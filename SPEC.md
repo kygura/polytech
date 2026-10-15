@@ -1,0 +1,280 @@
+# Polymarket Edge Engine — Build Spec
+
+Rev 5 · 2026-10-15 · Anthropic-only runtime · trade execution with configurable autonomy modes
+
+## Overview
+
+The system scans every open Polymarket market, scores where public research can beat the crowd price, sends an agent fleet to research the top candidates, and ranks the survivors by projected return per unit of risk. Output is a live watchlist with a thesis, a fair probability, an edge, and a suggested size for each market. The system places trades on Polymarket's CLOB. How much it does without a human depends on the **autonomy mode** (see [Execution and autonomy modes](#execution-and-autonomy-modes)). Modes range from observe-only to fully autonomous inside hard risk limits.
+
+**Edge thesis.** Prices are set by whoever trades, not by whoever read the source documents. The gap is widest in:
+
+- **Illiquid markets** (thin books, few traders): a careful read of resolution criteria and primary sources moves fair value a lot. Edge large, capacity small.
+- **Liquid markets with asymmetric information**: price anchored to headlines while a primary source (filing, schedule, poll methodology, court docket, on-chain data) says otherwise. Edge smaller, capacity large.
+
+On top of both: resolution-rule mispricing, stale prices after news, and crowd overreaction that a contrarian view can fade.
+
+**Non-goals:** market making, latency arbitrage, anything needing private or insider information. Research uses public sources only.
+
+## Stack and deployment
+
+One TypeScript monorepo on Vercel. Crons trigger durable workflows; long agent runs live in Vercel Sandbox microVMs, not in request functions. All LLM work runs on Anthropic (Claude Agent SDK in sandboxes, Anthropic SDK for orchestrator calls). No other model provider.
+
+| Layer | Choice | Why |
+|---|---|---|
+| Monorepo | pnpm + Turborepo | Shared types between web, TUI and workers |
+| Web | Next.js (App Router) on Vercel | Same deploy as API and crons |
+| TUI | Ink, talks to the same HTTP API | One API, two clients |
+| Scheduling | Vercel Cron → Vercel Workflow | Cron only fires; Workflow holds multi-step state, retries, sleeps |
+| Agent runtime | Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) inside Vercel Sandbox | Programmatic agent loop with tools, MCP and structured output; sandboxed shell; no 300 s ceiling per agent |
+| Orchestrator LLM calls | Anthropic SDK, small structured calls | Scoring, judge, JSON outputs |
+| Web research | Exa (search, contents, answer) | Neural search + full-page text |
+| DB | Postgres (Neon via Vercel Marketplace) + Drizzle | Markets, snapshots, theses, ledger |
+| Cache / locks | Upstash Redis | Cron overlap locks, rate-limit buckets |
+| Polymarket | `@polymarket/client` + raw REST | Official TS client for listing |
+| Execution | `@polymarket/clob-client` (signed orders, Polygon wallet) | Official client for order placement, cancels, fills |
+
+### Recommended alternatives (advisory, not adopted)
+
+The stack above is the one we build. These are recommendations to reconsider, mostly because live trading puts more weight on reliability and key safety than research alone did.
+
+| Area | Adopted | Recommendation | Reason |
+|---|---|---|---|
+| Signing key custody | Private key in Vercel env | Remote signer: **AWS KMS** (secp256k1) or **Turnkey**, with a per-day spend policy | A leaked env var drains the wallet. A remote signer limits the damage and logs every signature. |
+| Trading wallet | Single wallet | A **dedicated trading wallet** funded only up to bankroll B; sweep profits to cold storage by hand | Caps worst-case loss at B |
+| Durable workflows | Vercel Workflow | Keep it. Fallback: Inngest or Trigger.dev if Workflow limits bite | Step logic is kept portable anyway |
+| Ledger writes | Drizzle on Neon | Keep, but write order/fill/position changes inside serializable transactions keyed by idempotency key | Prevents double-orders on workflow retries |
+| Alerting | SSE to UI only | Add push alerts (ntfy or Telegram bot) for approvals, fills, kill-switch trips | Approvals in L2/L3 can't wait for someone to open the UI |
+
+### Repo layout
+
+```
+apps/web        Next.js UI + /api routes + cron handlers
+apps/tui        Ink client, reads /api with a bearer token
+packages/core   types, scoring, sizing, calibration math (pure, no I/O)
+packages/pm     Polymarket clients (gamma, clob, data) + per-host token buckets
+packages/agents fleet orchestration, role prompts, sandbox runner, model router
+packages/db     Drizzle schema + migrations
+```
+
+### Vercel constraints that shape the design
+
+- Functions default to 300 s (Pro: up to 800 s). Each cron handler only takes a lock, starts a workflow, and returns.
+- Vercel Cron does not serialize overlapping runs: every job takes a Redis lock first.
+- Workflow steps survive redeploys and sleep for free; keep step logic in plain functions so it stays portable.
+- Order-book state comes from polling snapshots, not a live stream.
+- Region: pin functions to `dub1` (Dublin). Read-only data endpoints work from anywhere.
+
+### Agent auth (Anthropic only)
+
+Each research agent is an Agent SDK `query()` run inside a Vercel Sandbox. Agents and orchestrator calls (judge, R classifier) all authenticate with `ANTHROPIC_API_KEY`. On rate-limit or overload errors the runner backs off and retries; total spend is bounded by the budget knobs.
+
+The **model router** picks a Claude model per role (configurable in Settings). Defaults: research roles on Sonnet, rules reader on Haiku, judge on Opus. Diversity comes from role separation and blind estimation, not from mixing providers.
+
+## Polymarket data layer
+
+Everything the screener needs is public and unauthenticated.
+
+| Need | Endpoint | Limit (req / 10 s) |
+|---|---|---|
+| Market universe | Gamma `GET /markets/keyset`, `/events/keyset` (cursor) | 300 / 500 |
+| Rules, tags, end date, neg-risk group | Gamma market + event detail | 4,000 general |
+| Comment sentiment | Gamma `/comments` | 200 |
+| Order books, batched | CLOB `POST /books` | 500 |
+| Spread, midpoint, last trade | CLOB `/spreads`, `/midpoints`, `/last-trades-prices` (≤ 500 tokens/call) | 500–1,500 |
+| Price history | CLOB `/prices-history` (+ batch) | 1,000 |
+| Fee rate, tick size, rewards | CLOB `GET /clob-markets` info | 9,000 general |
+| Top holders, open interest | Data API v2 `/v2/holders`, `/v2/oi` | 1,000 general |
+| Recent trades | Data API v2 `/v2/trades` | 200 |
+| Resolution state (UMA) | Gamma resolution-state endpoint | 4,000 general |
+
+Throttled requests are delayed, not rejected, so the client keeps its own token bucket per host.
+
+**Fees in every EV number.** Taker fee per share = `feeRate × p × (1 − p)`, rates 0.04 (politics, finance, tech) to 0.07 (crypto); geopolitics fee-free; makers never pay. Exact rate per market comes from CLOB market info.
+
+**Snapshot cadence:** universe every 30 min; books/prices for the watchlist every 5 min; holders/trades for researched markets every 15 min. Snapshots are append-only.
+
+## Market screener
+
+Two passes: hard filters on the whole universe, then a priority score on survivors. Top 20–40 go to the fleet.
+
+**Pass 1 — hard filters (pure code):**
+- Open, accepting orders, not in UMA dispute
+- Resolves in 2–120 days (configurable)
+- ≥ $200 depth within 5¢ of mid on the side traded
+- Excluded categories by config (e.g. sports in-play, 15-min crypto up/down)
+
+**Pass 2 — priority:** `Priority = R × I × L × T × (1 + 0.5·C)`
+
+| Factor | Measures | Inputs |
+|---|---|---|
+| R researchability (0–1) | Can public sources settle it? | Fast Claude (Haiku) classifier on rules text: objective source, scheduled event, public data release, rule ambiguity. Cached per market until rules change. |
+| I inefficiency (0–1) | Price not being worked | Spread width, hours since last trade, drift vs. siblings, round-number pinning, longshot zone (p < 0.07 or > 0.93) |
+| L liquidity fit (0–1) | Can target size fill? | Depth to fill target within 3¢ slippage, OI, 24h volume |
+| T time value (0–1) | Return per day of capital | Days to resolution, decays past 60 days |
+| C crowding (0–1) | One-sidedness | Top-10 holder share, net taker flow 24h, comment sentiment skew |
+
+L is computed against two size targets; each market is tagged **small-cap** or **size** and ranked in separate lists.
+
+**Free-edge detectors (every sweep, no research):**
+- Neg-risk sum: in a mutually exclusive group, Σ best asks < 1 − fees → buy-all locks profit; Σ best bids > 1 → the reverse.
+- Monotonic ladders: "X by March" priced above "X by June".
+- Mirror markets: same question listed twice at different prices.
+
+These go to the watchlist with a structural tag and no thesis.
+
+## Research fleet
+
+Each shortlisted market gets a pod: five Agent SDK agents with fixed roles, then a judge. Agents estimate blind: no market price in their brief.
+
+| Role | Job | Output | Default model |
+|---|---|---|---|
+| Rules reader | Parse resolution text, source, edge cases, likely crowd misreads | Resolution checklist, ambiguity flags | Haiku |
+| Primary-source hunter | Find the document/schedule/dataset/docket that settles it | Sourced facts with dates | Sonnet + Exa |
+| Base-rate analyst | Reference classes, historical frequencies; runs small scripts | Prior with method | Sonnet |
+| News and flow scanner | Last 7 days of news; is it priced in? | Event timeline | Sonnet + Exa |
+| Red team | Argue the other side; break the thesis | Counter-case, kill criteria | Sonnet |
+| Judge | Merge evidence, then see price; output fair probability | p̂, confidence, thesis, catalysts | Opus (SDK call) |
+
+**Pod run:**
+1. Workflow step creates one Sandbox per agent with a role prompt and a JSON brief (question, rules, tags, end date, sibling markets). No price.
+2. Agents use Exa via an MCP server inside the sandbox. Every claim carries a URL and retrieved-at time.
+3. Each agent returns a strict JSON result (Agent SDK structured output); validated with Zod, one retry on schema failure.
+4. The judge gets all five results, then the current book. **Disagreement cap:** if the probability-bearing agents' estimates straddle `p_mid` (at least one above and one below), confidence is capped at 0.5.
+
+**Evidence ledger:** every fact stored with URL, quote < 25 words, date, agent role. UI shows it beside the thesis.
+
+**Re-research triggers:** price moves > 8¢ since thesis; a catalyst date passes; new high-relevance Exa hit on a saved query; thesis > 72 h old with < 14 days to resolution.
+
+**Calibration loop:** every judge estimate stored with the market price at the time. Nightly job computes Brier and log loss by category, role mix and model. Those set confidence `c` per category; `c ≤ 0.4` until a category has 30 resolved forecasts.
+
+## Sizing and projected returns
+
+Formulas for buying YES; NO uses 1 − p throughout. All against the real book and fees, not mid.
+
+1. `p_post = c·p̂ + (1 − c)·p_mid`
+2. `k(S) = VWAP_asks(S) + feeRate·p(1 − p)`
+3. `e(S) = p_post − k(S)`, `r(S) = e/k`, `payoff = (1 − k)/k`
+4. `r_ann = (1 + r)^(365/d) − 1`, displayed capped at 500%
+5. `f* = (p_post − k)/(1 − k)`; `S = min(¼·f*·B, 0.05·B, S where e ≥ 0.02)`
+6. `Rank = e(S)·S / d × (1 + 0.2·C_against)`; `C_against` = C when trade opposes the crowd, else 0
+
+Each watchlist row: p_mid, p̂, p_post, edge (¢), size, expected profit (USD), annualized return, payoff ratio, days left, next catalyst.
+
+## Execution and autonomy modes
+
+One global mode, plus optional stricter per-category overrides. A category override can only lower autonomy, never raise it.
+
+| Mode | Name | Behavior |
+|---|---|---|
+| L0 | Observe | Watchlist only. No orders, no paper fills. |
+| L1 | Paper | Every qualifying thesis gets a hypothetical fill at k(S). Realized edge is tracked. No real orders. |
+| L2 | Approve each | Real orders are proposed with thesis, size, limit price and expected profit. Each needs explicit approval (web, TUI, or push alert) before it is sent. Proposals expire after 15 min or when the price moves > 2¢. |
+| L3 | Bounded auto | Orders inside auto-limits go out without approval. Anything above a limit falls back to L2 approval. |
+| L4 | Full auto | All qualifying orders go out automatically, but only inside the global risk limits. The kill switch and auto-downgrade still apply. |
+
+**Qualifying order:** a thesis with `e(S) ≥ 0.02`, judge confidence above the category threshold, no disagreement cap tripped, a fresh book snapshot (< 60 s at order time), and a market that still passes the Pass 1 filters.
+
+**Risk limits (Settings, enforced server-side in every mode ≥ L2):**
+- Per-trade max (USD and % of B). The default is the sizing cap `0.05·B`.
+- Per-market max position, per-event max (neg-risk groups count as one event)
+- Per-category max exposure, total open exposure max
+- Daily max notional sent; daily max realized loss
+- L3 auto-limits: per-trade auto ceiling, daily auto notional, category allowlist, structural trades allowed yes/no
+
+**Order policy:**
+- Limit orders only, priced at the VWAP level that sizing used, never worse than `p_post − 0.02`. No market orders.
+- GTD orders that expire at the earlier of thesis `expires_at` and 24 h. Unfilled remainder is cancelled when the thesis is re-researched or killed.
+- Structural (neg-risk) trades go out as a set. If any leg fails to fill within its window, the filled legs are unwound or flagged for manual action.
+- Every order carries an idempotency key `(thesis_id, attempt)` so workflow retries can't double-send.
+- Exits: when a kill criterion fires or the thesis flips sign, an exit is proposed (L2) or placed (L3/L4 within limits).
+
+**Mode gates (escalation).** Moving up requires evidence:
+- L1 → L2: phase-5 gate met (50 resolved forecasts, Brier below market at thesis time).
+- L2 → L3: ≥ 30 approved live trades, with realized slippage within 1¢ of modeled k(S) on average.
+- L3 → L4: ≥ 100 live trades and positive realized edge over a 30-day window.
+
+Gates are shown in Settings. Gates are advisory: the mode can be set regardless, and skipping a gate is logged.
+
+**Safety controls:**
+- **Kill switch:** one action (web button, TUI `K`, push-alert reply) drops to L0 and cancels all open orders.
+- **Auto-downgrade** to L2 (or L0 for the first two): daily loss limit hit; 3 consecutive order errors; book data stale > 5 min; wallet balance mismatch vs. ledger; Anthropic API outage that halts research mid-pod.
+- Mode changes are one action (no re-auth), written to `autonomy_events`, and trigger a push alert.
+- Reconciliation every 5 min: on-chain/CLOB positions and USDC balance vs. the `positions` table. A mismatch halts new orders.
+
+## Interfaces
+
+Web and TUI are two clients of one HTTP API. Nothing computed client-side except formatting.
+
+| View | Web | TUI |
+|---|---|---|
+| Watchlist | Tabs: small-cap, size, structural; sortable by rank, edge, r_ann, days left | Same lists, tab to switch, `/` to filter |
+| Market detail | Depth chart, price history with thesis markers, thesis, ledger, kill criteria | Thesis, ledger, book as text panes |
+| Fleet | Running pods, per-agent status, token spend, Sandbox minutes | Live pod list, logs on enter |
+| Calibration | Reliability curve, Brier by category and model | Table only |
+| Orders & positions | Pending approvals, open orders, fills, positions with live P&L, realized vs. modeled edge | Same; `a`/`r` approve/reject |
+| Autonomy | Current mode, per-category overrides, risk limits, gate progress, kill switch, event log | Mode + gate status, kill switch `K`; approve/reject proposals |
+| Settings | Filters, weights, bankroll, Kelly fraction, caps, model per role, risk limits | Read-only (mode change via Autonomy view) |
+| Actions | Re-research, pin, mute, approve/reject order, close position | Same, by keybinding |
+
+Live updates via SSE from `/api/stream`; TUI subscribes to the same stream.
+
+## Auth (single user, password)
+
+- `APP_PASSWORD_HASH` (argon2id) in env. `POST /api/login` verifies and sets a signed JWT (jose) in an httpOnly, SameSite=Strict cookie, 7-day expiry.
+- Next.js middleware guards every page and `/api/*` except `/api/login` and cron routes.
+- Login rate-limited in Upstash: 5 per 15 min per IP.
+- TUI: `pm login` prompts for the password, gets a bearer token, stores it in `~/.config/pm-edge/token` with mode 0600.
+- Cron routes check `CRON_SECRET` instead of the session.
+- Trading wallet key: `POLY_PRIVATE_KEY` plus CLOB API creds (`POLY_API_KEY/SECRET/PASSPHRASE`) in env. A remote signer is recommended (see Recommended alternatives). The key is never sent to sandboxes or agents.
+
+## Data model
+
+Twelve Postgres tables. Snapshots and events are append-only so every score and every trade decision can be replayed.
+
+| Table | Key columns | Written by |
+|---|---|---|
+| markets | condition_id, event_id, question, rules, category, tags, end_date, neg_risk_group, fee_rate, status | Universe sweep |
+| snapshots | condition_id, ts, mid, best_bid, best_ask, depth_5c_usd, vol_24h, oi, top10_share, last_trade_ts | Book/price polls |
+| screens | condition_id, ts, R, I, L, T, C, priority, tier, structural_flag | Screener |
+| pods | id, condition_id, started_at, status, trigger, cost_sandbox_s | Orchestrator |
+| agent_runs | pod_id, role, model, status, output_json, usage, duration_s | Sandbox runner |
+| evidence | pod_id, agent_role, url, quote, published_at, retrieved_at, claim, direction (+/−) | Agents |
+| theses | condition_id, pod_id, p_hat, c, p_post, side, edge_c, size_usd, r_ann, rank, catalysts[], kill_criteria[], expires_at | Judge + sizing |
+| outcomes | condition_id, resolved_at, result, brier, log_loss | Nightly calibration |
+| orders | id, thesis_id, idempotency_key, condition_id, token_id, side, limit_price, size, mode_at_send, approval (auto/user/null), status, clob_order_id, expires_at | Execution |
+| fills | order_id, ts, price, size, fee, tx_hash | Execution / fill listener |
+| positions | condition_id, token_id, size, avg_cost, realized_pnl, opened_at, closed_at, paper (bool) | Execution + reconciliation |
+| autonomy_events | ts, from_mode, to_mode, scope (global/category), reason, actor (user/auto-downgrade/kill) | Autonomy controller |
+
+**Agent output contract** (Zod, every run):
+
+```ts
+{
+  role: "rules" | "source" | "base_rate" | "news" | "red_team",
+  probability: number | null,   // null for rules reader
+  confidence: number,           // 0..1, self-reported
+  key_facts: { claim, url, quote, date }[],
+  risks: string[],
+  notes: string                 // ≤ 150 words
+}
+```
+
+## Build phases
+
+1. **Data + screener.** Universe sweep, snapshots, scoring, structural detectors, web watchlist, password auth. Gate: full sweep < 60 s, structural list populated.
+2. **One-agent research.** One Agent SDK agent per market in Sandbox, judge, sizing math, evidence ledger. Gate: 20 theses with sourced ledgers.
+3. **Full pods.** Five roles, model router, blind estimation, disagreement cap, re-research triggers.
+4. **TUI + calibration.** Ink client; nightly Brier and reliability charts.
+5. **Paper book (L1).** Autonomy controller, risk-limit engine, and hypothetical fills at k(S); track realized edge. Gate: 50 resolved forecasts with lower Brier than market price at thesis time.
+6. **Live execution (L2).** CLOB client, order/fill/position tables, approval flow with push alerts, kill switch, reconciliation. Gate: 30 approved trades with slippage within 1¢ of model.
+7. **Autonomy (L3/L4).** Auto-limits, auto-downgrade triggers, exits on kill criteria, mode-gate tracking.
+
+**Budget knobs** (Settings, enforced by orchestrator): max pods/day, max concurrent sandboxes, sandbox timeout (default 10 min/agent), Exa calls per pod, daily Anthropic spend cap (hard stop).
+
+## Open decisions
+
+- [ ] Vercel plan: Hobby caps functions at 300 s and limits cron frequency; Pro likely needed for 5-minute polls.
+- [ ] Execution legality: Spain's regulator ordered ISPs to block Polymarket (May 2026). Read-only API use from Dublin is unaffected. Confirm that order placement is permitted for the operator's jurisdiction and from `dub1` (Polymarket geoblock list and ToS) before phase 6.
+- [ ] Key custody: env var vs. KMS/Turnkey remote signer (recommended).
+- [ ] Default risk-limit values and the starting bankroll B.
+- [ ] Exa plan tier and per-pod call cap.
