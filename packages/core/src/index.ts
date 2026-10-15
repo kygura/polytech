@@ -5,4 +5,4 @@ export * from "./screen/index";
 export * from "./sizing";
 export * from "./structural";
 export * from "./agent-output";
-export * from "./book/index.js"; // T2
+export * from "./book/index"; // T2

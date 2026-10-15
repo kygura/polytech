@@ -1,0 +1,11 @@
+{
+  "regions": ["dub1"],
+  "crons": [
+    { "path": "/api/cron/sweep", "schedule": "0,30 * * * *" },
+    { "path": "/api/cron/snapshot", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/screen", "schedule": "10,40 * * * *" },
+    { "path": "/api/cron/research", "schedule": "20 * * * *" },
+    { "path": "/api/cron/paper", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/calibrate", "schedule": "0 3 * * *" }
+  ]
+}

@@ -120,3 +120,18 @@ export async function paperBook(d: Deps) {
     return res;
   });
 }
+
+/** Close one open paper position at the current best bid (latest snapshot). null = unknown/closed position. */
+export async function closePaperPosition(d: Deps, positionId: number) {
+  const row = (await openPaper(d.db)).find((x) => x.p.id === positionId);
+  if (!row) return null;
+  const { p, m } = row;
+  const snap = (await latestSnaps(d.db, [p.conditionId])).get(p.conditionId);
+  const levels = snap?.book ? (p.tokenId === m.yesTokenId ? snap.book.bids : mirror(snap.book.asks)) : [];
+  if (!levels.length) return { reason: "NO_BOOK" };
+  const bid = Math.max(...levels.map((l) => l.price));
+  const end = applyFill({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, { side: "sell", shares: p.size, price: bid, fee: 0 }); // ponytail: top-of-book, no depth walk or fee
+  await d.db.update(s.positions).set({ realizedPnl: end.realizedPnl, closedAt: new Date(d.now()) }).where(eq(s.positions.id, p.id));
+  publish("paper.close", { conditionId: p.conditionId, realizedPnl: end.realizedPnl });
+  return { ok: true as const, realizedPnl: end.realizedPnl };
+}

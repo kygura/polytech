@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type Host = "gamma" | "clob" | "data";
 export type Req = { params?: Record<string, string | number | boolean | undefined>; body?: unknown };
 
-const dir = new URL("../fixtures/", import.meta.url);
+const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures"); // plain path: Turbopack must not treat it as an asset
 const cache = new Map<string, any>();
 const load = (name: string): any => {
-  if (!cache.has(name)) cache.set(name, JSON.parse(readFileSync(new URL(`${name}.json`, dir), "utf8")));
+  if (!cache.has(name)) cache.set(name, JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")));
   return cache.get(name);
 };
 
