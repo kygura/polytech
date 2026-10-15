@@ -1,0 +1,3112 @@
+[
+ {
+  "id": "90100",
+  "slug": "fed-dec-2026",
+  "title": "Fed decision at December 2026 FOMC meeting",
+  "endDate": "2026-12-15T12:00:00Z",
+  "negRisk": true,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "fed-dec-2026",
+  "description": "Fed decision at December 2026 FOMC meeting",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": true,
+  "volume": 656149,
+  "markets": [
+   {
+    "id": "530000",
+    "question": "Fed cuts rates by 50+ bps at the December 2026 FOMC meeting?",
+    "conditionId": "0x23188941cb1cd27857aecfd32daed73fe0046f8229b60c84d46d054317be1626",
+    "slug": "fed-cuts-rates-by-50-bps-at-the-december-2026-fomc-meeting",
+    "description": "This market resolves to \"Yes\" if the following is true: Fed cuts rates by 50+ bps at the December 2026 FOMC meeting. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-15T12:00:00Z",
+    "endDateIso": "2026-12-15",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.035\",\"0.965\"]",
+    "clobTokenIds": "[\"60679163435077850737436531913134800635941416540447454804653446844553290480156\",\"69383654310365464960834373596171279052754748227676449848449999490766022947994\"]",
+    "volume": 125235,
+    "volumeNum": 125235,
+    "volume24hr": 10436,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.035,
+    "bestBid": 0.03,
+    "bestAsk": 0.04,
+    "spread": 0.01,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Fed",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90100",
+      "slug": "fed-dec-2026",
+      "title": "Fed decision at December 2026 FOMC meeting",
+      "endDate": "2026-12-15T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xade8e592f8fa656db9f9e2af969a7df137cba70c97da789bdb0c2b622241b863",
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530001",
+    "question": "Fed cuts rates by 25 bps at the December 2026 FOMC meeting?",
+    "conditionId": "0x66130cf890aad7e915bf8a66af448ae2cd99ea9ceae7f81fc9d6eae07279755a",
+    "slug": "fed-cuts-rates-by-25-bps-at-the-december-2026-fomc-meeting",
+    "description": "This market resolves to \"Yes\" if the following is true: Fed cuts rates by 25 bps at the December 2026 FOMC meeting. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-15T12:00:00Z",
+    "endDateIso": "2026-12-15",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.265\",\"0.735\"]",
+    "clobTokenIds": "[\"28609481679987790789958583492484852974165477848548343723160740448732392953797\",\"93196520584953312261160365584482734949986395118482549931691034963371714705145\"]",
+    "volume": "192083",
+    "volumeNum": 192083,
+    "volume24hr": 16007,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.265,
+    "bestBid": 0.26,
+    "bestAsk": 0.27,
+    "spread": 0.01,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Fed",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90100",
+      "slug": "fed-dec-2026",
+      "title": "Fed decision at December 2026 FOMC meeting",
+      "endDate": "2026-12-15T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xade8e592f8fa656db9f9e2af969a7df137cba70c97da789bdb0c2b622241b863",
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530002",
+    "question": "Fed holds rates at the December 2026 FOMC meeting?",
+    "conditionId": "0x89854ed91d23fd82bf11bb868242bcc3283953d7c27d4d2c16149848938e7dda",
+    "slug": "fed-holds-rates-at-the-december-2026-fomc-meeting",
+    "description": "This market resolves to \"Yes\" if the following is true: Fed holds rates at the December 2026 FOMC meeting. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-15T12:00:00Z",
+    "endDateIso": "2026-12-15",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.495\",\"0.505\"]",
+    "clobTokenIds": "[\"11193390280623343362890246774636067237968740613530760807849726241038820382392\",\"53081899154334113221968861667886053496381123726109332311666006952258272294715\"]",
+    "volume": 186944,
+    "volumeNum": 186944,
+    "volume24hr": 15579,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.495,
+    "bestBid": 0.49,
+    "bestAsk": 0.5,
+    "spread": 0.01,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Fed",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90100",
+      "slug": "fed-dec-2026",
+      "title": "Fed decision at December 2026 FOMC meeting",
+      "endDate": "2026-12-15T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xade8e592f8fa656db9f9e2af969a7df137cba70c97da789bdb0c2b622241b863",
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530003",
+    "question": "Fed hikes rates at the December 2026 FOMC meeting?",
+    "conditionId": "0x7be3fc645d5202f632a2d0c5379f45c04c895f3681e3c085d933231b62711994",
+    "slug": "fed-hikes-rates-at-the-december-2026-fomc-meeting",
+    "description": "This market resolves to \"Yes\" if the following is true: Fed hikes rates at the December 2026 FOMC meeting. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-15T12:00:00Z",
+    "endDateIso": "2026-12-15",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.055\",\"0.945\"]",
+    "clobTokenIds": "[\"39182245815799963818171559926554959002661116591698639294159523538988910555280\",\"14760868120369619896076223149037757503046567722576481735933102015559293493687\"]",
+    "volume": "151887",
+    "volumeNum": 151887,
+    "volume24hr": 12657,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.055,
+    "bestBid": 0.05,
+    "bestAsk": 0.06,
+    "spread": 0.01,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Fed",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90100",
+      "slug": "fed-dec-2026",
+      "title": "Fed decision at December 2026 FOMC meeting",
+      "endDate": "2026-12-15T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xade8e592f8fa656db9f9e2af969a7df137cba70c97da789bdb0c2b622241b863",
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90101",
+  "slug": "lmarena-top",
+  "title": "Top model on LMArena text leaderboard on Dec 31, 2026",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": true,
+  "tags": [
+   {
+    "id": "1401",
+    "label": "Tech",
+    "slug": "tech"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "lmarena-top",
+  "description": "Top model on LMArena text leaderboard on Dec 31, 2026",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": true,
+  "volume": 464638,
+  "markets": [
+   {
+    "id": "530004",
+    "question": "Google tops the LMArena text leaderboard on Dec 31, 2026?",
+    "conditionId": "0xa16233f9ebb66c0bf5ae27ea8692c47327af1ed04f47faf8542b5b44a861a6f8",
+    "slug": "google-tops-the-lmarena-text-leaderboard-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Google tops the LMArena text leaderboard on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.400\",\"0.600\"]",
+    "clobTokenIds": "[\"2079121524073862833314665278899952724585506838636828822907030821585886962677\",\"11225126503589327552271977828834041549329802818066341568402985271214675914840\"]",
+    "volume": 148005,
+    "volumeNum": 148005,
+    "volume24hr": 12334,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.4,
+    "bestBid": 0.39,
+    "bestAsk": 0.41,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Google",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90101",
+      "slug": "lmarena-top",
+      "title": "Top model on LMArena text leaderboard on Dec 31, 2026",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530005",
+    "question": "OpenAI tops the LMArena text leaderboard on Dec 31, 2026?",
+    "conditionId": "0x1da0cbaae27442584689fa6a2bb49dee6a1c1cf5ea6c7af463bc397b972976ef",
+    "slug": "openai-tops-the-lmarena-text-leaderboard-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: OpenAI tops the LMArena text leaderboard on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.340\",\"0.660\"]",
+    "clobTokenIds": [
+     "90791871471332849163011126532300953876600285825078747162854325269380414450846",
+     "62429838359983710835347730236652398965723621533773564444554651360675892936996"
+    ],
+    "volume": "199622",
+    "volumeNum": 199622,
+    "volume24hr": 16635,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.34,
+    "bestBid": 0.33,
+    "bestAsk": 0.35,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "OpenAI",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90101",
+      "slug": "lmarena-top",
+      "title": "Top model on LMArena text leaderboard on Dec 31, 2026",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "905",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530006",
+    "question": "Anthropic tops the LMArena text leaderboard on Dec 31, 2026?",
+    "conditionId": "0x2d6118ba90f20ade60d480046154137ee1c2cab04b3f005969f3c519d8dde0a9",
+    "slug": "anthropic-tops-the-lmarena-text-leaderboard-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Anthropic tops the LMArena text leaderboard on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.260\",\"0.740\"]",
+    "clobTokenIds": "[\"10144905288472708306100544458670783354578575862205557233213323487914075058145\",\"85760797525679557591536291869332047565519538492947897540896591810355160158571\"]",
+    "volume": 117011,
+    "volumeNum": 117011,
+    "volume24hr": 9751,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.26,
+    "bestBid": 0.25,
+    "bestAsk": 0.27,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Anthropic",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90101",
+      "slug": "lmarena-top",
+      "title": "Top model on LMArena text leaderboard on Dec 31, 2026",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "906",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90102",
+  "slug": "ru-ua-ceasefire",
+  "title": "When does a Russia-Ukraine ceasefire take effect?",
+  "endDate": "2026-11-30T12:00:00Z",
+  "negRisk": true,
+  "tags": [
+   {
+    "id": "100265",
+    "label": "Geopolitics",
+    "slug": "geopolitics"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ru-ua-ceasefire",
+  "description": "When does a Russia-Ukraine ceasefire take effect?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": true,
+  "volume": 455853,
+  "markets": [
+   {
+    "id": "530007",
+    "question": "Russia-Ukraine formal ceasefire takes effect before Dec 1, 2026?",
+    "conditionId": "0x50e35e53191f3d18850031da5a1de249ddad7b0d5be7a7e253728505a0b11e42",
+    "slug": "russia-ukraine-formal-ceasefire-takes-effect-before-dec-1-20",
+    "description": "This market resolves to \"Yes\" if the following is true: Russia-Ukraine formal ceasefire takes effect before Dec 1, 2026. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-30T12:00:00Z",
+    "endDateIso": "2026-11-30",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.310\",\"0.690\"]",
+    "clobTokenIds": "[\"96462560723969258465836891534517066983245736424754191985471573515412087292144\",\"11246614087271472242905837404313173110772919488647630975043684529004120981276\"]",
+    "volume": "153292",
+    "volumeNum": 153292,
+    "volume24hr": 12774,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.31,
+    "bestBid": 0.3,
+    "bestAsk": 0.32,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Russia-Ukraine",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90102",
+      "slug": "ru-ua-ceasefire",
+      "title": "When does a Russia-Ukraine ceasefire take effect?",
+      "endDate": "2026-11-30T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xa532b634aaacae60a44fc5d384f98d410c849bd87457955cd8dba83306a4df65",
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530008",
+    "question": "Russia-Ukraine formal ceasefire takes effect between Dec 1, 2026 and Mar 31, 2027?",
+    "conditionId": "0xe306cf8a0d771382aac8817d19ee78745a96591a5612dd610bacee85e2a4035d",
+    "slug": "russia-ukraine-formal-ceasefire-takes-effect-between-dec-1-2",
+    "description": "This market resolves to \"Yes\" if the following is true: Russia-Ukraine formal ceasefire takes effect between Dec 1, 2026 and Mar 31, 2027. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-02-12T12:00:00Z",
+    "endDateIso": "2027-02-12",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.410\",\"0.590\"]",
+    "clobTokenIds": "[\"83079800421802245097003530874688221707760001985846530869198906813559850740308\",\"50385741410978485046490400182302718079824780337839313199200511955055256627127\"]",
+    "volume": 129237,
+    "volumeNum": 129237,
+    "volume24hr": 10770,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.41,
+    "bestBid": 0.4,
+    "bestAsk": 0.42,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Russia-Ukraine",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90102",
+      "slug": "ru-ua-ceasefire",
+      "title": "When does a Russia-Ukraine ceasefire take effect?",
+      "endDate": "2027-02-12T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xa532b634aaacae60a44fc5d384f98d410c849bd87457955cd8dba83306a4df65",
+    "umaResolutionStatus": "unresolved"
+   },
+   {
+    "id": "530009",
+    "question": "Russia-Ukraine formal ceasefire takes effect after Mar 31, 2027 or never?",
+    "conditionId": "0xf15d9c344106062476866f783c0cc9b550dce4b80184b86b24df28e2bcca74de",
+    "slug": "russia-ukraine-formal-ceasefire-takes-effect-after-mar-31-20",
+    "description": "This market resolves to \"Yes\" if the following is true: Russia-Ukraine formal ceasefire takes effect after Mar 31, 2027 or never. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-04-23T12:00:00Z",
+    "endDateIso": "2027-04-23",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.330\",\"0.670\"]",
+    "clobTokenIds": "[\"16132472800471372782713711244300858539045754991415987367026298457253788702362\",\"60868665874818740724814835241702104063836704981777618749205102268274123679716\"]",
+    "volume": "173324",
+    "volumeNum": 173324,
+    "volume24hr": 14444,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.33,
+    "bestBid": 0.32,
+    "bestAsk": 0.34,
+    "spread": 0.02,
+    "negRisk": true,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "Russia-Ukraine",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90102",
+      "slug": "ru-ua-ceasefire",
+      "title": "When does a Russia-Ukraine ceasefire take effect?",
+      "endDate": "2027-04-23T12:00:00Z",
+      "negRisk": true,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "negRiskMarketID": "0xa532b634aaacae60a44fc5d384f98d410c849bd87457955cd8dba83306a4df65",
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90103",
+  "slug": "will-bitcoin-hit-150-000-by-december-31-2026",
+  "title": "Will Bitcoin hit $150,000 by December 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "903",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-l1",
+  "description": "Will Bitcoin hit $150,000 by December 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 110101,
+  "markets": [
+   {
+    "id": "530010",
+    "question": "Will Bitcoin hit $150,000 by December 31, 2026?",
+    "conditionId": "0xe35f304a52f5481e7569b166c071b45b471663eca9b4204ce39ed31cfca6ac29",
+    "slug": "will-bitcoin-hit-150-000-by-december-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Bitcoin hit $150,000 by December 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.180\",\"0.820\"]",
+    "clobTokenIds": "[\"8424273711156297739057757968648626958146986888695516307649687458178148050999\",\"71064821171303273889381604038095325899714921523209198413112068922109163709513\"]",
+    "volume": 110101,
+    "volumeNum": 110101,
+    "volume24hr": 9175,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.18,
+    "bestBid": 0.17,
+    "bestAsk": 0.19,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90103",
+      "slug": "will-bitcoin-hit-150-000-by-december-31-2026",
+      "title": "Will Bitcoin hit $150,000 by December 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90104",
+  "slug": "will-bitcoin-hit-150-000-by-january-31-2027",
+  "title": "Will Bitcoin hit $150,000 by January 31, 2027?",
+  "endDate": "2027-01-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-l2",
+  "description": "Will Bitcoin hit $150,000 by January 31, 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 157345,
+  "markets": [
+   {
+    "id": "530011",
+    "question": "Will Bitcoin hit $150,000 by January 31, 2027?",
+    "conditionId": "0x164f70ef431f54e0c19c8cdf1cd187c7bbc3613143690266b7b3abf3c54d42fa",
+    "slug": "will-bitcoin-hit-150-000-by-january-31-2027",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Bitcoin hit $150,000 by January 31, 2027. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-01-31T12:00:00Z",
+    "endDateIso": "2027-01-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.310\",\"0.690\"]",
+    "clobTokenIds": "[\"12469472232388838435873195065703360229046677174149954836395556464285588628890\",\"18132001587424310114516326650766877737311953221373811982928209262700701671911\"]",
+    "volume": "157345",
+    "volumeNum": 157345,
+    "volume24hr": 13112,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.31,
+    "bestBid": 0.3,
+    "bestAsk": 0.32,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90104",
+      "slug": "will-bitcoin-hit-150-000-by-january-31-2027",
+      "title": "Will Bitcoin hit $150,000 by January 31, 2027?",
+      "endDate": "2027-01-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90105",
+  "slug": "will-bitcoin-hit-150-000-by-march-31-2027",
+  "title": "Will Bitcoin hit $150,000 by March 31, 2027?",
+  "endDate": "2027-03-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "905",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-l3",
+  "description": "Will Bitcoin hit $150,000 by March 31, 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 148929,
+  "markets": [
+   {
+    "id": "530012",
+    "question": "Will Bitcoin hit $150,000 by March 31, 2027?",
+    "conditionId": "0x73e6dbcf13abbc0cd6da73961f279d9e41078e95fd7237520e6da118b8dccc9e",
+    "slug": "will-bitcoin-hit-150-000-by-march-31-2027",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Bitcoin hit $150,000 by March 31, 2027. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-03-31T12:00:00Z",
+    "endDateIso": "2027-03-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.260\",\"0.740\"]",
+    "clobTokenIds": "[\"75598516320506912977482706219211152300806244202013698297232067798592975079523\",\"12295236880450929291123944918070358547813272594357278942496739377475862388556\"]",
+    "volume": 148929,
+    "volumeNum": 148929,
+    "volume24hr": 12411,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.26,
+    "bestBid": 0.25,
+    "bestAsk": 0.27,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90105",
+      "slug": "will-bitcoin-hit-150-000-by-march-31-2027",
+      "title": "Will Bitcoin hit $150,000 by March 31, 2027?",
+      "endDate": "2027-03-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "905",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90106",
+  "slug": "will-congress-pass-the-federal-data-privacy-act-before-2027",
+  "title": "Will Congress pass the Federal Data Privacy Act before 2027?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "906",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-m1",
+  "description": "Will Congress pass the Federal Data Privacy Act before 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 112664,
+  "markets": [
+   {
+    "id": "530013",
+    "question": "Will Congress pass the Federal Data Privacy Act before 2027?",
+    "conditionId": "0x0aea41efaf0d3441c9b02c29b6595df564d06d2e16903f505de200449678f667",
+    "slug": "will-congress-pass-the-federal-data-privacy-act-before-2027",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Congress pass the Federal Data Privacy Act before 2027. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.220\",\"0.780\"]",
+    "clobTokenIds": "[\"24436361237663541049631767907163854901039008578395396650625339507418911018457\",\"36170484516771156693645963175259580678536443611590369988773432691268508465976\"]",
+    "volume": "112664",
+    "volumeNum": 112664,
+    "volume24hr": 9389,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.22,
+    "bestBid": 0.21,
+    "bestAsk": 0.23,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90106",
+      "slug": "will-congress-pass-the-federal-data-privacy-act-before-2027",
+      "title": "Will Congress pass the Federal Data Privacy Act before 2027?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "906",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90107",
+  "slug": "federal-data-privacy-act-signed-into-law-by-dec-31-2026",
+  "title": "Federal Data Privacy Act signed into law by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-m2",
+  "description": "Federal Data Privacy Act signed into law by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 198505,
+  "markets": [
+   {
+    "id": "530014",
+    "question": "Federal Data Privacy Act signed into law by Dec 31, 2026?",
+    "conditionId": "0xd94ed64aab0c34b5cb9378b8a1d25d6d31f3ae6cc4b5bcbf5084ed237581536d",
+    "slug": "federal-data-privacy-act-signed-into-law-by-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Federal Data Privacy Act signed into law by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.290\",\"0.710\"]",
+    "clobTokenIds": [
+     "92924066944892468512320308156401566367055269793198242146689342850699131240725",
+     "13312265554696402481698031801503162193935378901733083909309839904193791289423"
+    ],
+    "volume": 198505,
+    "volumeNum": 198505,
+    "volume24hr": 16542,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.29,
+    "bestBid": 0.28,
+    "bestAsk": 0.3,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90107",
+      "slug": "federal-data-privacy-act-signed-into-law-by-dec-31-2026",
+      "title": "Federal Data Privacy Act signed into law by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90108",
+  "slug": "will-nato-invoke-article-5-before-jan-1-2027",
+  "title": "Will NATO invoke Article 5 before Jan 1, 2027?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "100265",
+    "label": "Geopolitics",
+    "slug": "geopolitics"
+   },
+   {
+    "id": "901",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-s1",
+  "description": "Will NATO invoke Article 5 before Jan 1, 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 143165,
+  "markets": [
+   {
+    "id": "530015",
+    "question": "Will NATO invoke Article 5 before Jan 1, 2027?",
+    "conditionId": "0xbde686e83801620e8968b438cedcd75ba178e3345b5fa3b625f9ef81a338de36",
+    "slug": "will-nato-invoke-article-5-before-jan-1-2027",
+    "description": "This market resolves to \"Yes\" if the following is true: Will NATO invoke Article 5 before Jan 1, 2027. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.024\",\"0.976\"]",
+    "clobTokenIds": "[\"73959744830938542723623206561070115492758845279867667947457575511711377299749\",\"51918386327271320747887016835956485031658973685790665631169914429558507061107\"]",
+    "volume": "143165",
+    "volumeNum": 143165,
+    "volume24hr": 11930,
+    "liquidity": "9000",
+    "liquidityNum": 9000,
+    "lastTradePrice": 0.024,
+    "bestBid": 0.021,
+    "bestAsk": 0.027,
+    "spread": 0.006,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.001,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90108",
+      "slug": "will-nato-invoke-article-5-before-jan-1-2027",
+      "title": "Will NATO invoke Article 5 before Jan 1, 2027?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90109",
+  "slug": "will-apple-announce-the-acquisition-of-a-frontier-ai-lab-by-",
+  "title": "Will Apple announce the acquisition of a frontier AI lab by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1401",
+    "label": "Tech",
+    "slug": "tech"
+   },
+   {
+    "id": "902",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-s2",
+  "description": "Will Apple announce the acquisition of a frontier AI lab by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 75027,
+  "markets": [
+   {
+    "id": "530016",
+    "question": "Will Apple announce the acquisition of a frontier AI lab by Dec 31, 2026?",
+    "conditionId": "0xacdd509e599cfb1f01a4cfbcd78898226e6c865f121ccfea6bef5ac5204d5d24",
+    "slug": "will-apple-announce-the-acquisition-of-a-frontier-ai-lab-by-",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Apple announce the acquisition of a frontier AI lab by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.020\",\"0.980\"]",
+    "clobTokenIds": "[\"56589930984390917741537721574820532906564759168223611123945324068845922058118\",\"24124134098039723554252966158600549990259425885403716668728794367398831903800\"]",
+    "volume": 75027,
+    "volumeNum": 75027,
+    "volume24hr": 6252,
+    "liquidity": 9000,
+    "liquidityNum": 9000,
+    "lastTradePrice": 0.02,
+    "bestBid": 0.015,
+    "bestAsk": 0.025,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.001,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90109",
+      "slug": "will-apple-announce-the-acquisition-of-a-frontier-ai-lab-by-",
+      "title": "Will Apple announce the acquisition of a frontier AI lab by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90110",
+  "slug": "will-ethereum-trade-above-20-000-by-dec-31-2026",
+  "title": "Will Ethereum trade above $20,000 by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "903",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-s3",
+  "description": "Will Ethereum trade above $20,000 by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 125914,
+  "markets": [
+   {
+    "id": "530017",
+    "question": "Will Ethereum trade above $20,000 by Dec 31, 2026?",
+    "conditionId": "0xe20c8ebf76db6376817f937a40ddcef4c4297d8153abdc2945c134b890dee0be",
+    "slug": "will-ethereum-trade-above-20-000-by-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Ethereum trade above $20,000 by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.035\",\"0.965\"]",
+    "clobTokenIds": "[\"16105465522762094527042173747618733147630653156656618886394111751473056765772\",\"92565778705957539129642502911564011725406891513016679295309472798495306305565\"]",
+    "volume": "125914",
+    "volumeNum": 125914,
+    "volume24hr": 10493,
+    "liquidity": "9000",
+    "liquidityNum": 9000,
+    "lastTradePrice": 0.035,
+    "bestBid": 0.03,
+    "bestAsk": 0.04,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90110",
+      "slug": "will-ethereum-trade-above-20-000-by-dec-31-2026",
+      "title": "Will Ethereum trade above $20,000 by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90111",
+  "slug": "will-the-jacksonville-jaguars-win-super-bowl-lxi",
+  "title": "Will the Jacksonville Jaguars win Super Bowl LXI?",
+  "endDate": "2027-02-12T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1",
+    "label": "Sports",
+    "slug": "sports"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-s4",
+  "description": "Will the Jacksonville Jaguars win Super Bowl LXI?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 111468,
+  "markets": [
+   {
+    "id": "530018",
+    "question": "Will the Jacksonville Jaguars win Super Bowl LXI?",
+    "conditionId": "0x728a5eee9eed5737b38d94ee5b4644c80ea53edf4630043e654b56971ccd328b",
+    "slug": "will-the-jacksonville-jaguars-win-super-bowl-lxi",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the Jacksonville Jaguars win Super Bowl LXI. Otherwise it resolves to \"No\". The primary resolution source is the official league website; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official league website",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-02-12T12:00:00Z",
+    "endDateIso": "2027-02-12",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.045\",\"0.955\"]",
+    "clobTokenIds": "[\"10772521632464786708085031245840246652809475852682652073208629196649931110530\",\"169874423125530710638575744161731997706397650205467800849602427545557716659\"]",
+    "volume": 111468,
+    "volumeNum": 111468,
+    "volume24hr": 9289,
+    "liquidity": 9000,
+    "liquidityNum": 9000,
+    "lastTradePrice": 0.045,
+    "bestBid": 0.04,
+    "bestAsk": 0.05,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90111",
+      "slug": "will-the-jacksonville-jaguars-win-super-bowl-lxi",
+      "title": "Will the Jacksonville Jaguars win Super Bowl LXI?",
+      "endDate": "2027-02-12T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1",
+        "label": "Sports",
+        "slug": "sports"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90112",
+  "slug": "will-us-cpi-yoy-for-october-2026-print-above-3-5",
+  "title": "Will US CPI YoY for October 2026 print above 3.5%?",
+  "endDate": "2026-11-12T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "905",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-i1",
+  "description": "Will US CPI YoY for October 2026 print above 3.5%?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 1308,
+  "markets": [
+   {
+    "id": "530019",
+    "question": "Will US CPI YoY for October 2026 print above 3.5%?",
+    "conditionId": "0x0739a04fa5f68074768f3976489a5dddf0c59f92323405e9bc8d595cad17b57a",
+    "slug": "will-us-cpi-yoy-for-october-2026-print-above-3-5",
+    "description": "This market resolves to \"Yes\" if the following is true: Will US CPI YoY for October 2026 print above 3.5%. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-12T12:00:00Z",
+    "endDateIso": "2026-11-12",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.155\",\"0.845\"]",
+    "clobTokenIds": "[\"11476037761243156461453328279211627123479345996779724135453690636628304318808\",\"80264167151025138719043665028697368099382452613703965944950521891985235044538\"]",
+    "volume": "1308",
+    "volumeNum": 1308,
+    "volume24hr": 109,
+    "liquidity": "90",
+    "liquidityNum": 90,
+    "lastTradePrice": 0.155,
+    "bestBid": 0.12,
+    "bestAsk": 0.19,
+    "spread": 0.07,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90112",
+      "slug": "will-us-cpi-yoy-for-october-2026-print-above-3-5",
+      "title": "Will US CPI YoY for October 2026 print above 3.5%?",
+      "endDate": "2026-11-12T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "905",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90113",
+  "slug": "will-nvidia-market-cap-exceed-7t-at-close-on-dec-31-2026",
+  "title": "Will Nvidia market cap exceed $7T at close on Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1401",
+    "label": "Tech",
+    "slug": "tech"
+   },
+   {
+    "id": "906",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-i2",
+  "description": "Will Nvidia market cap exceed $7T at close on Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 1032,
+  "markets": [
+   {
+    "id": "530020",
+    "question": "Will Nvidia market cap exceed $7T at close on Dec 31, 2026?",
+    "conditionId": "0x697339f572cc262253d07dc7f8ebe06d220c51b9558e985979e79888539859a3",
+    "slug": "will-nvidia-market-cap-exceed-7t-at-close-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Nvidia market cap exceed $7T at close on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.390\",\"0.610\"]",
+    "clobTokenIds": "[\"10313832007009666767039123007709351827362238668765333238208547502379799185598\",\"10099564007644127121923074119816734425638209317507731883941700333327903724165\"]",
+    "volume": 1032,
+    "volumeNum": 1032,
+    "volume24hr": 86,
+    "liquidity": 120,
+    "liquidityNum": 120,
+    "lastTradePrice": 0.39,
+    "bestBid": 0.34,
+    "bestAsk": 0.44,
+    "spread": 0.1,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90113",
+      "slug": "will-nvidia-market-cap-exceed-7t-at-close-on-dec-31-2026",
+      "title": "Will Nvidia market cap exceed $7T at close on Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "906",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90114",
+  "slug": "will-voter-turnout-in-the-2026-us-midterms-exceed-50",
+  "title": "Will voter turnout in the 2026 US midterms exceed 50%?",
+  "endDate": "2026-11-03T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-i3",
+  "description": "Will voter turnout in the 2026 US midterms exceed 50%?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 1053,
+  "markets": [
+   {
+    "id": "530021",
+    "question": "Will voter turnout in the 2026 US midterms exceed 50%?",
+    "conditionId": "0x80100a60e772280b7d04407fd747c10227826cd89794a0f47057471a61621d84",
+    "slug": "will-voter-turnout-in-the-2026-us-midterms-exceed-50",
+    "description": "This market resolves to \"Yes\" if the following is true: Will voter turnout in the 2026 US midterms exceed 50%. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-03T12:00:00Z",
+    "endDateIso": "2026-11-03",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.605\",\"0.395\"]",
+    "clobTokenIds": "[\"66747854320162329818133998463925747997262961064770454879281594748037065116949\",\"43181786352015014335962141959603626487707905956536195799298331839517999494505\"]",
+    "volume": "1053",
+    "volumeNum": 1053,
+    "volume24hr": 88,
+    "liquidity": "75",
+    "liquidityNum": 75,
+    "lastTradePrice": 0.605,
+    "bestBid": 0.55,
+    "bestAsk": 0.66,
+    "spread": 0.11,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90114",
+      "slug": "will-voter-turnout-in-the-2026-us-midterms-exceed-50",
+      "title": "Will voter turnout in the 2026 US midterms exceed 50%?",
+      "endDate": "2026-11-03T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90115",
+  "slug": "will-solana-flip-bnb-in-market-cap-by-nov-30-2026",
+  "title": "Will Solana flip BNB in market cap by Nov 30, 2026?",
+  "endDate": "2026-11-30T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "901",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-i4",
+  "description": "Will Solana flip BNB in market cap by Nov 30, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 994,
+  "markets": [
+   {
+    "id": "530022",
+    "question": "Will Solana flip BNB in market cap by Nov 30, 2026?",
+    "conditionId": "0x8c842fa6674fbfc2b2760a139cae371b997f5a08c18880b945eb4bb7ec2e3877",
+    "slug": "will-solana-flip-bnb-in-market-cap-by-nov-30-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Solana flip BNB in market cap by Nov 30, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-30T12:00:00Z",
+    "endDateIso": "2026-11-30",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.115\",\"0.885\"]",
+    "clobTokenIds": "[\"26489070997377487681214096392901359094074401404211418719281321097793147633293\",\"40822927000721308690255113484383509863660642452883084364025883820403139644186\"]",
+    "volume": 994,
+    "volumeNum": 994,
+    "volume24hr": 83,
+    "liquidity": 105,
+    "liquidityNum": 105,
+    "lastTradePrice": 0.115,
+    "bestBid": 0.08,
+    "bestAsk": 0.15,
+    "spread": 0.07,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90115",
+      "slug": "will-solana-flip-bnb-in-market-cap-by-nov-30-2026",
+      "title": "Will Solana flip BNB in market cap by Nov 30, 2026?",
+      "endDate": "2026-11-30T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90116",
+  "slug": "will-the-bank-of-japan-intervene-in-fx-markets-before-oct-15",
+  "title": "Will the Bank of Japan intervene in FX markets before Oct 15, 2026?",
+  "endDate": "2026-10-16T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "902",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-d1",
+  "description": "Will the Bank of Japan intervene in FX markets before Oct 15, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 141206,
+  "markets": [
+   {
+    "id": "530023",
+    "question": "Will the Bank of Japan intervene in FX markets before Oct 15, 2026?",
+    "conditionId": "0xfab9052e50b33de8761d4dda4feccb926f2a5a952b984d45866463834eba50b9",
+    "slug": "will-the-bank-of-japan-intervene-in-fx-markets-before-oct-15",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the Bank of Japan intervene in FX markets before Oct 15, 2026. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-10-16T12:00:00Z",
+    "endDateIso": "2026-10-16",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.895\",\"0.105\"]",
+    "clobTokenIds": [
+     "10883128013033142542122160387492790867649890522571410396271255869661761681495",
+     "49013888754050089245740924976816800857477486431494646450751986355604570060383"
+    ],
+    "volume": "141206",
+    "volumeNum": 141206,
+    "volume24hr": 11767,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.895,
+    "bestBid": 0.88,
+    "bestAsk": 0.91,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90116",
+      "slug": "will-the-bank-of-japan-intervene-in-fx-markets-before-oct-15",
+      "title": "Will the Bank of Japan intervene in FX markets before Oct 15, 2026?",
+      "endDate": "2026-10-16T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "disputed"
+   }
+  ]
+ },
+ {
+  "id": "90117",
+  "slug": "will-the-dodgers-win-the-2026-world-series",
+  "title": "Will the Dodgers win the 2026 World Series?",
+  "endDate": "2026-10-16T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1",
+    "label": "Sports",
+    "slug": "sports"
+   },
+   {
+    "id": "903",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-x1",
+  "description": "Will the Dodgers win the 2026 World Series?",
+  "active": true,
+  "closed": true,
+  "enableNegRisk": false,
+  "volume": 138618,
+  "markets": [
+   {
+    "id": "530024",
+    "question": "Will the Dodgers win the 2026 World Series?",
+    "conditionId": "0xe4114826f7246b3fbcd7fc57985d6cef20ef3d5ffda49ebff3cc1e128b5bf46b",
+    "slug": "will-the-dodgers-win-the-2026-world-series",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the Dodgers win the 2026 World Series. Otherwise it resolves to \"No\". The primary resolution source is the official league website; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official league website",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-10-16T12:00:00Z",
+    "endDateIso": "2026-10-16",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"1\", \"0\"]",
+    "clobTokenIds": "[\"78004641464414614704601161655706896459088132583388963254096500100089898632414\",\"85280420333154052244477422931547150778646789615377077303842736389194492250721\"]",
+    "volume": 138618,
+    "volumeNum": 138618,
+    "volume24hr": 11552,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.995,
+    "bestBid": 0.99,
+    "bestAsk": 1,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": false,
+    "closed": true,
+    "archived": false,
+    "acceptingOrders": false,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90117",
+      "slug": "will-the-dodgers-win-the-2026-world-series",
+      "title": "Will the Dodgers win the 2026 World Series?",
+      "endDate": "2026-10-16T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1",
+        "label": "Sports",
+        "slug": "sports"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "resolved"
+   }
+  ]
+ },
+ {
+  "id": "90118",
+  "slug": "will-a-spot-ethereum-etf-with-staking-be-approved-by-nov-15-",
+  "title": "Will a spot Ethereum ETF with staking be approved by Nov 15, 2026?",
+  "endDate": "2026-11-15T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-n1",
+  "description": "Will a spot Ethereum ETF with staking be approved by Nov 15, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 188776,
+  "markets": [
+   {
+    "id": "530025",
+    "question": "Will a spot Ethereum ETF with staking be approved by Nov 15, 2026?",
+    "conditionId": "0x4698f88325b879cd2e2de57dc875b9c33d63943537b8e61ef70387fa76c5dba4",
+    "slug": "will-a-spot-ethereum-etf-with-staking-be-approved-by-nov-15-",
+    "description": "This market resolves to \"Yes\" if the following is true: Will a spot Ethereum ETF with staking be approved by Nov 15, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-15T12:00:00Z",
+    "endDateIso": "2026-11-15",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.620\",\"0.380\"]",
+    "clobTokenIds": "[\"66773146623659531031042129934041527258272520438359590733252605358758229045514\",\"99984594755064416426135343012955575660488492291416221199371491575459283763423\"]",
+    "volume": "188776",
+    "volumeNum": 188776,
+    "volume24hr": 15731,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.62,
+    "bestBid": 0.6,
+    "bestAsk": 0.64,
+    "spread": 0.04,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": false,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90118",
+      "slug": "will-a-spot-ethereum-etf-with-staking-be-approved-by-nov-15-",
+      "title": "Will a spot Ethereum ETF with staking be approved by Nov 15, 2026?",
+      "endDate": "2026-11-15T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90119",
+  "slug": "will-republicans-win-the-senate-majority-in-the-2026-midterm",
+  "title": "Will Republicans win the Senate majority in the 2026 midterms?",
+  "endDate": "2026-11-03T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "905",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-p1",
+  "description": "Will Republicans win the Senate majority in the 2026 midterms?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 152790,
+  "markets": [
+   {
+    "id": "530026",
+    "question": "Will Republicans win the Senate majority in the 2026 midterms?",
+    "conditionId": "0x3338953d45a997bd43173e2b99d0a6ce34fc0839b8d9b57af7a55602e052ace7",
+    "slug": "will-republicans-win-the-senate-majority-in-the-2026-midterm",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Republicans win the Senate majority in the 2026 midterms. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-03T12:00:00Z",
+    "endDateIso": "2026-11-03",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.605\",\"0.395\"]",
+    "clobTokenIds": "[\"52647669344444488256642271953285740270021874571907579537670631050944654508211\",\"47710628081712275496001816936433524220549590616662286211142353520406768025803\"]",
+    "volume": 152790,
+    "volumeNum": 152790,
+    "volume24hr": 12733,
+    "liquidity": 18000,
+    "liquidityNum": 18000,
+    "lastTradePrice": 0.605,
+    "bestBid": 0.6,
+    "bestAsk": 0.61,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 4,
+    "events": [
+     {
+      "id": "90119",
+      "slug": "will-republicans-win-the-senate-majority-in-the-2026-midterm",
+      "title": "Will Republicans win the Senate majority in the 2026 midterms?",
+      "endDate": "2026-11-03T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "905",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90120",
+  "slug": "will-a-us-federal-government-shutdown-begin-before-dec-1-202",
+  "title": "Will a US federal government shutdown begin before Dec 1, 2026?",
+  "endDate": "2026-11-30T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "906",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-p2",
+  "description": "Will a US federal government shutdown begin before Dec 1, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 170834,
+  "markets": [
+   {
+    "id": "530027",
+    "question": "Will a US federal government shutdown begin before Dec 1, 2026?",
+    "conditionId": "0xf1c027e199033ddaf46ae2e3c86b7bb3424cf48b4c48d6a4f46532561ff43b45",
+    "slug": "will-a-us-federal-government-shutdown-begin-before-dec-1-202",
+    "description": "This market resolves to \"Yes\" if the following is true: Will a US federal government shutdown begin before Dec 1, 2026. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-30T12:00:00Z",
+    "endDateIso": "2026-11-30",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.230\",\"0.770\"]",
+    "clobTokenIds": "[\"3505335682654704980254452384739422733786951850313239156326121502722701515709\",\"10944297500703925274161224299009988633997973816080637285520749119413112617449\"]",
+    "volume": "170834",
+    "volumeNum": 170834,
+    "volume24hr": 14236,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.23,
+    "bestBid": 0.22,
+    "bestAsk": 0.24,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90120",
+      "slug": "will-a-us-federal-government-shutdown-begin-before-dec-1-202",
+      "title": "Will a US federal government shutdown begin before Dec 1, 2026?",
+      "endDate": "2026-11-30T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "906",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90121",
+  "slug": "will-the-supreme-court-rule-on-the-tariff-case-by-jan-31-202",
+  "title": "Will the Supreme Court rule on the tariff case by Jan 31, 2027?",
+  "endDate": "2027-01-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "2",
+    "label": "Politics",
+    "slug": "politics"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-p3",
+  "description": "Will the Supreme Court rule on the tariff case by Jan 31, 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 141512,
+  "markets": [
+   {
+    "id": "530028",
+    "question": "Will the Supreme Court rule on the tariff case by Jan 31, 2027?",
+    "conditionId": "0x7b2bd3dff7867a26633e1af6a144be3ca5523ab597990032024e7d4dbd9823aa",
+    "slug": "will-the-supreme-court-rule-on-the-tariff-case-by-jan-31-202",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the Supreme Court rule on the tariff case by Jan 31, 2027. Otherwise it resolves to \"No\". The primary resolution source is official government records; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official government records",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-01-31T12:00:00Z",
+    "endDateIso": "2027-01-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.725\",\"0.275\"]",
+    "clobTokenIds": "[\"54106086592560384016025081652722008388436356528629413892750626531348947247164\",\"19081812369549712263495439200670810034237532306364401714814188825877196705146\"]",
+    "volume": 141512,
+    "volumeNum": 141512,
+    "volume24hr": 11793,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.725,
+    "bestBid": 0.71,
+    "bestAsk": 0.74,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90121",
+      "slug": "will-the-supreme-court-rule-on-the-tariff-case-by-jan-31-202",
+      "title": "Will the Supreme Court rule on the tariff case by Jan 31, 2027?",
+      "endDate": "2027-01-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "2",
+        "label": "Politics",
+        "slug": "politics"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90122",
+  "slug": "will-the-s-p-500-close-above-7-000-on-dec-31-2026",
+  "title": "Will the S&P 500 close above 7,000 on Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "901",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-f1",
+  "description": "Will the S&P 500 close above 7,000 on Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 122624,
+  "markets": [
+   {
+    "id": "530029",
+    "question": "Will the S&P 500 close above 7,000 on Dec 31, 2026?",
+    "conditionId": "0x9b137b030809830d1e33dc07974ef25a5a8db9a5172a97a4ecc280db869cf062",
+    "slug": "will-the-s-p-500-close-above-7-000-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the S&P 500 close above 7,000 on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.420\",\"0.580\"]",
+    "clobTokenIds": "[\"895214799744246004442645148978493297640256730341258870069455884469475288182\",\"11107211179440913572460447626156784287260358740078609307555715660177024784780\"]",
+    "volume": "122624",
+    "volumeNum": 122624,
+    "volume24hr": 10219,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.42,
+    "bestBid": 0.41,
+    "bestAsk": 0.43,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90122",
+      "slug": "will-the-s-p-500-close-above-7-000-on-dec-31-2026",
+      "title": "Will the S&P 500 close above 7,000 on Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90123",
+  "slug": "will-gold-close-above-4-500-oz-on-nov-30-2026",
+  "title": "Will gold close above $4,500/oz on Nov 30, 2026?",
+  "endDate": "2026-11-30T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "902",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-f2",
+  "description": "Will gold close above $4,500/oz on Nov 30, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 114061,
+  "markets": [
+   {
+    "id": "530030",
+    "question": "Will gold close above $4,500/oz on Nov 30, 2026?",
+    "conditionId": "0xa14b12dc2491cd73bb53909e8a69d0936cfe213a7fdb21a1829e7948f001efec",
+    "slug": "will-gold-close-above-4-500-oz-on-nov-30-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will gold close above $4,500/oz on Nov 30, 2026. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-30T12:00:00Z",
+    "endDateIso": "2026-11-30",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.365\",\"0.635\"]",
+    "clobTokenIds": "[\"40395969434408743362625589930470616479658980081165648517370215499611125152571\",\"39273447310372545620150374605664168440174707863263303850090640686567132658763\"]",
+    "volume": 114061,
+    "volumeNum": 114061,
+    "volume24hr": 9505,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.365,
+    "bestBid": 0.35,
+    "bestAsk": 0.38,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90123",
+      "slug": "will-gold-close-above-4-500-oz-on-nov-30-2026",
+      "title": "Will gold close above $4,500/oz on Nov 30, 2026?",
+      "endDate": "2026-11-30T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90124",
+  "slug": "will-the-us-10-year-yield-close-above-4-5-on-dec-31-2026",
+  "title": "Will the US 10-year yield close above 4.5% on Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "120",
+    "label": "Finance",
+    "slug": "finance"
+   },
+   {
+    "id": "903",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-f3",
+  "description": "Will the US 10-year yield close above 4.5% on Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 136844,
+  "markets": [
+   {
+    "id": "530031",
+    "question": "Will the US 10-year yield close above 4.5% on Dec 31, 2026?",
+    "conditionId": "0x89ddf79bb42ffd24b0d6a5951934aef71fd566858cb7e486be993aa3d5757599",
+    "slug": "will-the-us-10-year-yield-close-above-4-5-on-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the US 10-year yield close above 4.5% on Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is the official data release; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official data release",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.305\",\"0.695\"]",
+    "clobTokenIds": "[\"48379268064702479335545381434938983360052206199723025115481123333059093143100\",\"67291136783030541587629749650263531890713191441948678486227490683490390091649\"]",
+    "volume": "136844",
+    "volumeNum": 136844,
+    "volume24hr": 11404,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.305,
+    "bestBid": 0.29,
+    "bestAsk": 0.32,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90124",
+      "slug": "will-the-us-10-year-yield-close-above-4-5-on-dec-31-2026",
+      "title": "Will the US 10-year yield close above 4.5% on Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "120",
+        "label": "Finance",
+        "slug": "finance"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90125",
+  "slug": "will-openai-release-a-new-flagship-model-before-jan-1-2027",
+  "title": "Will OpenAI release a new flagship model before Jan 1, 2027?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1401",
+    "label": "Tech",
+    "slug": "tech"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-t1",
+  "description": "Will OpenAI release a new flagship model before Jan 1, 2027?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 140630,
+  "markets": [
+   {
+    "id": "530032",
+    "question": "Will OpenAI release a new flagship model before Jan 1, 2027?",
+    "conditionId": "0xb20efa25d1277114324fc9641291c76eb3f710e5554289dc78315a8462022199",
+    "slug": "will-openai-release-a-new-flagship-model-before-jan-1-2027",
+    "description": "This market resolves to \"Yes\" if the following is true: Will OpenAI release a new flagship model before Jan 1, 2027. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.345\",\"0.655\"]",
+    "clobTokenIds": [
+     "44084977123567612019609925718410110085935378683903141937218989535130986377391",
+     "17314363912800593745879857096424765584096227601830932243485641422181742616475"
+    ],
+    "volume": 140630,
+    "volumeNum": 140630,
+    "volume24hr": 11719,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.345,
+    "bestBid": 0.33,
+    "bestAsk": 0.36,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90125",
+      "slug": "will-openai-release-a-new-flagship-model-before-jan-1-2027",
+      "title": "Will OpenAI release a new flagship model before Jan 1, 2027?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90126",
+  "slug": "will-tesla-run-unsupervised-robotaxis-in-5-cities-by-dec-31-",
+  "title": "Will Tesla run unsupervised robotaxis in 5+ cities by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1401",
+    "label": "Tech",
+    "slug": "tech"
+   },
+   {
+    "id": "905",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-t2",
+  "description": "Will Tesla run unsupervised robotaxis in 5+ cities by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 140110,
+  "markets": [
+   {
+    "id": "530033",
+    "question": "Will Tesla run unsupervised robotaxis in 5+ cities by Dec 31, 2026?",
+    "conditionId": "0x61c09c2a591959deaf986c3b87a00d379f97731dd15b73c5ad2f29d5cbdf7949",
+    "slug": "will-tesla-run-unsupervised-robotaxis-in-5-cities-by-dec-31-",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Tesla run unsupervised robotaxis in 5+ cities by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is official company announcements; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "official company announcements",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.155\",\"0.845\"]",
+    "clobTokenIds": "[\"96059135897242911895689079577438679682558356793252679220676409798440423183105\",\"21855549867947310159547570534661622289778442078009872013593668458002473741400\"]",
+    "volume": "140110",
+    "volumeNum": 140110,
+    "volume24hr": 11676,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.155,
+    "bestBid": 0.14,
+    "bestAsk": 0.17,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90126",
+      "slug": "will-tesla-run-unsupervised-robotaxis-in-5-cities-by-dec-31-",
+      "title": "Will Tesla run unsupervised robotaxis in 5+ cities by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1401",
+        "label": "Tech",
+        "slug": "tech"
+       },
+       {
+        "id": "905",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90127",
+  "slug": "will-bitcoin-close-above-110-000-on-nov-30-2026",
+  "title": "Will Bitcoin close above $110,000 on Nov 30, 2026?",
+  "endDate": "2026-11-30T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "906",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-k1",
+  "description": "Will Bitcoin close above $110,000 on Nov 30, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 176160,
+  "markets": [
+   {
+    "id": "530034",
+    "question": "Will Bitcoin close above $110,000 on Nov 30, 2026?",
+    "conditionId": "0x5eee198210081793dec3baa99b39a2101f5d6f08a33633184b905ed04028e883",
+    "slug": "will-bitcoin-close-above-110-000-on-nov-30-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Bitcoin close above $110,000 on Nov 30, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-11-30T12:00:00Z",
+    "endDateIso": "2026-11-30",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.480\",\"0.520\"]",
+    "clobTokenIds": "[\"61139823381576204053987052252928844655637530172999409174923815983400975142223\",\"52187117120337845131253752905483293160567811268810650607089454540576755356147\"]",
+    "volume": 176160,
+    "volumeNum": 176160,
+    "volume24hr": 14680,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.48,
+    "bestBid": 0.47,
+    "bestAsk": 0.49,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90127",
+      "slug": "will-bitcoin-close-above-110-000-on-nov-30-2026",
+      "title": "Will Bitcoin close above $110,000 on Nov 30, 2026?",
+      "endDate": "2026-11-30T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "906",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90128",
+  "slug": "will-a-spot-solana-etf-be-approved-by-dec-31-2026",
+  "title": "Will a spot Solana ETF be approved by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "21",
+    "label": "Crypto",
+    "slug": "crypto"
+   },
+   {
+    "id": "900",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-k2",
+  "description": "Will a spot Solana ETF be approved by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 186206,
+  "markets": [
+   {
+    "id": "530035",
+    "question": "Will a spot Solana ETF be approved by Dec 31, 2026?",
+    "conditionId": "0xa6b8738a8e432415440884ede0c37b81a1e162eb69979e6ee3f683f79f06a264",
+    "slug": "will-a-spot-solana-etf-be-approved-by-dec-31-2026",
+    "description": "This market resolves to \"Yes\" if the following is true: Will a spot Solana ETF be approved by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is CoinGecko daily close data; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "CoinGecko daily close data",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.540\",\"0.460\"]",
+    "clobTokenIds": "[\"10751503874988822071102278623207673412244250426553824763226195383979112070366\",\"97574834617967629805205544483323577929943884544051748284972610195142872889586\"]",
+    "volume": "186206",
+    "volumeNum": 186206,
+    "volume24hr": 15517,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.54,
+    "bestBid": 0.52,
+    "bestAsk": 0.56,
+    "spread": 0.04,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90128",
+      "slug": "will-a-spot-solana-etf-be-approved-by-dec-31-2026",
+      "title": "Will a spot Solana ETF be approved by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "21",
+        "label": "Crypto",
+        "slug": "crypto"
+       },
+       {
+        "id": "900",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90129",
+  "slug": "will-israel-and-saudi-arabia-announce-normalization-by-dec-3",
+  "title": "Will Israel and Saudi Arabia announce normalization by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "100265",
+    "label": "Geopolitics",
+    "slug": "geopolitics"
+   },
+   {
+    "id": "901",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-g1",
+  "description": "Will Israel and Saudi Arabia announce normalization by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 127112,
+  "markets": [
+   {
+    "id": "530036",
+    "question": "Will Israel and Saudi Arabia announce normalization by Dec 31, 2026?",
+    "conditionId": "0x5e1ed8c73eb1e00853c2fd1f170d8fcbb16853aa2f3545ceaaa1cd1447c78c87",
+    "slug": "will-israel-and-saudi-arabia-announce-normalization-by-dec-3",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Israel and Saudi Arabia announce normalization by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.090\",\"0.910\"]",
+    "clobTokenIds": "[\"4041149607708690529676250772075114450687861989465474080904534052350665927696\",\"66057408850181329763910244012363911255410718327571498044293641322862416914693\"]",
+    "volume": 127112,
+    "volumeNum": 127112,
+    "volume24hr": 10593,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.09,
+    "bestBid": 0.08,
+    "bestAsk": 0.1,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90129",
+      "slug": "will-israel-and-saudi-arabia-announce-normalization-by-dec-3",
+      "title": "Will Israel and Saudi Arabia announce normalization by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "901",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90130",
+  "slug": "will-the-eu-adopt-a-20th-russia-sanctions-package-by-dec-31-",
+  "title": "Will the EU adopt a 20th Russia sanctions package by Dec 31, 2026?",
+  "endDate": "2026-12-31T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "100265",
+    "label": "Geopolitics",
+    "slug": "geopolitics"
+   },
+   {
+    "id": "902",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-g2",
+  "description": "Will the EU adopt a 20th Russia sanctions package by Dec 31, 2026?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 178368,
+  "markets": [
+   {
+    "id": "530037",
+    "question": "Will the EU adopt a 20th Russia sanctions package by Dec 31, 2026?",
+    "conditionId": "0x043961448b3808cdc4c1eaf592fa0894a71c2ca5641b3b7f6068c8c69a889f60",
+    "slug": "will-the-eu-adopt-a-20th-russia-sanctions-package-by-dec-31-",
+    "description": "This market resolves to \"Yes\" if the following is true: Will the EU adopt a 20th Russia sanctions package by Dec 31, 2026. Otherwise it resolves to \"No\". The primary resolution source is credible reporting from major news agencies; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "credible reporting from major news agencies",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-31T12:00:00Z",
+    "endDateIso": "2026-12-31",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.565\",\"0.435\"]",
+    "clobTokenIds": "[\"97135446089695679337993597945201558567343868508743540064051371522751268432868\",\"46672171609803543830771695924950412329680020337994554426224999300671212683734\"]",
+    "volume": "178368",
+    "volumeNum": 178368,
+    "volume24hr": 14864,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.565,
+    "bestBid": 0.55,
+    "bestAsk": 0.58,
+    "spread": 0.03,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90130",
+      "slug": "will-the-eu-adopt-a-20th-russia-sanctions-package-by-dec-31-",
+      "title": "Will the EU adopt a 20th Russia sanctions package by Dec 31, 2026?",
+      "endDate": "2026-12-31T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "100265",
+        "label": "Geopolitics",
+        "slug": "geopolitics"
+       },
+       {
+        "id": "902",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90131",
+  "slug": "will-real-madrid-win-the-2026-27-champions-league",
+  "title": "Will Real Madrid win the 2026-27 Champions League?",
+  "endDate": "2027-05-03T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1",
+    "label": "Sports",
+    "slug": "sports"
+   },
+   {
+    "id": "903",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-e1",
+  "description": "Will Real Madrid win the 2026-27 Champions League?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 194118,
+  "markets": [
+   {
+    "id": "530038",
+    "question": "Will Real Madrid win the 2026-27 Champions League?",
+    "conditionId": "0xd0e9b9cd00306e17dd24e37706254fba90c949609d2ffdf4ffe3e0a61d439ed4",
+    "slug": "will-real-madrid-win-the-2026-27-champions-league",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Real Madrid win the 2026-27 Champions League. Otherwise it resolves to \"No\". The primary resolution source is the official league website; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official league website",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2027-05-03T12:00:00Z",
+    "endDateIso": "2027-05-03",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.175\",\"0.825\"]",
+    "clobTokenIds": "[\"10862701944855618851848803092912157904947753611900105018050127735382543367623\",\"54798138827973381606706618271737986531831082395198463074008650502921280054573\"]",
+    "volume": 194118,
+    "volumeNum": 194118,
+    "volume24hr": 16177,
+    "liquidity": 12000,
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.175,
+    "bestBid": 0.17,
+    "bestAsk": 0.18,
+    "spread": 0.01,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90131",
+      "slug": "will-real-madrid-win-the-2026-27-champions-league",
+      "title": "Will Real Madrid win the 2026-27 Champions League?",
+      "endDate": "2027-05-03T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1",
+        "label": "Sports",
+        "slug": "sports"
+       },
+       {
+        "id": "903",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ },
+ {
+  "id": "90132",
+  "slug": "will-max-verstappen-win-the-2026-f1-drivers-championship",
+  "title": "Will Max Verstappen win the 2026 F1 drivers' championship?",
+  "endDate": "2026-12-07T12:00:00Z",
+  "negRisk": false,
+  "tags": [
+   {
+    "id": "1",
+    "label": "Sports",
+    "slug": "sports"
+   },
+   {
+    "id": "904",
+    "label": "Featured",
+    "slug": "featured"
+   }
+  ],
+  "ticker": "ev-e2",
+  "description": "Will Max Verstappen win the 2026 F1 drivers' championship?",
+  "active": true,
+  "closed": false,
+  "enableNegRisk": false,
+  "volume": 179257,
+  "markets": [
+   {
+    "id": "530039",
+    "question": "Will Max Verstappen win the 2026 F1 drivers' championship?",
+    "conditionId": "0x74b347eff3d4d3b9716722559dc798e6cd70e9d3eced5ddad10e14dd942df61d",
+    "slug": "will-max-verstappen-win-the-2026-f1-drivers-championship",
+    "description": "This market resolves to \"Yes\" if the following is true: Will Max Verstappen win the 2026 F1 drivers' championship. Otherwise it resolves to \"No\". The primary resolution source is the official league website; if it is unavailable, consensus of credible reporting is used.",
+    "resolutionSource": "the official league website",
+    "startDate": "2026-09-15T12:00:00Z",
+    "endDate": "2026-12-07T12:00:00Z",
+    "endDateIso": "2026-12-07",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.220\",\"0.780\"]",
+    "clobTokenIds": "[\"73087406235244366618864521594610438291251360963520324035593011696914219715243\",\"58697688363697106437227458066401556740436352536703282235368838520629676877004\"]",
+    "volume": "179257",
+    "volumeNum": 179257,
+    "volume24hr": 14938,
+    "liquidity": "12000",
+    "liquidityNum": 12000,
+    "lastTradePrice": 0.22,
+    "bestBid": 0.21,
+    "bestAsk": 0.23,
+    "spread": 0.02,
+    "negRisk": false,
+    "active": true,
+    "closed": false,
+    "archived": false,
+    "acceptingOrders": true,
+    "enableOrderBook": true,
+    "orderPriceMinTickSize": 0.01,
+    "orderMinSize": 5,
+    "groupItemTitle": "",
+    "commentCount": 0,
+    "events": [
+     {
+      "id": "90132",
+      "slug": "will-max-verstappen-win-the-2026-f1-drivers-championship",
+      "title": "Will Max Verstappen win the 2026 F1 drivers' championship?",
+      "endDate": "2026-12-07T12:00:00Z",
+      "negRisk": false,
+      "tags": [
+       {
+        "id": "1",
+        "label": "Sports",
+        "slug": "sports"
+       },
+       {
+        "id": "904",
+        "label": "Featured",
+        "slug": "featured"
+       }
+      ]
+     }
+    ],
+    "umaResolutionStatus": "unresolved"
+   }
+  ]
+ }
+]
