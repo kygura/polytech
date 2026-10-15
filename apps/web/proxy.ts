@@ -5,7 +5,8 @@ const PUBLIC = new Set(["/login", "/api/login"]);
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  if (PUBLIC.has(pathname)) return NextResponse.next();
+  // Workflow runtime routes (queue deliveries, webhooks) authenticate their own callers (@workflow docs).
+  if (PUBLIC.has(pathname) || pathname.startsWith("/.well-known/workflow/")) return NextResponse.next();
 
   const auth = req.headers.get("authorization");
   const isApi = pathname === "/api" || pathname.startsWith("/api/");

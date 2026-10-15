@@ -91,6 +91,13 @@ describe("proxy", () => {
   it("allows public paths", async () => {
     for (const p of ["/login", "/api/login"]) expect((await proxy(req(p))).headers.get("x-middleware-next")).toBe("1");
   });
+  it("lets workflow runtime routes through, nothing else under .well-known", async () => {
+    for (const p of ["/.well-known/workflow/v1/flow", "/.well-known/workflow/v1/step", "/.well-known/workflow/v1/webhook/t"]) {
+      expect((await proxy(req(p))).headers.get("x-middleware-next")).toBe("1");
+    }
+    expect((await proxy(req("/.well-known/workflowx"))).status).toBe(307);
+    expect((await proxy(req("/.well-known/other"))).status).toBe(307);
+  });
   it("redirects unauthed pages with next", async () => {
     const r = await proxy(req("/markets?x=1"));
     expect(r.status).toBe(307);
