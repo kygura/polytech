@@ -76,6 +76,19 @@ export function safeNext(next: string | null | undefined): string {
   }
 }
 
+/**
+ * APP_PASSWORD_HASH as a PHC string. Next's .env loader runs dotenv-expand, which eats unescaped `$...`,
+ * so .env files must use `\$`; strip those escapes here so the same value also works where nothing
+ * expands (Vercel dashboard). PHC strings never contain backslashes. Throws on a missing/mangled value.
+ */
+export function passwordHash(raw = process.env.APP_PASSWORD_HASH): string {
+  const h = (raw ?? "").replaceAll("\\$", "$");
+  if (!h.startsWith("$argon2id$")) {
+    throw new Error(`APP_PASSWORD_HASH malformed (len ${h.length}); in .env files escape every $ as \\$`);
+  }
+  return h;
+}
+
 export function clientIp(headers: Headers): string {
   return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip")?.trim() || "unknown";
 }
