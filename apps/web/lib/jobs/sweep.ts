@@ -1,0 +1,145 @@
+import { depthWithin, midOf } from "@pm/core";
+import { insertSnapshots, schema as s } from "@pm/db";
+import type { Market as PmMarket } from "@pm/pm";
+import { and, inArray, isNotNull, sql } from "drizzle-orm";
+import { chunks, withLock, type Deps } from "./deps";
+import { publish } from "./events";
+import { watchlistIds } from "./screen";
+
+const OPEN = ["active", "disputed", "not_accepting"];
+const ex = (c: { name: string }) => sql.raw(`excluded."${c.name}"`);
+
+const statusOf = (m: PmMarket) => (!m.open ? "closed" : m.in_dispute ? "disputed" : !m.accepting_orders ? "not_accepting" : "active");
+
+/** pm universe (markets + events) -> `markets` upsert. Fee rate fetched once per new market (null = unknown -> category fallback at use). */
+export async function sweepUniverse(d: Deps) {
+  return withLock(d, "sweep", 10 * 60_000, async () => {
+    const [list, events] = await Promise.all([d.pm.listMarkets(), d.pm.listEvents()]);
+    const byCond = new Map<string, PmMarket>();
+    for (const e of events)
+      for (const m of e.markets) byCond.set(m.condition_id, e.neg_risk && !m.neg_risk_group ? { ...m, neg_risk_group: e.id } : m);
+    for (const m of list) byCond.set(m.condition_id, m);
+    if (!byCond.size) return { markets: 0, newMarkets: 0, feesFetched: 0, closed: 0 };
+
+    const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status }).from(s.markets)).map((r) => [r.id, r]));
+    const fees = new Map<string, number>();
+    const need = [...byCond.values()].filter((m) => m.yes_token_id && known.get(m.condition_id)?.fee == null);
+    for (const batch of chunks(need, 20))
+      await Promise.all(batch.map(async (m) => {
+        const bps = await d.pm.feeRateBps(m.yes_token_id!).catch(() => undefined);
+        if (bps !== undefined) fees.set(m.condition_id, bps / 10_000); // unit unverified (see TASKS T4)
+      }));
+
+    const rows = [...byCond.values()].map((m): typeof s.markets.$inferInsert => ({
+      conditionId: m.condition_id,
+      eventId: m.event_id ?? null,
+      question: m.question,
+      rules: m.rules ?? "",
+      category: m.category ?? null,
+      tags: m.tags,
+      endDate: m.end_date ? new Date(m.end_date) : null,
+      negRiskGroup: m.neg_risk ? (m.neg_risk_group ?? null) : null,
+      feeRate: fees.get(m.condition_id) ?? null,
+      status: statusOf(m),
+      pmId: m.id,
+      yesTokenId: m.yes_token_id ?? null,
+      noTokenId: m.no_token_id ?? null,
+      vol24h: m.volume_24h ?? null,
+    }));
+    const t = s.markets;
+    for (const c of chunks(rows, 500))
+      await d.db.insert(t).values(c).onConflictDoUpdate({
+        target: t.conditionId,
+        set: {
+          eventId: ex(t.eventId), question: ex(t.question), rules: ex(t.rules), category: ex(t.category), tags: ex(t.tags),
+          endDate: ex(t.endDate), negRiskGroup: ex(t.negRiskGroup), status: ex(t.status), pmId: ex(t.pmId),
+          yesTokenId: ex(t.yesTokenId), noTokenId: ex(t.noTokenId), vol24h: ex(t.vol24h),
+          feeRate: sql`coalesce(excluded."fee_rate", ${t.feeRate})`,
+        },
+      });
+
+    // open in db but gone from the open universe => closed (calibrateNightly decides if it resolved)
+    const gone = [...known].filter(([id, r]) => OPEN.includes(r.status) && !byCond.has(id)).map(([id]) => id);
+    for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
+
+    const out = { markets: rows.length, newMarkets: rows.filter((r) => !known.has(r.conditionId)).length, feesFetched: fees.size, closed: gone.length };
+    publish("sweep.done", out);
+    return out;
+  });
+}
+
+const BOOK_LEVELS = 40; // ponytail: per side, bounds snapshot row size; sizing never walks deeper than this in practice
+
+/** Append snapshots for `ids` (default: every open market). Not locked: callers lock. */
+export async function takeSnapshots(d: Deps, ids?: string[]) {
+  const t = s.markets;
+  const mkts = await d.db.select().from(t).where(and(inArray(t.status, OPEN), isNotNull(t.yesTokenId), ids ? inArray(t.conditionId, ids) : undefined));
+  if (!mkts.length) return { markets: 0, snapshots: 0, noBook: 0 };
+  const conds = mkts.map((m) => m.conditionId);
+  const now = d.now();
+
+  const [books, oiParts, tradeParts] = await Promise.all([
+    d.pm.books(mkts.map((m) => m.yesTokenId!)),
+    Promise.all(chunks(conds, 50).map((c) => d.pm.oi(c))),
+    Promise.all(chunks(conds, 25).map((c) => d.pm.trades({ market: c, limit: 500 }))),
+  ]);
+  const book = new Map(books.map((b) => [b.token_id, b]));
+  const oi: Record<string, number> = Object.assign({}, ...oiParts);
+
+  // trades -> last trade ts + signed 24h flow on the YES token (buy YES / sell NO = +)
+  const yesOf = new Map(mkts.map((m) => [m.conditionId, m.yesTokenId]));
+  const flow = new Map<string, { last: number; net: number; gross: number }>();
+  for (const tr of tradeParts.flat()) {
+    const c = tr.condition_id;
+    if (!c || !yesOf.has(c)) continue;
+    const f = flow.get(c) ?? { last: 0, net: 0, gross: 0 };
+    f.last = Math.max(f.last, tr.ts * 1000);
+    if (tr.ts * 1000 > now - 24 * 3_600_000) {
+      const usd = tr.size * tr.price, sign = (tr.side?.toUpperCase() === "SELL" ? -1 : 1) * (tr.token_id === yesOf.get(c) ? 1 : -1);
+      f.net += sign * usd;
+      f.gross += usd;
+    }
+    flow.set(c, f);
+  }
+
+  // crowding input only for researched markets (holders endpoint is 1000 req/10s, SPEC cadence 15 min)
+  const researched = new Set((await d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses)).map((r) => r.c));
+  const hold = conds.filter((c) => researched.has(c));
+  const tokCond = new Map(mkts.flatMap((m) => [[m.yesTokenId!, m.conditionId], [m.noTokenId ?? "", m.conditionId]] as const));
+  const top10 = new Map<string, number>();
+  for (const g of (await Promise.all(chunks(hold, 20).map((c) => d.pm.holders(c)))).flat()) {
+    const c = tokCond.get(g.token_id);
+    if (!c) continue;
+    const sum = g.holders.map((h) => h.amount).sort((a, b) => b - a).slice(0, 10).reduce((x, y) => x + y, 0);
+    top10.set(c, Math.max(top10.get(c) ?? 0, sum));
+  }
+
+  const rows: (typeof s.snapshots.$inferInsert)[] = [];
+  for (const m of mkts) {
+    const b = book.get(m.yesTokenId!);
+    const mid = b ? midOf(b.bids, b.asks) : null;
+    if (!b || mid == null) continue;
+    const f = flow.get(m.conditionId);
+    const o = oi[m.conditionId];
+    rows.push({
+      conditionId: m.conditionId,
+      ts: new Date(now),
+      mid,
+      bestBid: Math.max(...b.bids.map((l) => l.price)),
+      bestAsk: Math.min(...b.asks.map((l) => l.price)),
+      depth5cUsd: depthWithin(b.bids, mid, 5) + depthWithin(b.asks, mid, 5),
+      vol24h: m.vol24h,
+      oi: o ?? null,
+      top10Share: o && top10.has(m.conditionId) ? Math.min(1, top10.get(m.conditionId)! / o) : null,
+      lastTradeTs: f?.last ? new Date(f.last) : null,
+      book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow: f?.gross ? f.net / f.gross : 0 },
+    });
+  }
+  for (const c of chunks(rows, 200)) await insertSnapshots(d.db, c);
+  const out = { markets: mkts.length, snapshots: rows.length, noBook: mkts.length - rows.length };
+  publish("snapshot.done", out);
+  return out;
+}
+
+export const snapshotBooks = (d: Deps, scope: "watchlist" | "all") =>
+  withLock(d, `snapshot:${scope}`, 4 * 60_000, async () => takeSnapshots(d, scope === "all" ? undefined : await watchlistIds(d)));

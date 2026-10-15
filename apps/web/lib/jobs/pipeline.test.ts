@@ -1,0 +1,173 @@
+import { AnthropicOutageError, fakeJudge, fakeRunner, type AgentRunner } from "@pm/agents";
+import { DEFAULT_SETTINGS } from "@pm/core";
+import { memoryKv, schema as s } from "@pm/db";
+import { createPm } from "@pm/pm";
+import { createHash } from "node:crypto";
+import { desc, eq } from "drizzle-orm";
+import { beforeAll, describe, expect, it } from "vitest";
+import { ZodError } from "zod";
+import { calibrateNightly, deps, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
+
+process.env.PGLITE_DIR = "memory://";
+const cid = (k: string) => "0x" + createHash("sha256").update("cond:" + k).digest("hex"); // gen-fixtures.ts
+const ids = (ks: string[]) => ks.map(cid);
+
+let t = Date.parse("2026-10-15T12:00:00Z");
+const pm = createPm({ fixtures: true });
+let d: Deps, r: Pick<Deps, "db" | "now">;
+const events: string[] = [];
+
+beforeAll(async () => {
+  d = await deps({ pm, kv: memoryKv(), now: () => (t += 1), runner: fakeRunner, judge: fakeJudge });
+  r = { db: d.db, now: d.now };
+  subscribe((e) => events.push(e.type));
+  await sweepUniverse(d);
+  await snapshotBooks(d, "all");
+  await screenAll(d);
+  await researchShortlist(d, { limit: 12 });
+  await setMode(d, "L1", "test");
+  await paperBook(d);
+}, 60_000);
+
+describe("pipeline (fixtures + fake runner/judge)", () => {
+  it("sweep maps pm -> markets", async () => {
+    const rows = await d.db.select().from(s.markets);
+    expect(rows).toHaveLength(39); // 40 fixtures minus the closed x1
+    const a1 = rows.find((m) => m.conditionId === cid("a1"))!;
+    expect(a1.feeRate).toBeCloseTo(0.04); // 400 bps
+    expect(a1.negRiskGroup).toBeTruthy();
+    expect(rows.find((m) => m.conditionId === cid("d1"))!.status).toBe("disputed");
+    expect(rows.find((m) => m.conditionId === cid("n1"))!.status).toBe("not_accepting");
+    expect(rows.find((m) => m.conditionId === cid("s1"))!.feeRate).toBe(0); // geopolitics 0 bps is a real 0, not "unknown"
+  });
+
+  it("watchlist is populated in both tiers; illiquid and disputed are filtered", async () => {
+    const small = await read.watchlist(r, "small-cap"), size = await read.watchlist(r, "size");
+    expect(small.length).toBeGreaterThan(0);
+    expect(size.length).toBeGreaterThan(0);
+    const all = new Set([...small, ...size].map((x) => x.conditionId));
+    for (const k of ["i1", "i2", "i3", "i4", "d1", "n1"]) expect(all.has(cid(k))).toBe(false);
+    expect([...small, ...size].some((x) => x.thesisId)).toBe(true);
+  });
+
+  it("structural tab holds the neg-risk arb, ladder and mirror", async () => {
+    const st = await read.watchlist(r, "structural");
+    const by = new Map(st.map((x) => [x.conditionId, x]));
+    for (const k of ["a1", "a2", "a3", "a4"]) {
+      expect(by.get(cid(k))).toMatchObject({ type: "neg-risk-sum", kind: "buy-all", legs: 4 });
+      expect(by.get(cid(k))!.lockedC).toBeGreaterThan(5);
+    }
+    for (const k of ["c1", "c2", "c3"]) expect(by.get(cid(k))).toMatchObject({ type: "neg-risk-sum", kind: "sell-all" });
+    for (const k of ["l2", "l3"]) expect(by.get(cid(k))!.type).toBe("ladder");
+    for (const k of ["m1", "m2"]) expect(by.get(cid(k))!.type).toBe("mirror");
+    for (const k of ["b1", "b2", "b3", "l1", "p1", "i1", "d1"]) expect(by.has(cid(k))).toBe(false);
+    expect(st.every((x) => x.sizeUsd <= 0.05 * DEFAULT_SETTINGS.bankroll + 1e-9)).toBe(true);
+  });
+
+  it("theses respect the 5% cap and carry the full sizing row", async () => {
+    const th = await d.db.select().from(s.theses);
+    expect(th.length).toBeGreaterThan(0);
+    for (const x of th) {
+      expect(x.sizeUsd).toBeLessThanOrEqual(0.05 * DEFAULT_SETTINGS.bankroll + 1e-9);
+      expect(x.c).toBeLessThanOrEqual(0.4 + 1e-9); // < 30 resolved
+    }
+    const ev = await d.db.select().from(s.evidence);
+    expect(ev.length).toBeGreaterThan(0);
+    const spend = await d.db.select().from(s.spend);
+    expect(spend).toHaveLength(1);
+    const tid = th[0]!.conditionId;
+    const det = await read.marketDetail(r, tid);
+    expect(det!.thesis!.thesis).toMatch(/Fake judge/);
+    expect(det!.agents).toHaveLength(6); // 5 roles + judge
+    expect(det!.evidence.length).toBeGreaterThan(0);
+  });
+
+  it("L2 request is refused with EXECUTION_DISABLED and the mode stays", async () => {
+    const res = await setMode(d, "L2", "try");
+    expect(res).toMatchObject({ allowed: false, mode: "L1", reason: "EXECUTION_DISABLED" });
+    const a = await read.autonomy(r);
+    expect(a.mode).toBe("L1");
+    expect(a.events[0]).toMatchObject({ reason: "EXECUTION_DISABLED", fromMode: "L1", toMode: "L1" });
+  });
+
+  it("paper fills exist and a re-run does not double-fill", async () => {
+    const book = await read.paperBook(r);
+    expect(book.summary.open).toBeGreaterThan(0);
+    expect(book.fills.length).toBe(book.summary.open);
+    expect(book.fills[0]!.modeledK).toBeGreaterThan(0);
+    const before = (await d.db.select().from(s.orders)).length;
+    const again = await paperBook(d);
+    expect(again).toMatchObject({ filled: 0 });
+    expect((await d.db.select().from(s.orders)).length).toBe(before);
+  });
+
+  it("job lock prevents concurrent runs", async () => {
+    const release = (await d.kv.lock("job:sweep", 60_000))!;
+    expect(await sweepUniverse(d)).toEqual({ skipped: true, reason: "LOCKED" });
+    await release();
+    expect(await sweepUniverse(d)).not.toHaveProperty("skipped");
+  });
+
+  it("settings: merged on defaults, validated", async () => {
+    expect((await read.settingsGet(r)).bankroll).toBe(DEFAULT_SETTINGS.bankroll);
+    await read.settingsPut(r, { budget: { maxPodsPerDay: 41 } });
+    const st = await read.settingsGet(r);
+    expect(st.budget).toMatchObject({ maxPodsPerDay: 41, maxConcurrentSandboxes: 5 });
+    await expect(read.settingsPut(r, { bankroll: -5 })).rejects.toBeInstanceOf(ZodError);
+    await expect(read.settingsPut(r, { nope: 1 })).rejects.toBeInstanceOf(ZodError);
+    expect((await read.settingsGet(r)).bankroll).toBe(DEFAULT_SETTINGS.bankroll);
+  });
+
+  it("budget stops pods", async () => {
+    await read.settingsPut(r, { budget: { maxPodsPerDay: 0 } });
+    const fresh = { ...d, settings: await read.settingsGet(r) };
+    expect(await researchMarket(fresh, cid("p2"), "manual")).toEqual({ skipped: true, reason: "MAX_PODS_PER_DAY" });
+    await read.settingsPut(r, { budget: { maxPodsPerDay: 40 } });
+  });
+
+  it("anthropic outage mid-pod downgrades L3 -> L2 and fails the pod", async () => {
+    await d.db.insert(s.autonomyEvents).values({ fromMode: "L1", toMode: "L3", reason: "persisted", actor: "user" }); // unreachable via API this build
+    const boom: AgentRunner = async () => { throw new AnthropicOutageError(5); };
+    const res = await researchMarket({ ...d, settings: await read.settingsGet(r), runner: boom }, cid("p3"), "manual");
+    expect(res).toMatchObject({ status: "failed", reason: "ANTHROPIC_OUTAGE" });
+    const ev = (await d.db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(1))[0]!;
+    expect(ev).toMatchObject({ fromMode: "L3", toMode: "L2", reason: "ANTHROPIC_OUTAGE", actor: "auto-downgrade" });
+    await setMode(d, "L1", "back"); // lowering is always allowed
+    expect((await read.autonomy(r)).mode).toBe("L1");
+  });
+
+  it("resolved market: calibrate writes outcome, paperBook settles, calibration reads", async () => {
+    const { p, m } = (await d.db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId)))[0]!;
+    const gone = m.conditionId, yes = p.tokenId === m.yesTokenId;
+    const base = (await pm.listMarkets()).find((x) => x.condition_id === gone)!;
+    const sim = {
+      ...pm,
+      listMarkets: async () => (await pm.listMarkets()).filter((x) => x.condition_id !== gone),
+      listEvents: async () => (await pm.listEvents()).map((e) => ({ ...e, markets: e.markets.filter((x) => x.condition_id !== gone) })),
+      market: async (id: string) => (id === base.id ? { ...base, open: false, closed: true, yes_price: yes ? 1 : 0 } : pm.market(id)),
+    } as typeof pm;
+    const d2 = { ...d, pm: sim };
+    await sweepUniverse(d2);
+    expect((await d.db.select().from(s.markets).where(eq(s.markets.conditionId, gone)))[0]!.status).toBe("closed");
+    expect(await calibrateNightly(d2)).toMatchObject({ resolved: 1 });
+    expect(await paperBook(d2)).toMatchObject({ settled: 1 });
+    const pos = (await d.db.select().from(s.positions).where(eq(s.positions.id, p.id)))[0]!;
+    expect(pos.closedAt).not.toBeNull();
+    expect(pos.realizedPnl).toBeGreaterThan(0); // held token won
+    const cal = await read.calibration(r);
+    expect(cal.n).toBe(1);
+    expect(cal.byCategory[m.category!]!.c).toBe(0.4);
+    const pb = await read.paperBook(r);
+    expect(pb.summary.closed).toBe(1);
+    expect(pb.positions.find((x) => x.id === p.id)!.result).toBe(yes ? "YES" : "NO");
+  });
+
+  it("kill drops to L0 and stops paper fills", async () => {
+    expect(await kill(d)).toMatchObject({ mode: "L0", cancelledOrders: 0 });
+    expect(await paperBook(d)).toMatchObject({ mode: "L0", filled: 0 });
+  });
+
+  it("publishes bus events", () => {
+    for (const e of ["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.done", "thesis.created", "mode.changed", "paper.fill"]) expect(events).toContain(e);
+  });
+});

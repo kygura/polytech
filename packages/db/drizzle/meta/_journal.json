@@ -8,6 +8,13 @@
       "when": 1792079619037,
       "tag": "0000_ambiguous_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792080869838,
+      "tag": "0001_greedy_vargas",
+      "breakpoints": true
     }
   ]
 }

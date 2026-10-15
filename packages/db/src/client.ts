@@ -5,6 +5,7 @@ import { migrate as migrateNeon } from "drizzle-orm/neon-http/migrator";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as schema from "./schema";
@@ -26,7 +27,9 @@ export function getDb(): Db {
     migrator = () => migrateNeon(d, { migrationsFolder });
     return (db = d);
   }
-  const d = drizzlePglite({ client: new PGlite(process.env.PGLITE_DIR ?? resolve(here, "../../../.data/pglite")), schema });
+  const dir = process.env.PGLITE_DIR ?? resolve(here, "../../../.data/pglite");
+  if (!dir.startsWith("memory://")) mkdirSync(dirname(dir), { recursive: true }); // PGlite only creates the leaf dir
+  const d = drizzlePglite({ client: new PGlite(dir), schema });
   migrator = () => migratePglite(d, { migrationsFolder });
   return (db = d);
 }

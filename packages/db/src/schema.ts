@@ -11,8 +11,12 @@ export const markets = pgTable("markets", {
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   endDate: ts("end_date"),
   negRiskGroup: text("neg_risk_group"),
-  feeRate: dp("fee_rate"),
-  status: text("status").notNull().default("active"),
+  feeRate: dp("fee_rate"), // null = unknown, callers fall back by category
+  status: text("status").notNull().default("active"), // active | disputed | not_accepting | closed | resolved
+  pmId: text("pm_id"), // Gamma market id (for single-market lookups)
+  yesTokenId: text("yes_token_id"),
+  noTokenId: text("no_token_id"),
+  vol24h: dp("vol_24h"),
 });
 
 export const snapshots = pgTable("snapshots", {
@@ -27,6 +31,8 @@ export const snapshots = pgTable("snapshots", {
   oi: dp("oi"),
   top10Share: dp("top10_share"),
   lastTradeTs: ts("last_trade_ts"),
+  // YES-token levels kept for sizing/fills + 24h net taker flow (-1..1) for crowding
+  book: jsonb("book").$type<{ bids: { price: number; size: number }[]; asks: { price: number; size: number }[]; netFlow: number }>(),
 }, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]);
 
 export const screens = pgTable("screens", {
@@ -41,6 +47,7 @@ export const screens = pgTable("screens", {
   priority: dp("priority"),
   tier: text("tier"),
   structuralFlag: boolean("structural_flag").notNull().default(false),
+  structuralDetail: jsonb("structural_detail").$type<Record<string, unknown>>(),
 }, (t) => [index("screens_cond_ts").on(t.conditionId, t.ts)]);
 
 export const pods = pgTable("pods", {
@@ -91,6 +98,8 @@ export const theses = pgTable("theses", {
   killCriteria: jsonb("kill_criteria").$type<string[]>().notNull().default([]),
   createdAt: ts("created_at").notNull().defaultNow(),
   expiresAt: ts("expires_at"),
+  // thesis text, YES-side pYes/pMidYes, k, shares, payoff, expectedProfit, daysLeft, capped, trigger
+  detail: jsonb("detail").$type<Record<string, unknown>>(),
 }, (t) => [index("theses_cond").on(t.conditionId)]);
 
 export const outcomes = pgTable("outcomes", {
