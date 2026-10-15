@@ -1,0 +1,5 @@
+.bar { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-3); flex-wrap: wrap; }
+.right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+.check { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--muted); font-family: var(--font-ui); }
+.check input { height: auto; }
+.pin { color: var(--accent); margin-right: 2px; }
