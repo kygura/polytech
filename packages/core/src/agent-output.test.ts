@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentOutput, capConfidence } from "./agent-output";
+import { AgentOutput, capConfidence, straddles } from "./agent-output";
 
 const fact = { claim: "c", url: "https://example.com/x", quote: "q", date: "2026-10-01" };
 const ok = { role: "news", probability: 0.4, confidence: 0.7, key_facts: [fact], risks: ["r"], notes: "short" };
@@ -26,6 +26,10 @@ describe("AgentOutput", () => {
 });
 
 describe("capConfidence", () => {
+  it("straddles reports the trip even when confidence is already below the cap", () => {
+    expect(straddles([0.3, 0.6], 0.5)).toBe(true);
+    expect(straddles([0.6, 0.7], 0.5)).toBe(false);
+  });
   it("caps to 0.5 when estimates straddle p_mid", () => {
     expect(capConfidence(0.9, [0.3, 0.6], 0.5)).toBe(0.5);
   });

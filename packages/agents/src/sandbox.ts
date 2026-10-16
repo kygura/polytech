@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Sandbox } from "@vercel/sandbox";
 import { agentInput } from "./agent-input";
+import { AnthropicOutageError, isOverloadText } from "./backoff";
 import { validated, type AgentRunner } from "./runner";
 
 const MAIN = `import { readFileSync } from "node:fs";
@@ -33,7 +34,10 @@ export const sandboxRunner = (env: Record<string, string | undefined> = process.
       if (inst.exitCode !== 0) throw new Error(`sandbox npm install failed: ${await inst.stderr()}`);
       const run = await sandbox.runCommand({ cmd: "node", args: ["main.mjs"], env: { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY ?? "", EXA_API_KEY: env.EXA_API_KEY ?? "" } });
       const out = await run.stdout();
-      if (run.exitCode !== 0) throw new Error(`sandbox agent failed: ${(await run.stderr()).slice(-500)}`);
+      if (run.exitCode !== 0) {
+        const err = (await run.stderr()).slice(-500);
+        throw isOverloadText(err) ? new AnthropicOutageError(1, err) : new Error(`sandbox agent failed: ${err}`);
+      }
       const line = out.split("\n").reverse().find((l) => l.startsWith("__RESULT__"));
       if (!line) throw new Error("sandbox agent printed no result");
       const secs = (Date.now() - t) / 1000;

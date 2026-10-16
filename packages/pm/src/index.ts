@@ -61,7 +61,7 @@ export function createPm(opts: PmOptions = {}) {
       if (res.ok) return res.json();
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
         const ra = toNum(res.headers.get("retry-after"));
-        await sleep(ra !== undefined ? ra * 1000 : backoff);
+        await sleep(ra !== undefined ? Math.min(ra * 1000, 30_000) : backoff);
         continue;
       }
       throw new Error(`${post ? "POST" : "GET"} ${url.pathname} -> ${res.status} ${(await res.text()).slice(0, 200)}`);
@@ -84,8 +84,14 @@ export function createPm(opts: PmOptions = {}) {
     }
   }
 
-  const batch = async <T>(path: string, tokens: string[], norm: (r: unknown) => T): Promise<T[]> =>
-    Promise.all(chunks([...new Set(tokens)]).map((c) => raw("clob", path, { body: c.map((token_id) => ({ token_id })) }).then(norm)));
+  /** One failed chunk does not fail the batch: returns what succeeded (throws only if every chunk failed). */
+  const batch = async <T>(path: string, tokens: string[], norm: (r: unknown) => T): Promise<T[]> => {
+    const rs = await Promise.allSettled(chunks([...new Set(tokens)]).map((c) => raw("clob", path, { body: c.map((token_id) => ({ token_id })) }).then(norm)));
+    const ok = rs.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const bad = rs.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (bad && !ok.length) throw bad.reason;
+    return ok;
+  };
 
   return {
     raw,

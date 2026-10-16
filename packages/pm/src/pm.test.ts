@@ -32,6 +32,12 @@ describe("fetch wrapper", () => {
     expect(f).toHaveBeenCalledTimes(3);
     expect(sleeps).toEqual([250, 500]);
   });
+  it("caps retry-after at 30s", async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "999" } })).mockResolvedValueOnce(json({ base_fee: "1" }));
+    const sleeps: number[] = [];
+    await createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) }).feeRateBps("1");
+    expect(sleeps).toEqual([30_000]);
+  });
   it("gives up after 3 retries and does not retry 4xx", async () => {
     const f = vi.fn().mockResolvedValue(json({}, 500));
     const pm = createPm({ fixtures: false, fetch: f, sleep: async () => {} });

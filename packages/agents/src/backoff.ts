@@ -6,9 +6,12 @@ export class AnthropicOutageError extends Error {
 }
 
 export const isOverload = (e: unknown) => {
-  const x = e as { status?: number; message?: string } | null;
-  return x?.status === 429 || x?.status === 529 || /overloaded|rate.?limit|\b(429|529)\b/i.test(x?.message ?? "");
+  const st = (e as { status?: number } | null)?.status;
+  return st === 429 || st === 529;
 };
+
+/** Sandbox stderr (plain Error, no .status): did the Anthropic API overload/rate-limit the agent? */
+export const isOverloadText = (s: string) => /overloaded_error|rate_limit_error|API Error: (429|529)\b/i.test(s);
 
 export type BackoffOpts = { retries?: number; baseMs?: number };
 

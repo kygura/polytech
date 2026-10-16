@@ -18,8 +18,9 @@ export const AgentOutput = z
 export type AgentOutput = z.infer<typeof AgentOutput>;
 
 /** Probability-bearing estimates straddling p_mid (one above, one below) cap confidence at 0.5. */
-export function capConfidence(confidence: number, probs: (number | null)[], pMid: number): number {
+export function straddles(probs: (number | null)[], pMid: number): boolean {
   const ps = probs.filter((p): p is number => p != null);
-  const straddle = ps.some((p) => p > pMid) && ps.some((p) => p < pMid);
-  return straddle ? Math.min(confidence, 0.5) : confidence;
+  return ps.some((p) => p > pMid) && ps.some((p) => p < pMid);
 }
+export const capConfidence = (confidence: number, probs: (number | null)[], pMid: number): number =>
+  straddles(probs, pMid) ? Math.min(confidence, 0.5) : confidence;

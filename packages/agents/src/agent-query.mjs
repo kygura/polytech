@@ -38,6 +38,7 @@ export async function runAgent(input) {
         systemPrompt: input.system,
         mcpServers: { exa: server },
         allowedTools: ["mcp__exa__search", "mcp__exa__contents"],
+        // base_rate scripts need key isolation + egress allowlist (phase 6)
         disallowedTools: BUILTIN,
         maxTurns: input.maxTurns ?? 20,
         outputFormat: { type: "json_schema", schema: input.schema },

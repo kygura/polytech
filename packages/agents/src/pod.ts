@@ -1,6 +1,7 @@
-import { capConfidence, type AgentOutput, type Level, type Market, type Settings } from "@pm/core";
+import { capConfidence, straddles, type AgentOutput, type Level, type Market, type Settings } from "@pm/core";
 import type { Judge, JudgeOut } from "./judge";
 import { buildBrief, type AgentRole } from "./prompts";
+import { AnthropicOutageError, isOverload } from "./backoff";
 import { modelFor, type ModelRole } from "./router";
 import type { AgentRunner, Run, Usage } from "./runner";
 
@@ -14,7 +15,7 @@ export type PodSettings = {
   exaCallCap?: number; // per agent
   core?: Settings;
 };
-export type AgentResult = { role: AgentRole; model: string; ok: true; run: Run } | { role: AgentRole; model: string; ok: false; error: string };
+export type AgentResult = { role: AgentRole; model: string; ok: true; run: Run } | { role: AgentRole; model: string; ok: false; error: string; outage: boolean };
 export type EvidenceRow = { agent_role: AgentRole; claim: string; url: string; quote: string; date: string; direction: "+" | "-" };
 export type PodResult = {
   agents: AgentResult[];
@@ -24,8 +25,8 @@ export type PodResult = {
 };
 
 export class PodFailedError extends Error {
-  constructor(public agents: AgentResult[]) {
-    super(`pod failed: ${agents.filter((a) => a.ok).length}/${agents.length} agents succeeded`);
+  constructor(public agents: AgentResult[], public cause?: unknown) {
+    super(`pod failed: ${agents.filter((a) => a.ok).length}/${agents.length} agents succeeded${cause ? ` (${cause instanceof Error ? cause.message : cause})` : ""}`);
   }
 }
 
@@ -52,7 +53,7 @@ export async function runPod(a: {
         const run = await a.runner(role, brief, { model, timeoutMs: settings.timeoutMs ?? 600_000, exaCallCap: settings.exaCallCap ?? 10 });
         r = { role, model, ok: true, run };
       } catch (e) {
-        r = { role, model, ok: false, error: e instanceof Error ? e.message : String(e) };
+        r = { role, model, ok: false, error: e instanceof Error ? e.message : String(e), outage: e instanceof AnthropicOutageError || isOverload(e) };
       }
       agents.push(r);
       a.onAgentDone?.(r);
@@ -77,9 +78,10 @@ export async function runPod(a: {
       bidDepthUsd: usd(book.bids),
       askDepthUsd: usd(book.asks),
     },
-  });
+  }).catch((e) => { throw new PodFailedError(agents, e); });
 
-  const confidence = capConfidence(j.judge.confidence, outputs.map((o) => o.probability), book.pMid);
+  const probs = outputs.map((o) => o.probability);
+  const confidence = capConfidence(j.judge.confidence, probs, book.pMid);
   const evidence = outputs.flatMap((o) =>
     o.key_facts.map((f): EvidenceRow => ({
       agent_role: o.role,
@@ -96,7 +98,7 @@ export async function runPod(a: {
   );
   return {
     agents,
-    judge: { ...j.judge, confidence, capped: confidence < j.judge.confidence },
+    judge: { ...j.judge, confidence, capped: straddles(probs, book.pMid) },
     evidence,
     costs: { ...costs, sandboxS: ok.reduce((s, r) => s + r.sandboxS, 0) },
   };

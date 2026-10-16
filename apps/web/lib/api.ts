@@ -12,13 +12,17 @@ export function parse<S extends z.ZodType>(schema: S, input: unknown): { data: z
 export const parseBody = async <S extends z.ZodType>(req: Request, schema: S) => parse(schema, await req.json().catch(() => undefined));
 
 // one wiring per process; settings re-read per call so PUT /api/settings reaches the jobs
-let base: Promise<Deps> | undefined;
+/** Memoise a promise but drop it on reject, so one failed init is retried instead of 500-ing until restart. */
+const once = <T>(init: () => Promise<T>) => {
+  let p: Promise<T> | undefined;
+  return () => (p ??= init().catch((e) => ((p = undefined), Promise.reject(e))));
+};
+const base = once(() => deps());
 export const getDeps = async (): Promise<Deps> => {
-  const b = await (base ??= deps());
+  const b = await base();
   return { ...b, settings: await getSettings(b.db) };
 };
-let rd: Promise<read.ReadDeps> | undefined;
-export const getRead = () => (rd ??= read.readDeps());
+export const getRead = once(() => read.readDeps());
 
 // ---- cron jobs (shared by the cron route and the workflow step) ----
 export const JOBS = {

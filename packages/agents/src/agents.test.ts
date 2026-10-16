@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@pm/core";
 import { AgentOutput } from "@pm/core";
-import { AnthropicOutageError, buildBrief, classifyR, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
+import { AnthropicOutageError, isOverloadText, PodFailedError, buildBrief, classifyR, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
 
 const mk = (q: string): Market => ({
@@ -64,6 +64,22 @@ describe("runPod", () => {
     expect(r.judge.capped).toBe(true);
   });
 
+  it("capped means straddle tripped, even if judge confidence is already below the cap", async () => {
+    const p = { rules: null, source: 0.9, base_rate: 0.8, news: 0.2, red_team: 0.1 } as const;
+    const raw: RawRunner = async (role, brief, o) => ({ ...(await fakeRaw(role, brief, o)), output: { ...((await fakeRaw(role, brief, o)).output as object), probability: p[role] } });
+    const judge: typeof fakeJudge = async (x) => { const j = await fakeJudge(x); return { ...j, judge: { ...j.judge, confidence: 0.3 } }; };
+    const r = await runPod({ market, siblings: sibs, book, runner: validated(raw), judge });
+    expect(r.judge.confidence).toBe(0.3);
+    expect(r.judge.capped).toBe(true);
+  });
+
+  it("judge throw surfaces as PodFailedError carrying the agents", async () => {
+    const judge: typeof fakeJudge = async () => { throw new Error("judge boom"); };
+    const e = await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge }).catch((x) => x);
+    expect(e).toBeInstanceOf(PodFailedError);
+    expect(e.agents).toHaveLength(5);
+  });
+
   it("proceeds with 3 ok, fails with fewer", async () => {
     const failing = (n: number): RawRunner => async (role, brief, o) => {
       if (["source", "news", "red_team"].slice(0, n).includes(role)) throw new Error("boom");
@@ -100,6 +116,13 @@ describe("backoff", () => {
     const client = { messages: { create: async () => { n++; throw Object.assign(new Error("Overloaded"), { status: 529 }); } } };
     await expect(classifyR("rules", client as never, "m", noWait)).rejects.toBeInstanceOf(AnthropicOutageError);
     expect(n).toBe(5);
+  });
+  it("does not treat 429/rate-limit text without a status as overload", async () => {
+    await expect(withBackoff(async () => { throw new Error("sandbox 429 rate limit"); }, noWait)).rejects.toThrow("sandbox 429");
+  });
+  it("classifies sandbox stderr: Anthropic overload yes, other 429s no", () => {
+    expect(isOverloadText("API Error: 529 {\"type\":\"overloaded_error\"}")).toBe(true);
+    expect(isOverloadText("Exa HTTP 429")).toBe(false);
   });
   it("recovers and ignores other errors", async () => {
     let n = 0;

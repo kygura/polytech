@@ -26,8 +26,9 @@ const t0 = Date.now();
 export const defaultNow = () => (process.env.PM_FIXTURES === "1" ? FIXTURE_NOW + (Date.now() - t0) : Date.now());
 
 let ready: Promise<Db> | undefined;
-/** getDb(), migrated once per process when running on local PGlite (Neon is migrated at deploy). */
-export const dbReady = () => (ready ??= process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate());
+/** getDb(), migrated once per process when running on local PGlite (Neon is migrated at deploy). Cache cleared on reject. */
+export const dbReady = () =>
+  (ready ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((ready = undefined), Promise.reject(e))));
 
 /** Production wiring. Tests/seed override pieces via `over`. */
 export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
