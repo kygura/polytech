@@ -36,24 +36,35 @@ Phases 1–5 of SPEC.md: screener + structural detectors, research pods + judge 
 
 | id | task | level / role | deps | status |
 |---|---|---|---|---|
-| R1 | Research Polymarket Gamma/CLOB/Data API shapes, fees, neg-risk → `docs/research/polymarket.md` | L0 research haiku@high | — | todo |
-| R2 | Research Claude Agent SDK query()+structured output+MCP, Vercel Sandbox, Vercel Workflow, Exa API, PGlite+drizzle → `docs/research/runtime.md` | L0 research haiku@high | — | todo |
-| D1 | DESIGN.md: web + TUI brief | L2 designer fable@medium | — | todo |
-| T0 | Monorepo scaffold | L1 grunt haiku@max | — | todo |
-| T1 | packages/core: screening, sizing, fees, structural detectors | L2 worker sonnet@medium | T0 | todo |
-| T2 | packages/core: calibration, autonomy/risk-limit engine, paper fills | L2 worker | T0 | todo |
-| T3 | packages/db schema + client (Neon/PGlite) | L2 worker | T0 | todo |
-| T4 | packages/pm clients + token buckets + fixtures | L2 worker | T0, R1 | todo |
-| T5 | packages/agents: router, runner (Sandbox + fake), pod, judge, Exa MCP | L2 worker | T0, R2, T1 | todo |
-| T6 | Auth: login, jose JWT, middleware, rate limit, TUI bearer | L3 heavy (auth) | T0, T3 | todo |
-| T7 | Web API + jobs (sweep, snapshots, screen, pods, calibration, paper) + crons + SSE | L2 worker | T1–T5 | todo |
-| T8 | Web UI per DESIGN.md | L2 ui-impl fable@medium | D1, T7 | todo |
-| T9 | Ink TUI per DESIGN.md | L2 ui-impl fable@medium | D1, T7 | todo |
-| V | Verification gate | reviewers | all | todo |
+| R1 | Research Polymarket Gamma/CLOB/Data API shapes, fees, neg-risk → `docs/research/polymarket.md` | L0 research haiku@high | — | done |
+| R2 | Research Claude Agent SDK query()+structured output+MCP, Vercel Sandbox, Vercel Workflow, Exa API, PGlite+drizzle → `docs/research/runtime.md` | L0 research haiku@high | — | done |
+| D1 | DESIGN.md: web + TUI brief | L2 designer fable@medium | — | done |
+| T0 | Monorepo scaffold | L1 grunt haiku@max | — | done |
+| T1 | packages/core: screening, sizing, fees, structural detectors | L2 worker sonnet@medium | T0 | done |
+| T2 | packages/core: calibration, autonomy/risk-limit engine, paper fills | L2 worker | T0 | done |
+| T3 | packages/db schema + client (Neon/PGlite) | L2 worker | T0 | done |
+| T4 | packages/pm clients + token buckets + fixtures | L2 worker | T0, R1 | done |
+| T5 | packages/agents: router, runner (Sandbox + fake), pod, judge, Exa MCP | L2 worker | T0, R2, T1 | done |
+| T6 | Auth: login, jose JWT, middleware, rate limit, TUI bearer | L3 heavy (auth) | T0, T3 | done |
+| T7 | Web API + jobs (sweep, snapshots, screen, pods, calibration, paper) + crons + SSE | L2 worker | T1–T5 | done |
+| T8 | Web UI per DESIGN.md | L2 ui-impl fable@medium | D1, T7 | done |
+| T9 | Ink TUI per DESIGN.md | L2 ui-impl fable@medium | D1, T7 | done |
+| V | Verification gate | reviewers | all | done |
 
 ## Decisions so far
 
+- 2026-10-16: T8b done (d6bb743). Fleet row expands in place, output in Drawer. Gaps deferred: settings excluded-tags (no schema field), fleet retry badge (no data), category override → inherit (PUT merges, no key delete). 200/200 tests. Gate V dispatched.
+- 2026-10-16: gate V loop 1. Reviews in (risk opus, reliability/resilience/readability/spec sonnet, drift haiku). Fix batches dispatched, disjoint files, no agent commits: A1 research/runtime (sonnet), A2 screen/sweep/paper/read/autonomy money paths (sonnet), B auth hardening (sonnet), C UI/TUI drift (fable). Deferred → phase 6+ notes: comment skew in C, NEW_HIT re-research trigger, cross-instance SSE bus, logout token revocation, /m/[conditionId] route (docs/api.md uses /markets/[id]). Readability cleanup = recommendations only.
+- 2026-10-16: gate V PASSED (025eed4..3640273). Loop 3: no-candidate stale threshold 15 min; sweep shrink honored after 3 consecutive truncated listings. Final smoke at 3640273 in clean worktree: install clean, 13/13 turbo tasks, 228 tests, authed web checks, L2 refused, kill/re-arm, cron auth, workflow route guarded off Vercel, TUI login + watchlist render. Open (low): /markets/<bad id> returns 200 not 404; TUI first frame shows offline before SSE connects; core checkOrder still flags dailyLoss=0 as violation (L1 records only).
+- 2026-10-16: gate V loop 2. Re-review (opus) found: base_rate Bash in sandbox can leak API keys via prompt injection → Bash reverted for all roles (SPEC divergence; needs key isolation + egress allowlist, phase 6). Also sandbox outage detection, global stale measure, self-hosted clientIp order, sweep floor vs previous listing, reaper waves, early-close edge, dailyLoss=0, kv cap, TUI bearer http guard. pnpm-workspace allowBuilds += @swc/core, cbor-extract. TUI test flake = fixed 60ms wait (now polls); header keeps mode + K visible when narrow.
 - 2026-10-15: T1 done (89995e7). `@pm/core`: fees, screen (pass1, factorI/L/T, crowd, priority, screen), sizeTrade → WatchCore|null (both sides, best e), negRiskArb, ladderViolations, mirrorPairs, AgentOutput, capConfidence, DEFAULT_SETTINGS (B=1000 placeholder). I excludes sibling drift (no input yet).
+- 2026-10-15: login fix (c82c1f5). Root cause: Next dotenv-expand mangles `$` in APP_PASSWORD_HASH (97 → 44 chars). Fix: hash-password emits `\$`-escaped value, passwordHash() unescapes + validates prefix, misconfig → 500 + log. Gate: live login with smoke password from .env.local.
+- 2026-10-15: T8a done (8c3531e). Shell, components, /login, /watchlist, /markets/[id]. Bug found: login 401 under `next start` (argon2 error swallowed) → sent to T6 agent for diagnosis. T8b dispatched (fable@medium).
+- 2026-10-15: T9 done (8676001). Ink TUI, 6 views + settings, no new deps, hand-rolled SSE parser. Untested against live API → gate must smoke `pm` against `next start`.
+- 2026-10-15: proxy fix (1e73b89): /.well-known/workflow/* bypasses session guard. Auth for those routes relies on Vercel platform-side queue signing (docs-only evidence); unauthenticated if self-hosted. Review item for review-risk.
+- 2026-10-15: T7b done (f0ccebd). All docs/api.md routes; cron = app/api/cron/[job]; Workflow real (withWorkflow, start() on Vercel for long jobs, inline otherwise). Region via vercel.json (preferredRegion deprecated). Follow-ups: proxy must pass /.well-known/workflow/* (sent to T6 agent); clean install may need `pnpm approve-builds` for @swc/core, cbor-extract (check at gate). Paper close = best bid, no depth walk/fee.
+- 2026-10-15: T7a done (9be5660). lib/jobs: jobs + read.* + seed (26 watch rows, 11 structural, 8 theses, 5 paper fills). Additive migration 0001. Paper fills proceed with risk violations recorded (L1 = observe violations). Not done: Exa call counting, category-scoped setMode, L3 limits enforcement (phase 7).
+- 2026-10-15: docs/api.md contract fixed. Server components call read.* directly; client components + TUI via HTTP. T8 split → T8a (shell, components, watchlist, detail, login) then T8b (fleet, calibration, paper, autonomy, settings). Dispatched T7b (sonnet), T8a (fable), T9 (fable) in parallel.
 - 2026-10-15: T5 done (607061d). `@pm/agents`: modelFor, buildBrief (no price), classifyR+rulesHash, AgentRunner, fakeRunner, pickRunner(env), withBackoff, AnthropicOutageError, anthropicJudge/fakeJudge, runPod → {agents, judge{capped}, evidence, costs}, PodFailedError (<3 ok). Exa via fetch. OPEN for verification: base-rate agent has no script tool (SPEC says it runs small scripts) — allow Bash inside sandbox runner only.
 - 2026-10-15: T7 split → T7a jobs/read models/seed (dispatched sonnet@medium), T7b API routes + SSE + crons + Workflow (after T7a).
 - 2026-10-15: T4 done. `@pm/pm` createPm({fixtures}) → listMarkets/listEvents/market/comments/books/midpoints/spreads/lastTradePrices/pricesHistory/feeRateBps/tickSize/holders/oi/trades. Normalized snake_case types (Market, PmEvent, Book…) — T7 maps to core camelCase. feeRate = feeRateBps/10000 (unit UNVERIFIED). Fixtures: neg-risk arb a1–a4 (buy-all), c1–c3 (sell-all), ladder l2>l3, mirror m1/m2, longshots s*, illiquid i*, dispute d1.
