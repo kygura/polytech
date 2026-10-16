@@ -1,0 +1,31 @@
+/* Fleet / calibration / paper / autonomy / settings primitives. One class per component. */
+
+.strip { display: flex; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.stripItem { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.meterW { width: 80px; display: inline-block; }
+
+.flash { animation: flash 1s ease-out; }
+@keyframes flash { from { background: var(--surface-2); } }
+
+.half { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); align-items: start; }
+@media (max-width: 1100px) { .half { grid-template-columns: 1fr; } }
+
+.controls { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-3); flex-wrap: wrap; }
+.controls label { display: inline-flex; gap: var(--sp-1); align-items: center; color: var(--muted); font-family: var(--font-ui); }
+
+.line { padding: var(--sp-2) var(--sp-3); }
+.divider { color: var(--muted); font-family: var(--font-ui); padding: var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border); margin-top: var(--sp-3); }
+
+.chip { font-size: var(--fs-xs); line-height: var(--lh-xs); border: 1px solid var(--mode-1); color: var(--mode-1); border-radius: var(--radius); padding: 0 var(--sp-1); margin-left: var(--sp-1); }
+.tag { font-size: var(--fs-xs); line-height: var(--lh-xs); border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius); padding: 0 var(--sp-1); margin-left: var(--sp-1); }
+
+.modes { display: flex; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-3) var(--sp-3) 0; }
+.modeOpt { font-weight: 600; font-family: var(--font-mono); padding: var(--sp-1) var(--sp-3); background: var(--surface); }
+.modeOpt:disabled { border-color: var(--faint) !important; color: var(--faint); }
+
+.stack > * { margin-bottom: var(--sp-3); }
+.kv td:first-child { color: var(--muted); font-family: var(--font-ui); }
+.pre { white-space: pre-wrap; font-size: var(--fs-xs); max-height: 300px; overflow: auto; margin: var(--sp-1) 0 0; background: var(--surface-2); padding: var(--sp-2); }
+.dots { display: inline-flex; gap: 3px; }
+.bins { margin-top: var(--sp-2); }
+.bins summary { color: var(--muted); font-family: var(--font-ui); cursor: pointer; }

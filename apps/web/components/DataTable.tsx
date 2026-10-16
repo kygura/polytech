@@ -21,10 +21,12 @@ export type DataTableProps<T> = {
   /** Keys j/k/Enter bound while true (default). Set false when two tables share a view. */
   keys?: boolean;
   label?: string;
+  /** Extra class per row (e.g. the one allowed flash on new pods). */
+  rowClass?: (row: T) => string | undefined;
 };
 
 /** The one table. Real <table>, sticky header, aria-sort buttons, j/k/Enter, selection bar. */
-export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey, onSelect, onOpen, renderExpanded, muted, keys = true, label }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey, onSelect, onOpen, renderExpanded, muted, keys = true, label, rowClass }: DataTableProps<T>) {
   const ref = useRef<HTMLDivElement>(null);
   const idx = selectedKey == null ? -1 : rows.findIndex((r) => rowKey(r) === selectedKey);
 
@@ -70,7 +72,7 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
           {rows.map((r) => {
             const k = rowKey(r), sel = k === selectedKey;
             return [
-              <tr key={k} className={`${css.row} ${sel ? css.selected : ""}`} aria-selected={sel} tabIndex={sel ? 0 : -1}
+              <tr key={k} className={`${css.row} ${sel ? css.selected : ""} ${rowClass?.(r) ?? ""}`} aria-selected={sel} tabIndex={sel ? 0 : -1}
                 onClick={() => { onSelect?.(k); onOpen?.(r); }}
                 onFocus={() => onSelect?.(k)}>
                 {columns.map((c) => <td key={c.id} className={c.align === "r" ? "num" : undefined}>{c.cell(r)}</td>)}
