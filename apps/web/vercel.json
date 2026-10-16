@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/cron/sweep", "schedule": "0,30 * * * *" },
     { "path": "/api/cron/snapshot", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/snapshot?scope=all", "schedule": "5,35 * * * *" },
     { "path": "/api/cron/screen", "schedule": "10,40 * * * *" },
     { "path": "/api/cron/research", "schedule": "20 * * * *" },
     { "path": "/api/cron/paper", "schedule": "*/15 * * * *" },

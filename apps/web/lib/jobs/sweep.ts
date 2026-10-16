@@ -1,11 +1,12 @@
 import { depthWithin, midOf } from "@pm/core";
 import { insertSnapshots, schema as s } from "@pm/db";
 import type { Market as PmMarket } from "@pm/pm";
-import { and, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { watchlistIds } from "./screen";
 
+const MAX_FEE_FETCHES = 200;
 const OPEN = ["active", "disputed", "not_accepting"];
 const ex = (c: { name: string }) => sql.raw(`excluded."${c.name}"`);
 
@@ -18,18 +19,10 @@ export async function sweepUniverse(d: Deps) {
     const byCond = new Map<string, PmMarket>();
     for (const e of events)
       for (const m of e.markets) byCond.set(m.condition_id, e.neg_risk && !m.neg_risk_group ? { ...m, neg_risk_group: e.id } : m);
-    for (const m of list) byCond.set(m.condition_id, m);
+    for (const m of list) byCond.set(m.condition_id, { ...byCond.get(m.condition_id), ...Object.fromEntries(Object.entries(m).filter(([k, v]) => v != null && !(k === "neg_risk" && !v))) } as PmMarket); // list wins per field, but never nulls event-derived eventId/neg_risk_group
     if (!byCond.size) return { markets: 0, newMarkets: 0, feesFetched: 0, closed: 0 };
 
     const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status }).from(s.markets)).map((r) => [r.id, r]));
-    const fees = new Map<string, number>();
-    const need = [...byCond.values()].filter((m) => m.yes_token_id && known.get(m.condition_id)?.fee == null);
-    for (const batch of chunks(need, 20))
-      await Promise.all(batch.map(async (m) => {
-        const bps = await d.pm.feeRateBps(m.yes_token_id!).catch(() => undefined);
-        if (bps !== undefined) fees.set(m.condition_id, bps / 10_000); // unit unverified (see TASKS T4)
-      }));
-
     const rows = [...byCond.values()].map((m): typeof s.markets.$inferInsert => ({
       conditionId: m.condition_id,
       eventId: m.event_id ?? null,
@@ -39,7 +32,7 @@ export async function sweepUniverse(d: Deps) {
       tags: m.tags,
       endDate: m.end_date ? new Date(m.end_date) : null,
       negRiskGroup: m.neg_risk ? (m.neg_risk_group ?? null) : null,
-      feeRate: fees.get(m.condition_id) ?? null,
+      feeRate: null, // filled below; upsert keeps the stored rate
       status: statusOf(m),
       pmId: m.id,
       yesTokenId: m.yes_token_id ?? null,
@@ -58,11 +51,33 @@ export async function sweepUniverse(d: Deps) {
         },
       });
 
+    // fees after the upsert (a first run must not block on thousands of fetches); capped per run, the rest next sweep
+    const need = [...byCond.values()].filter((m) => m.yes_token_id && known.get(m.condition_id)?.fee == null).sort(() => Math.random() - 0.5).slice(0, MAX_FEE_FETCHES); // shuffle: failing markets must not starve the rest
+    let feesFetched = 0;
+    for (const batch of chunks(need, 20))
+      await Promise.all(batch.map(async (m) => {
+        const bps = await d.pm.feeRateBps(m.yes_token_id!).catch(() => undefined);
+        if (bps === undefined) return;
+        feesFetched++; // unit unverified (see TASKS T4)
+        await d.db.update(t).set({ feeRate: bps / 10_000 }).where(eq(t.conditionId, m.condition_id));
+      }));
+
     // open in db but gone from the open universe => closed (calibrateNightly decides if it resolved)
-    const gone = [...known].filter(([id, r]) => OPEN.includes(r.status) && !byCond.has(id)).map(([id]) => id);
+    // a truncated listing would mass-close live markets: skip when far fewer came back than we know are open
+    const knownOpen = [...known].filter(([, r]) => OPEN.includes(r.status));
+    // truncated listing = drops >10% vs the previous sweep's listing (not vs db open count, which a real mass resolution would lock out).
+    // A shrink is honoured (close + new baseline) only after 3 consecutive shrunken sweeps; a normal sweep resets the counter.
+    const prev = await d.kv.get<number>("sweep:listing");
+    const shrunk = prev != null && byCond.size < 0.9 * prev;
+    const streak = shrunk ? ((await d.kv.get<number>("sweep:shrink")) ?? 0) + 1 : 0;
+    const truncated = shrunk && streak < 3;
+    if (truncated) console.warn(`sweep: listing truncated (${byCond.size} vs previous ${prev}, ${streak}/3), skipping close`);
+    await d.kv.set("sweep:shrink", truncated ? streak : 0);
+    if (!truncated) await d.kv.set("sweep:listing", byCond.size);
+    const gone = truncated ? [] : knownOpen.filter(([id]) => !byCond.has(id)).map(([id]) => id);
     for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
 
-    const out = { markets: rows.length, newMarkets: rows.filter((r) => !known.has(r.conditionId)).length, feesFetched: fees.size, closed: gone.length };
+    const out = { markets: rows.length, newMarkets: rows.filter((r) => !known.has(r.conditionId)).length, feesFetched, closed: gone.length };
     publish("sweep.done", out);
     return out;
   });

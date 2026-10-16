@@ -95,6 +95,8 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect(book.summary.open).toBeGreaterThan(0);
     expect(book.fills.length).toBe(book.summary.open);
     expect(book.fills[0]!.modeledK).toBeGreaterThan(0);
+    const f0 = book.fills[0]!;
+    expect(f0.slipC).toBeCloseTo((f0.price + f0.fee / f0.size - f0.modeledK!) * 100, 9); // fee-inclusive fill vs k
     const before = (await d.db.select().from(s.orders)).length;
     const again = await paperBook(d);
     expect(again).toMatchObject({ filled: 0 });
@@ -123,6 +125,17 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const fresh = { ...d, settings: await read.settingsGet(r) };
     expect(await researchMarket(fresh, cid("p2"), "manual")).toEqual({ skipped: true, reason: "MAX_PODS_PER_DAY" });
     await read.settingsPut(r, { budget: { maxPodsPerDay: 40 } });
+  });
+
+  it("stale `running` pods are reaped so they stop counting against the budget", async () => {
+    const old = new Date(d.now() - 3 * 3_600_000);
+    await d.db.insert(s.pods).values({ id: "pod_stale", conditionId: cid("p2"), startedAt: old, status: "running", trigger: "manual" });
+    await d.db.insert(s.pods).values({ id: "pod_live", conditionId: cid("p2"), startedAt: new Date(d.now() - 60_000), status: "running", trigger: "manual" });
+    await researchMarket({ ...d, settings: await read.settingsGet(r) }, cid("p2"), "manual");
+    const st = async (i: string) => (await d.db.select().from(s.pods).where(eq(s.pods.id, i)))[0]!.status;
+    expect(await st("pod_stale")).toBe("failed");
+    expect(await st("pod_live")).toBe("running");
+    await d.db.update(s.pods).set({ status: "failed" }).where(eq(s.pods.id, "pod_live"));
   });
 
   it("anthropic outage mid-pod downgrades L3 -> L2 and fails the pod", async () => {
@@ -157,14 +170,42 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const cal = await read.calibration(r);
     expect(cal.n).toBe(1);
     expect(cal.byCategory[m.category!]!.c).toBe(0.4);
+    expect(Object.values(cal.byRoleMix).reduce((n, a) => n + a.n, 0)).toBe(1);
     const pb = await read.paperBook(r);
     expect(pb.summary.closed).toBe(1);
+    expect(pb.summary.perShare.n).toBe(1);
+    expect(pb.summary.perShare.realized).toBeCloseTo(pos.realizedPnl / pos.size, 9);
     expect(pb.positions.find((x) => x.id === p.id)!.result).toBe(yes ? "YES" : "NO");
   });
 
   it("kill drops to L0 and stops paper fills", async () => {
     expect(await kill(d)).toMatchObject({ mode: "L0", cancelledOrders: 0 });
     expect(await paperBook(d)).toMatchObject({ mode: "L0", filled: 0 });
+  });
+
+  it("truncated listing does not mass-close", async () => {
+    const all = await pm.listMarkets();
+    const half = { ...pm, listMarkets: async () => all.slice(0, Math.floor(all.length / 2)), listEvents: async () => [] } as typeof pm;
+    const d3 = { ...d, pm: half };
+    expect(await sweepUniverse(d3)).toMatchObject({ closed: 0 });
+    expect(await sweepUniverse(d3)).toMatchObject({ closed: 0 });
+    expect((await sweepUniverse(d3) as { closed: number }).closed).toBeGreaterThan(0); // 3rd consecutive: honoured
+  });
+
+  it("no candidates: 10 min old snapshots keep L1, 20 min downgrade", async () => {
+    await setMode(d, "L1", "test");
+    const cats = (await d.db.select({ c: s.markets.category }).from(s.markets)).map((x) => x.c ?? "");
+    const quiet = { ...d, settings: { ...d.settings, overrides: Object.fromEntries([...cats, ""].map((c) => [c, "L0" as const])) } };
+    t += 10 * 60_000;
+    expect(await paperBook(quiet)).toMatchObject({ candidates: 0, mode: "L1" });
+    t += 10 * 60_000;
+    expect(await paperBook(quiet)).toMatchObject({ mode: "L0" });
+  });
+
+  it("dead feed (no snapshot for > 5 min) downgrades L1 -> L0 even with no candidates", async () => {
+    await setMode(d, "L1", "test");
+    t += 10 * 60_000;
+    expect(await paperBook({ ...d, pm: { ...pm, books: async () => [] } as typeof pm })).toMatchObject({ mode: "L0" }); // feed returns no books
   });
 
   it("publishes bus events", () => {

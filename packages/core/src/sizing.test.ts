@@ -73,6 +73,9 @@ describe("sizeTrade NO", () => {
 });
 
 describe("sizeTrade edges", () => {
+  it("dust size (< $1) is zeroed", () => {
+    expect(sizeTrade({ ...base, settings: { ...S, bankroll: 10 } })!.sizeUsd).toBe(0);
+  });
   it("null when d <= 0 or no asks on either side", () => {
     expect(sizeTrade({ ...base, daysLeft: 0 })).toBeNull();
     expect(sizeTrade({ ...base, bids: [], asks: [] })).toBeNull();

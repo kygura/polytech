@@ -49,7 +49,7 @@ export const latestSnaps = async (db: Db, ids?: string[]) =>
 
 /** Neg-risk sums, ladders, mirrors over every open market with a book. First detector to claim a market wins. */
 export function detectStructural(
-  rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], capUsd: number,
+  rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], capUsd: number, groupSize?: Map<string, number>,
 ): Map<string, StructDetail> {
   const out = new Map<string, StructDetail>();
   const by = new Map(rows.map((r) => [r.m.conditionId, r]));
@@ -70,6 +70,7 @@ export function detectStructural(
       Math.max(...legs.map((l) => feeOf(l.m))),
     );
     if (!arb) continue;
+    if (arb.kind === "buy-all" && legs.length !== (groupSize?.get(legs[0]!.m.negRiskGroup!) ?? legs.length)) continue; // buy-all needs every leg: a missing one may be the winner
     const side = arb.kind === "buy-all" ? "asks" : "bids";
     claim(arb.legs, {
       type: "neg-risk-sum", kind: arb.kind, lockedC: arb.edge * 100,
@@ -85,16 +86,20 @@ export function detectStructural(
     const bid = touch(v.earlier, "bids"), ask = touch(v.later, "asks"); // sell the early rung, buy the late one
     if (!bid || !ask) continue;
     const fee = takerFeePerShare(feeOf(by.get(v.earlier)!.m), bid.price) + takerFeePerShare(feeOf(by.get(v.later)!.m), ask.price);
-    claim([v.earlier, v.later], { type: "ladder", lockedC: (bid.price - ask.price - fee) * 100, sum: null, legs: [v.earlier, v.later], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
+    const lockedC = (bid.price - ask.price - fee) * 100;
+    if (lockedC <= 0) continue;
+    claim([v.earlier, v.later], { type: "ladder", lockedC, sum: null, legs: [v.earlier, v.later], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
   }
 
-  const key = (id: string) => mirrorKey(by.get(id)!.m.question);
+  const key = (id: string) => { const m = by.get(id)!.m; return `${mirrorKey(m.question)} ${new Date(m.endDate).toISOString().slice(0, 10)}`; }; // same entity, different question/date is not a mirror
   for (const p of mirrorPairs(rows.filter((r) => r.snap.mid != null).map((r) => ({ conditionId: r.m.conditionId, question: key(r.m.conditionId), p: r.snap.mid! })), 0.03)) {
     const [hi, lo] = mid(p.a) > mid(p.b) ? [p.a, p.b] : [p.b, p.a]; // sell the dear listing, buy the cheap one
     const bid = touch(hi, "bids"), ask = touch(lo, "asks");
     if (!bid || !ask) continue;
     const fee = takerFeePerShare(feeOf(by.get(hi)!.m), bid.price) + takerFeePerShare(feeOf(by.get(lo)!.m), ask.price);
-    claim([hi, lo], { type: "mirror", lockedC: (bid.price - ask.price - fee) * 100, sum: null, legs: [hi, lo], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
+    const lockedC = (bid.price - ask.price - fee) * 100;
+    if (lockedC <= 0) continue;
+    claim([hi, lo], { type: "mirror", lockedC, sum: null, legs: [hi, lo], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
   }
   return out;
 }
@@ -105,7 +110,7 @@ export async function screenAll(d: Deps) {
     const mrows = await d.db.select().from(s.markets).where(inArray(s.markets.status, OPEN));
     const snaps = await latestSnaps(d.db, mrows.map((m) => m.conditionId));
     const rows = mrows.flatMap((r) => { const snap = snaps.get(r.conditionId); return snap?.book ? [{ r, m: toMarket(r), snap }] : []; });
-    const structural = detectStructural(rows, st.capFrac * st.bankroll);
+    const structural = detectStructural(rows, st.capFrac * st.bankroll, new Map([...groupBy(mrows.filter((r) => r.negRiskGroup), (r) => r.negRiskGroup!)].map(([g, v]) => [g, v.length])));
 
     // pass 1 on everything; R (cached by rules hash) only for survivors and structural legs
     const filtered: Partial<Record<Pass1Reason, number>> = {};

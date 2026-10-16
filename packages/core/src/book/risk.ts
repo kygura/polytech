@@ -33,7 +33,7 @@ export interface Violation {
 export function checkOrder(o: Order, x: Exposure, l: Limits): { ok: boolean; violations: Violation[] } {
   const v: Violation[] = [];
   const over = (rule: Violation["rule"], value: number, limit: number) => {
-    if (value > limit + 1e-9) v.push({ rule, limit, value });
+    if (!(value <= limit + 1e-9)) v.push({ rule, limit, value });
   };
   over("PER_TRADE_USD", o.sizeUsd, l.perTradeUsd);
   over("PER_TRADE_PCT", o.sizeUsd, l.perTradePct * x.bankroll);
@@ -42,6 +42,6 @@ export function checkOrder(o: Order, x: Exposure, l: Limits): { ok: boolean; vio
   over("PER_CATEGORY", (x.byCategory[o.category] ?? 0) + o.sizeUsd, l.perCategory);
   over("TOTAL_OPEN", x.totalOpen + o.sizeUsd, l.totalOpen);
   over("DAILY_NOTIONAL", x.dailyNotional + o.sizeUsd, l.dailyNotional);
-  if (x.dailyRealizedLoss >= l.dailyLoss) v.push({ rule: "DAILY_LOSS", limit: l.dailyLoss, value: x.dailyRealizedLoss });
+  if (!(x.dailyRealizedLoss < l.dailyLoss)) v.push({ rule: "DAILY_LOSS", limit: l.dailyLoss, value: x.dailyRealizedLoss });
   return { ok: v.length === 0, violations: v };
 }

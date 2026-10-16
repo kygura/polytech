@@ -1,4 +1,4 @@
-import { autoDowngrade, kill as coreKill, requestModeChange, type Actor, type AutonomyEvent, type Mode } from "@pm/core";
+import { autoDowngrade, kill as coreKill, requestModeChange, type Actor, type AutonomyEvent, type DowngradeSignals, type Mode } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { desc, eq } from "drizzle-orm";
 import type { Deps } from "./deps";
@@ -36,6 +36,17 @@ export async function kill(d: Pick<Deps, "db" | "now">) {
 export async function outageDowngrade(d: Pick<Deps, "db" | "now">) {
   const cur = await currentMode(d.db);
   const dg = autoDowngrade({ dailyLossHit: false, consecutiveOrderErrors: 0, bookStaleMs: 0, balanceMismatch: false, anthropicOutageMidPod: true }, cur);
+  if (!dg) return null;
+  const ch = requestModeChange(cur, dg.mode, "auto-downgrade", dg.reason);
+  await record(d, ch.event);
+  return ch.mode;
+}
+
+/** L1-relevant auto-downgrades (daily loss, stale book). Core targets L2 for BOOK_STALE, which never lowers L1, so at L1 stale goes to L0. */
+export async function downgradeOn(d: Pick<Deps, "db" | "now">, sig: Partial<DowngradeSignals>) {
+  const cur = await currentMode(d.db);
+  const all = { dailyLossHit: false, consecutiveOrderErrors: 0, bookStaleMs: 0, balanceMismatch: false, anthropicOutageMidPod: false, ...sig };
+  const dg = autoDowngrade(all, cur) ?? (all.bookStaleMs > 300_000 && cur === "L1" ? { mode: "L0" as Mode, reason: "BOOK_STALE" } : null);
   if (!dg) return null;
   const ch = requestModeChange(cur, dg.mode, "auto-downgrade", dg.reason);
   await record(d, ch.event);

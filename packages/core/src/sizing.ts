@@ -15,6 +15,8 @@ export type SizeInput = {
   settings: Settings;
 };
 
+const MIN_ORDER_USD = 1; // dust below the exchange minimum is not an order
+
 const inUnit = (name: string, x: number) => {
   if (!(x >= 0 && x <= 1)) throw new RangeError(`${name} must be in [0,1], got ${x}`);
 };
@@ -53,6 +55,8 @@ function evalSide(side: Side, a: SizeInput): WatchCore | null {
       sizeUsd = lo;
     }
   }
+
+  if (sizeUsd < MIN_ORDER_USD) sizeUsd = 0;
 
   const k = kAt(sizeUsd)!;
   const e = pPost - k;

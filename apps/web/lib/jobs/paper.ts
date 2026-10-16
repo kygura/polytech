@@ -1,12 +1,15 @@
 import { applyFill, checkOrder, effectiveMode, feeRateFor, mirror, paperFill, pass1, qualifies, settle, sizeTrade, crowd, type Exposure, type Limits } from "@pm/core";
 import { schema as s } from "@pm/db";
-import { and, desc, eq, gt, gte, isNotNull, isNull } from "drizzle-orm";
-import { currentMode } from "./autonomy";
+import { and, desc, eq, gt, gte, isNotNull, isNull, max } from "drizzle-orm";
+import { currentMode, downgradeOn } from "./autonomy";
 import { DAY, feeOf, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { latestSnaps } from "./screen";
 import { takeSnapshots } from "./sweep";
 
+// No candidates => the only snapshots are the watchlist cron (*/5, may be empty) and scope=all (:05/:35): allow >= 2x that cadence before calling the feed dead.
+const NO_CAND_STALE_MS = 15 * 60_000;
+const TICK = 0.01; // ponytail: default tick; per-market tick size not stored
 const id = (p: string) => `${p}_${crypto.randomUUID().slice(0, 12)}`;
 
 /** Open paper positions with their market (for exposure + settlement). */
@@ -32,7 +35,8 @@ export async function exposureOf(db: Deps["db"], bankroll: number, now: number):
   const dayStart = new Date(`${today(now)}T00:00:00Z`);
   for (const f of await db.select().from(s.fills).where(gte(s.fills.ts, dayStart))) x.dailyNotional += f.price * f.size;
   for (const p of await db.select().from(s.positions).where(and(eq(s.positions.paper, true), isNotNull(s.positions.closedAt), gte(s.positions.closedAt, dayStart))))
-    if (p.realizedPnl < 0) x.dailyRealizedLoss -= p.realizedPnl;
+    x.dailyRealizedLoss -= p.realizedPnl; // net: same-day gains offset losses
+  x.dailyRealizedLoss = Math.max(0, x.dailyRealizedLoss);
   return x;
 }
 
@@ -69,13 +73,18 @@ export async function paperBook(d: Deps) {
       return !!m && m.status === "active" && !held.has(t.conditionId) && effectiveMode(mode, st.overrides[m.category ?? ""]) === "L1";
     }).sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
     res.candidates = cands.length;
-    if (!cands.length) return res;
+    if (cands.length) await takeSnapshots(d, cands.map((t) => t.conditionId)); // "fresh book (< 60 s at order time)"
 
-    await takeSnapshots(d, cands.map((t) => t.conditionId)); // "fresh book (< 60 s at order time)"
-    const snaps = await latestSnaps(db, cands.map((t) => t.conditionId));
-
-    // 3. exposure at cost, updated as we fill
+    // 3. auto-downgrades. Stale = newest snapshot anywhere (feed down), not one candidate; skipped on a DB with no snapshots yet.
     const x = await exposureOf(db, st.bankroll, now);
+    const last = ((await db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)) as [{ ts: Date | null }])[0].ts;
+    const dg = await downgradeOn(d, {
+      dailyLossHit: st.limits.dailyLoss > 0 && !(x.dailyRealizedLoss < st.limits.dailyLoss), // 0 = disabled
+      bookStaleMs: !last ? 0 : cands.length || now - last.getTime() > NO_CAND_STALE_MS ? now - last.getTime() : 0,
+    });
+    if (dg) return { ...res, mode: dg };
+    if (!cands.length) return res;
+    const snaps = await latestSnaps(db, cands.map((t) => t.conditionId));
     const L: Limits = { ...st.limits };
 
     const reject = (r: string) => void (res.rejected[r] = (res.rejected[r] ?? 0) + 1);
@@ -102,15 +111,18 @@ export async function paperBook(d: Deps) {
       if (!tokenId || !f.complete || f.shares <= 0) { reject("THIN_BOOK"); continue; }
 
       const rules = chk.violations.map((v) => v.rule);
+      if ((await currentMode(db)) !== "L1") { reject("MODE_CHANGED"); break; } // killed mid-run
+      const key = `${t.id}:paper`;
+      if ((await db.select({ id: s.orders.id }).from(s.orders).where(eq(s.orders.idempotencyKey, key))).length) { reject("ALREADY_FILLED"); continue; }
+      // Neon HTTP has no tx: position -> fill -> order (idempotency key) last, so a crash never leaves an order without its position
       const orderId = id("ord");
-      const ins = await db.insert(s.orders).values({
-        id: orderId, thesisId: t.id, idempotencyKey: `${t.id}:paper`, conditionId: t.conditionId, tokenId, side: "BUY", limitPrice: f.avgPrice, size: f.shares,
-        modeAtSend: "L1", approval: null, status: rules.length ? `paper_filled!${rules.join(",")}` : "paper_filled", expiresAt: t.expiresAt,
-      }).onConflictDoNothing().returning({ id: s.orders.id });
-      if (!ins.length) { reject("ALREADY_FILLED"); continue; }
-      await db.insert(s.fills).values({ orderId, ts: new Date(now), price: f.avgPrice, size: f.shares, fee: f.fee });
       const pos = applyFill({ shares: 0, avgCost: 0, realizedPnl: 0 }, { side: "buy", shares: f.shares, price: f.avgPrice, fee: f.fee });
       await db.insert(s.positions).values({ conditionId: t.conditionId, tokenId, size: pos.shares, avgCost: pos.avgCost, realizedPnl: 0, openedAt: new Date(now), paper: true });
+      await db.insert(s.fills).values({ orderId, ts: new Date(now), price: f.avgPrice, size: f.shares, fee: f.fee });
+      await db.insert(s.orders).values({
+        id: orderId, thesisId: t.id, idempotencyKey: key, conditionId: t.conditionId, tokenId, side: "BUY", limitPrice: Math.round(Math.ceil(f.avgPrice / TICK - 1e-9) * TICK * 1e6) / 1e6, size: f.shares,
+        modeAtSend: "L1", approval: null, status: rules.length ? `paper_filled!${rules.join(",")}` : "paper_filled", expiresAt: t.expiresAt,
+      });
       addExposure(x, row, f.filled);
       x.dailyNotional += f.filled;
       res.filled++;

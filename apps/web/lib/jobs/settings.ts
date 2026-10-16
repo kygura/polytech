@@ -26,7 +26,7 @@ const AppSettingsSchema = z.strictObject({
   models: z.record(z.string(), z.string()),
   limits: z.strictObject({
     perTradeUsd: nonneg, perTradePct: nonneg, perMarket: nonneg, perEvent: nonneg, perCategory: nonneg,
-    totalOpen: nonneg, dailyNotional: nonneg, dailyLoss: nonneg,
+    totalOpen: nonneg, dailyNotional: nonneg, dailyLoss: nonneg, // dailyLoss 0 = auto-downgrade disabled
     categoryThreshold: num.min(0).max(1), // thesis c must exceed this to qualify
     l3: z.strictObject({ perTradeUsd: nonneg, dailyNotional: nonneg, categoryAllowlist: z.array(z.string()), structuralAuto: z.boolean() }),
   }),

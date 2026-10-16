@@ -10,6 +10,10 @@ const order = { sizeUsd: 40, marketId: "m1", eventId: "e1", category: "c1" };
 const rules = (r: ReturnType<typeof checkOrder>) => r.violations.map((v) => v.rule);
 
 describe("checkOrder", () => {
+  it("NaN fails closed", () => {
+    expect(checkOrder({ ...order, sizeUsd: NaN }, empty, limits).ok).toBe(false);
+    expect(rules(checkOrder(order, { ...empty, dailyRealizedLoss: NaN }, limits))).toEqual(["DAILY_LOSS"]);
+  });
   it("ok on empty book", () => expect(checkOrder(order, empty, limits)).toEqual({ ok: true, violations: [] }));
   it("per trade USD and % of bankroll", () => {
     expect(rules(checkOrder({ ...order, sizeUsd: 60 }, empty, limits))).toEqual(["PER_TRADE_USD", "PER_TRADE_PCT"]);

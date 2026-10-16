@@ -181,6 +181,7 @@ export async function calibration(r: ReadDeps, o: { category?: string; model?: s
     overall: aggregate(rows, () => "all").all ?? null, // { n, brier, logLoss, marketBrier }
     byCategory: Object.fromEntries(await Promise.all(Object.entries(cats).map(async ([k, v]) => [k, { ...v, c: await categoryConfidence(r.db, k), gate: `${v.n}/30` }]))),
     byModel: aggregate(rows, (x) => x.model),
+    byRoleMix: aggregate(rows, (x) => x.roleMix),
     bins: reliabilityBins(rows), // 10 bins { lo, hi, n, meanPredicted, observed }
   };
 }
@@ -190,16 +191,22 @@ export async function paperBook(r: ReadDeps) {
   const { db } = r;
   const pos = await db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId)).where(eq(s.positions.paper, true)).orderBy(desc(s.positions.id));
   const ids = [...new Set(pos.map((x) => x.p.conditionId))];
-  const [snaps, ths, outs, ords] = ids.length
+  const [snaps, outs, ords] = ids.length
     ? await Promise.all([
-        latestSnaps(db, ids), latestTheses(db, ids),
+        latestSnaps(db, ids),
         db.select().from(s.outcomes).where(inArray(s.outcomes.conditionId, ids)),
         db.select().from(s.orders).where(inArray(s.orders.conditionId, ids)),
       ])
-    : [new Map<string, never>(), new Map<string, Th>(), [], []];
+    : [new Map<string, never>(), [], []];
+  const FT = ords.length ? await db.select().from(s.fills).where(inArray(s.fills.orderId, ords.map((o) => o.id))) : [];
+  const fillTs = new Map(FT.map((f) => [f.orderId, f.ts.getTime()]));
+  const resolvedAt = new Map(outs.map((o) => [o.conditionId, o.resolvedAt.getTime()]));
+  const OT = new Map((ords.length ? await db.select().from(s.theses).where(inArray(s.theses.id, [...new Set(ords.map((o) => o.thesisId))])) : []).map((x) => [x.id, x]));
   const O = new Map(outs.map((o) => [o.conditionId, o.result]));
   const positions = pos.map(({ p, m }) => {
-    const t = ths.get(p.conditionId), e = t ? (dt(t).e ?? t.edgeC / 100) : null;
+    const tid = ords.filter((o) => o.conditionId === p.conditionId && o.tokenId === p.tokenId && (fillTs.get(o.id) ?? 0) <= p.openedAt.getTime())
+      .sort((a, b) => (fillTs.get(b.id) ?? 0) - (fillTs.get(a.id) ?? 0))[0]?.thesisId; // latest order filled at or before this position opened // the order's thesis, not the latest
+    const t = tid ? OT.get(tid) : undefined, e = t ? (dt(t).e ?? t.edgeC / 100) : null;
     const yes = snaps.get(p.conditionId)?.mid ?? null;
     const midNow = yes == null ? null : p.tokenId === m.yesTokenId ? yes : 1 - yes;
     const closed = p.closedAt != null;
@@ -208,7 +215,7 @@ export async function paperBook(r: ReadDeps) {
       size: p.size, avgCost: p.avgCost, midNow, unrealizedUsd: closed || midNow == null ? null : p.size * (midNow - p.avgCost),
       modeledEdgeC: e == null ? null : e * 100, realizedEdgeC: closed ? (p.realizedPnl / p.size) * 100 : null,
       openedAt: p.openedAt.getTime(), closedAt: p.closedAt?.getTime() ?? null, result: O.get(p.conditionId) ?? null, realizedPnl: p.realizedPnl,
-      thesisId: ords.find((o) => o.conditionId === p.conditionId && o.tokenId === p.tokenId)?.thesisId ?? null, modeledE: e,
+      thesisId: tid ?? null, modeledE: e, viaOutcome: closed && (resolvedAt.get(p.conditionId) ?? Infinity) <= p.closedAt!.getTime(),
     };
   });
   const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.orders.modeAtSend, "L1")).orderBy(desc(s.fills.id)).limit(200);
@@ -217,11 +224,11 @@ export async function paperBook(r: ReadDeps) {
     const t = T.get(o.thesisId), k = t ? (dt(t).k ?? null) : null;
     return {
       ts: f.ts.getTime(), conditionId: o.conditionId, question: q, side: (t?.side ?? null) as Side | null, price: f.price, size: f.size, fee: f.fee, modeledK: k,
-      slipC: k == null ? null : (f.price - k) * 100, paper: true, violations: o.status.includes("!") ? o.status.split("!")[1]!.split(",") : [],
+      slipC: k == null ? null : (f.price + f.fee / f.size - k) * 100, paper: true, violations: o.status.includes("!") ? o.status.split("!")[1]!.split(",") : [],
     };
   });
   const closed = positions.filter((p) => p.closedAt != null);
-  const edge = realizedEdge(closed.flatMap((p) => (p.modeledE == null ? [] : [{ shares: p.size, avgPrice: p.avgCost, fee: 0, modeledEdge: p.modeledE, outcome: (p.realizedPnl >= 0 ? 1 : 0) as 0 | 1 }])));
+  const edge = realizedEdge(closed.flatMap((p) => (p.modeledE == null ? [] : [{ shares: p.size, avgPrice: p.avgCost, fee: 0, modeledEdge: p.modeledE, outcome: (p.viaOutcome ? (p.result === p.side ? 1 : 0) : p.avgCost + p.realizedPnl / p.size) as 0 | 1 }])));
   const open = positions.filter((p) => p.closedAt == null);
   const modeledUsd = positions.reduce((t, p) => t + p.size * (p.modeledE ?? 0), 0);
   const realizedUsd = closed.reduce((t, p) => t + p.realizedPnl, 0);
@@ -232,7 +239,7 @@ export async function paperBook(r: ReadDeps) {
       capture: closed.length && modeledUsd > 0 ? realizedUsd / closed.reduce((t, p) => t + p.size * (p.modeledE ?? 0), 0) : null,
       perShare: edge, // { n, realized, modeled, gap } over resolved trades
     },
-    positions: positions.map(({ modeledE: _, ...p }) => p),
+    positions: positions.map(({ modeledE: _, viaOutcome: __, ...p }) => p),
     fills,
   };
 }
