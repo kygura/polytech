@@ -165,7 +165,7 @@ function Detail({ id, ctx, back }: { id: string; ctx: Ctx; back: () => void }) {
       </Box>
       <Pane title={`Evidence (${ev.length})`}>
         {ev.slice(start, start + evH).map((e, i) => {
-          const dir = e.direction === "for" || e.direction === "+" ? "+" : e.direction === "against" || e.direction === "-" ? "−" : "·";
+          const dir = e.direction > 0 ? "+" : e.direction < 0 ? "−" : "·";
           return (
             <Text key={e.id} inverse={start + i === scroll} wrap="truncate">
               <Text color={dir === "+" ? "green" : dir === "−" ? "red" : "gray"}>{dir}</Text> {left(e.role, 7)} {left(e.claim, 44)} <Text color="gray">{left(e.quote ? `"${e.quote}"` : "", 30)}</Text> {mmdd(e.publishedAt)} <Text color="gray">{e.url ? new URL(e.url).hostname : ""}</Text>

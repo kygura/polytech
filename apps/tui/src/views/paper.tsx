@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
-import { useFetch } from "../api";
+import { post, useFetch } from "../api";
 import { clamp, hhmm, int, left, mmdd, num, pct, signed, signedInt } from "../fmt";
 import type { PaperBook } from "../types";
 import { type Col, type Ctx, Err, Pane, sideColor, signColor, Table } from "../ui";
@@ -21,14 +21,19 @@ const COLS: Col<Pos>[] = [
 ];
 
 export function Paper({ ctx }: { ctx: Ctx }) {
-  const [sel, setSel] = useState(0), [open, setOpen] = useState(false);
-  const { data, error } = useFetch<PaperBook>("/api/paper", ctx.tick);
+  const [sel, setSel] = useState(0), [open, setOpen] = useState(false), [bump, setBump] = useState(0);
+  const { data, error } = useFetch<PaperBook>("/api/paper", ctx.tick + bump);
   const rows: Pos[] = data ? [...data.positions.filter((p) => p.closedAt == null), { sep: true }, ...data.positions.filter((p) => p.closedAt != null)] : [];
   const cur = rows[clamp(sel, rows.length)];
   useInput(
     (ch, key) => {
       if (open && (key.escape || key.backspace || key.delete)) setOpen(false);
       else if (key.return && cur && !isSep(cur)) setOpen(true);
+      else if (ch === "x" && !open && cur && !isSep(cur) && cur.closedAt == null)
+        post<{ realizedPnl: number }>(`/api/paper/${cur.id}/close`).then(
+          (r) => (ctx.flash(`closed ${left(cur.question, 30).trim()} · realized ${signed(r.realizedPnl, 2)}$`), setBump((b) => b + 1)),
+          (e: Error) => ctx.flash(`close failed: ${e.message}`, "red"),
+        );
       else if (ch === "j" || key.downArrow) setSel((s) => clamp(s + 1, rows.length));
       else if (ch === "k" || key.upArrow) setSel((s) => clamp(s - 1, rows.length));
     },

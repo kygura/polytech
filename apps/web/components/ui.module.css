@@ -16,13 +16,13 @@
 
 .kill {
   background: var(--kill);
-  color: #fff;
+  color: var(--on-kill);
   border-color: var(--kill);
   font-weight: 600;
   white-space: nowrap;
 }
 .kill:hover:not(:disabled) { background: var(--kill); filter: brightness(1.1); }
-.kill:disabled { color: #fff; opacity: 0.8; }
+.kill:disabled { color: var(--on-kill); opacity: 0.8; }
 .killWide { width: 100%; height: 32px; }
 
 .sse { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); white-space: nowrap; }
@@ -74,6 +74,6 @@
   position: fixed; inset: 0 0 0 auto; margin: 0; height: 100vh; max-height: 100vh; width: min(640px, 90vw);
   background: var(--surface); color: var(--text); border: 0; border-left: 1px solid var(--border); padding: 0;
 }
-.drawer::backdrop { background: rgb(0 0 0 / 0.5); }
+.drawer::backdrop { background: var(--backdrop); }
 .drawerHead { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); font-weight: 600; }
 .drawerBody { padding: var(--sp-3); overflow: auto; max-height: calc(100vh - 40px); }

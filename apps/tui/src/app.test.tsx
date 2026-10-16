@@ -3,6 +3,9 @@ import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./app";
 
+// Hermetic: never read the real ~/.config/pm-edge/token; fetch is stubbed per test below.
+vi.mock("./auth", () => ({ authHeaders: async () => ({}) }));
+
 // Tiny Ink test harness (ink-testing-library is untested against Ink 8): debug mode writes every frame raw.
 function mount() {
   const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode() {}, ref() {}, unref() {} });
@@ -10,9 +13,14 @@ function mount() {
   const stdout = Object.assign(new PassThrough(), { isTTY: false, columns: 140, rows: 40 });
   stdout.on("data", (c: Buffer) => (last = c.toString()));
   const app = render(<App />, { stdin: stdin as never, stdout: stdout as never, debug: true, patchConsole: false });
-  return { app, frame: () => last, key: async (s: string) => (stdin.write(s), tick()) };
+  // Poll until the frame contains `want` (fixed sleeps race async fetches under parallel load).
+  const until = async (want: string | RegExp, ms = 3000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await tick(10)) if (typeof want === "string" ? last.includes(want) : want.test(last)) return last;
+    return last;
+  };
+  return { app, frame: () => last, until, key: async (s: string) => (stdin.write(s), tick()) };
 }
-const tick = () => new Promise((r) => setTimeout(r, 60));
+const tick = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
 const watch = [
   { conditionId: "c1", question: "Will the Fed cut in Dec 2026?", category: "politics", pinned: false, muted: false, researching: false, daysLeft: 41, thesisAgeH: 3, capped: false, nextCatalyst: "11-02 FOMC", side: "YES", pMid: 0.412, pHat: 0.58, c: 0.6, pPost: 0.512, edgeC: 10, payoff: 1.2, rAnn: 3.12, sizeUsd: 1250, expectedProfit: 125, rank: 1 },
@@ -36,28 +44,27 @@ afterEach(() => (vi.unstubAllGlobals(), calls.splice(0)));
 
 it("renders watchlist rows with question and signed, right-aligned edge", async () => {
   fakeFetch();
-  const { app, frame, key } = mount();
-  await tick();
-  const f = frame();
+  const { app, frame, key, until } = mount();
+  await until("L1 PAPER");
+  const f = await until("● live");
   expect(f).toContain("Will the Fed cut in Dec 2026?");
   expect(f).toContain("+10.0");
   expect(f).toContain("-2.5");
   expect(f).toContain("● live");
   expect(f).toContain("L1 PAPER");
   await key("j"); // selection moves
-  expect(frame()).toMatch(/▶.*Senate confirms/);
+  expect(await until(/▶.*Senate confirms/)).toMatch(/▶.*Senate confirms/);
   app.unmount();
 });
 
 it("K posts the kill switch from any view and shows KILLED → L0", async () => {
   autonomy.mode = "L1";
   fakeFetch();
-  const { app, frame, key } = mount();
-  await tick();
+  const { app, frame, key, until } = mount();
+  await until("L1 PAPER");
   await key("2"); // fleet view (404 in the fake, irrelevant)
   await key("K");
+  expect(await until("L0 Observe")).toContain("KILLED → L0");
   expect(calls).toContain("POST /api/autonomy/kill");
-  expect(frame()).toContain("KILLED → L0");
-  expect(frame()).toContain("L0 Observe");
   app.unmount();
 });

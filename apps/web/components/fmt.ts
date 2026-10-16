@@ -23,7 +23,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export const hms = (t: number) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 export const hm = (t: number) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 export const mmdd = (t: number) => { const d = new Date(t); return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-export const ymd = (t: number) => new Date(t).toISOString().slice(0, 10);
 export const ago = (ms: number) => (ms < 3_600_000 ? `${Math.max(0, Math.round(ms / 60_000))}m ago` : ms < 86_400_000 ? `${Math.round(ms / 3_600_000)}h ago` : `${Math.round(ms / 86_400_000)}d ago`);
 export const dur = (s: number) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${pad(Math.round(s % 60))}s`);
 export const host = (url: string) => { try { return new URL(url).host; } catch { return url; } };

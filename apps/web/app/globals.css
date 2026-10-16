@@ -16,6 +16,8 @@
   --mode-3: #f58a44;
   --mode-4: #f0616d;
   --kill: #ff3b3b;
+  --on-kill: #fff;
+  --backdrop: rgb(0 0 0 / 0.5);
 
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --font-ui: system-ui, sans-serif;

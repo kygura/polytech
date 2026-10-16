@@ -12,6 +12,6 @@
 .themeBtn { font-size: var(--fs-sm); }
 .main { padding: 52px var(--sp-3) var(--sp-3); }
 .sheet { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-3); min-width: 420px; }
-.sheet::backdrop { background: rgb(0 0 0 / 0.5); }
+.sheet::backdrop { background: var(--backdrop); }
 .sheet h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); }
 .sheet table th { position: static; background: none; text-align: left; }

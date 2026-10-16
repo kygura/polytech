@@ -21,7 +21,7 @@ export type MarketDetail = {
     createdAt: number; expiresAt: N; side: Side; pHat: number; c: number; pPost: number; edgeC: number; sizeUsd: number; rAnn: number;
     catalysts: string[]; killCriteria: string[]; thesis?: string; k?: number; payoff?: number; expectedProfit?: number; model?: string;
   } | null;
-  evidence: { id: number; role: string; claim: string; quote: string | null; url: string | null; direction: string; publishedAt: N }[];
+  evidence: { id: number; role: string; claim: string; quote: string | null; url: string | null; direction: number; publishedAt: N }[];
 };
 
 export type Pod = {

@@ -16,11 +16,13 @@ import { Watchlist } from "./views/watchlist";
 const VIEWS = ["Watchlist", "Fleet", "Calib", "Paper", "Autonomy", "Settings"] as const;
 // Which SSE events make a view refetch.
 const RELEVANT: RegExp[] = [/^(sweep|snapshot|screen|thesis|pod|mode)\./, /^pod\./, /^calibration\./, /^(paper|snapshot|mode)\./, /^mode\./, /^$/];
-const KEYS = "j/k move  Enter open  / filter  s sort  r research  p pin  m mute  K kill  ? help  q quit";
+const KEYS = "j/k move  Enter open  / filter  s/S sort  r research  p pin  m mute  R refresh  K kill  ? help  q quit";
+const KEYS_NARROW = "j/k Enter / s/S r p m R K ? q";
 const HELP = [
   "1-6 Tab/S-Tab  switch view        j/k ↑/↓  move      Enter  open   Esc  back",
   "/  filter (Enter apply, Esc clear) s/S  sort col/dir  h/l ←/→  watchlist tab",
   "r  re-research   p  pin   m  mute   R  refresh        q  quit",
+  "Paper: x  close selected open position at best bid",
   "K  KILL SWITCH → L0 (any view)     Autonomy: 0/1 set L0/L1, 2-4 refused",
   "Calibration: Tab cycles selects, ←/→ change value",
 ];
@@ -93,15 +95,24 @@ export function App() {
 
   return (
     <Box flexDirection="column" width={w} height={rows}>
-      <Text wrap="truncate">
-        <Text bold> PM-EDGE  </Text>
-        {VIEWS.map((v, i) => <Text key={v} color={i === view ? "cyan" : undefined} bold={i === view}>{`[${i + 1}]${v} `}</Text>)}
-        {"     "}
-        {live ? <Text color="green">● live</Text> : <Text color="red">● offline</Text>}
-        {"  "}
-        <Text color={MODE_COLOR[mode]} bold>{mode} {MODE_NAME[mode]}</Text>
-        <Text color="gray">   K=KILL</Text>
-      </Text>
+      {/* Nav truncates first; SSE dot, mode and K=KILL stay visible at any width. */}
+      <Box>
+        <Box flexShrink={1}>
+          <Text wrap="truncate">
+            <Text bold> PM-EDGE  </Text>
+            {VIEWS.map((v, i) => <Text key={v} color={i === view ? "cyan" : undefined} bold={i === view}>{`[${i + 1}]${v} `}</Text>)}
+          </Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>
+            {"     "}
+            {live ? <Text color="green">● live</Text> : <Text color="red">● offline</Text>}
+            {"  "}
+            <Text color={MODE_COLOR[mode]} bold>{mode} {MODE_NAME[mode]}</Text>
+            <Text color="gray">   K=KILL</Text>
+          </Text>
+        </Box>
+      </Box>
       <Text color="gray"> {rule}</Text>
       <Box flexDirection="column" height={h} overflow="hidden">
         {help ? (
@@ -116,7 +127,7 @@ export function App() {
         {" "}
         {flash ? (
           flash.kill ? <Text backgroundColor="red" color="white" bold> {flash.text} </Text> : <Text color={flash.color}>{flash.text}</Text>
-        ) : <Text color="gray">{KEYS}</Text>}
+        ) : <Text color="gray">{w < 100 ? KEYS_NARROW : KEYS}</Text>}
         {"   "}
         {stale ? <Text color="yellow">{stale}</Text> : <Text color="gray">{sweptAt ? `swept ${hhmm(sweptAt)}` : ""}</Text>}
       </Text>
