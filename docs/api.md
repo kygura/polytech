@@ -1,6 +1,6 @@
 # HTTP API contract (build 1)
 
-All routes require the session cookie or `Authorization: Bearer <jwt>` (see `apps/web/proxy.ts`), except `/api/login` and `/api/cron/*` (CRON_SECRET bearer).
+All routes require the session cookie or `Authorization: Bearer <jwt>` (see `apps/web/proxy.ts`), except `/api/login`, `/api/cron/*` (CRON_SECRET bearer, at least 32 bytes) and, only when `VERCEL` is set, `/.well-known/workflow/*` (Vercel verifies queue signatures; self-hosted keeps the session guard).
 Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types exported there), JSON, camelCase.
 
 | Method | Path | Body / query | Returns |

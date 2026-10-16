@@ -12,7 +12,7 @@ export interface Kv {
 export function memoryKv(): Kv {
   const now = () => Date.now();
   const store = new Map<string, { v: unknown; exp: number }>();
-  const hits = new Map<string, number[]>();
+  const hits = new Map<string, { ts: number[]; win: number }>();
   const live = (k: string) => {
     const e = store.get(k);
     if (e && e.exp <= now()) store.delete(k);
@@ -28,10 +28,13 @@ export function memoryKv(): Kv {
     },
     async rateLimit(key, limit, windowMs) {
       const t = now();
-      const w = (hits.get(key) ?? []).filter((x) => x > t - windowMs); // sliding log
+      if (hits.size > 1000) for (const [k, e] of hits) if ((e.ts.at(-1) ?? 0) <= t - e.win) hits.delete(k); // evict expired
+      for (const k of hits.keys()) { if (hits.size <= 10_000) break; hits.delete(k); } // still over cap: drop oldest inserted
+      const w = (hits.get(key)?.ts ?? []).filter((x) => x > t - windowMs); // sliding log
       const ok = w.length < limit;
       if (ok) w.push(t);
-      hits.set(key, w);
+      hits.delete(key); // re-insert so Map order tracks recency
+      hits.set(key, { ts: w, win: windowMs });
       return { ok, remaining: Math.max(0, limit - w.length) };
     },
     async get<T>(key: string) { return (live(key)?.v as T) ?? null; },
@@ -68,5 +71,12 @@ export function upstashKv(redis: Redis): Kv {
 
 let kv: Kv | undefined;
 export function getKv(): Kv {
-  return (kv ??= process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN ? upstashKv(Redis.fromEnv()) : memoryKv());
+  if (kv) return kv;
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) return (kv = upstashKv(Redis.fromEnv()));
+  // Serverless instances don't share memory, so rate limits/locks would be per-instance: refuse.
+  if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
+    throw new Error("UPSTASH_REDIS_REST_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
+  }
+  if (process.env.NODE_ENV === "production") console.warn("kv: Upstash not configured, using in-memory kv (single process only)");
+  return (kv = memoryKv());
 }

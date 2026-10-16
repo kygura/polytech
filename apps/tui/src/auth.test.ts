@@ -13,6 +13,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("login refuses plain http to a remote host", async () => {
+  vi.stubGlobal("fetch", vi.fn());
+  await expect(login("http://example.com", "pw")).rejects.toThrow(/plain http/);
+});
+
+it("authHeaders refuses plain http to a remote base", async () => {
+  vi.stubEnv("PM_API_BASE", "http://example.com");
+  await expect(authHeaders()).rejects.toThrow(/plain http/);
+  vi.stubEnv("PM_API_BASE", "http://[::1]:3000");
+  await expect(authHeaders()).resolves.toEqual({});
+  vi.unstubAllEnvs();
+});
+
 it("login stores token with 0600 file / 0700 dir and builds bearer header", async () => {
   const fetchMock = vi.fn(async (_url: URL, _init?: RequestInit) => Response.json({ ok: true, token: "jwt.abc.def" }));
   vi.stubGlobal("fetch", fetchMock);

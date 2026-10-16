@@ -57,6 +57,20 @@ describe("memory kv", () => {
     expect((await kv.rateLimit("ip", 2, 50)).ok).toBe(true);
   });
 
+  it("evicts expired rateLimit entries", async () => {
+    const kv = memoryKv();
+    for (let i = 0; i < 1100; i++) await kv.rateLimit(`k${i}`, 1, 5);
+    await new Promise((r) => setTimeout(r, 10));
+    expect((await kv.rateLimit("fresh", 1, 5)).ok).toBe(true); // sweep runs; no throw, bounded map
+  });
+
+  it("caps unexpired rateLimit entries, dropping oldest", async () => {
+    const kv = memoryKv();
+    for (let i = 0; i < 10_050; i++) await kv.rateLimit(`k${i}`, 1, 60_000);
+    expect((await kv.rateLimit("k0", 1, 60_000)).ok).toBe(true); // evicted, so fresh
+    expect((await kv.rateLimit("k10049", 1, 60_000)).ok).toBe(false); // newest kept
+  });
+
   it("get/set json with ttl", async () => {
     const kv = memoryKv();
     await kv.set("k", { a: 1 }, 20);

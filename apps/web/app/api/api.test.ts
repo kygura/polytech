@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
-process.env.CRON_SECRET = "cron-secret-for-tests";
+process.env.CRON_SECRET = "cron-secret-for-tests-0123456789abcdef";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
 
 const cid = (k: string) => "0x" + createHash("sha256").update("cond:" + k).digest("hex");
@@ -77,8 +77,8 @@ describe("http api", () => {
   it("cron: bad secret 401, unknown job 404, paper runs", async () => {
     const req = (secret: string) => new Request(`${U}/cron/paper`, { headers: { authorization: `Bearer ${secret}` } });
     expect((await h.cron!.GET(req("wrong"), ctx({ job: "paper" }))).status).toBe(401);
-    expect((await h.cron!.GET(req("cron-secret-for-tests"), ctx({ job: "nope" }))).status).toBe(404);
-    expect((await (await h.cron!.GET(req("cron-secret-for-tests"), ctx({ job: "paper" }))).json()).started).toBe(true);
+    expect((await h.cron!.GET(req("cron-secret-for-tests-0123456789abcdef"), ctx({ job: "nope" }))).status).toBe(404);
+    expect((await (await h.cron!.GET(req("cron-secret-for-tests-0123456789abcdef"), ctx({ job: "paper" }))).json()).started).toBe(true);
   });
 
   it("close unknown position 404", async () => {

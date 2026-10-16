@@ -21,12 +21,22 @@ export async function loadToken(): Promise<string | null> {
   }
 }
 
+/** Credentials never go over plain http except to loopback. */
+function assertSafeBase(apiBase: string) {
+  const u = new URL(apiBase);
+  if (u.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(u.hostname)) {
+    throw new Error(`refusing to send credentials over plain http to ${u.hostname}; use https`);
+  }
+}
+
 export async function authHeaders(): Promise<Record<string, string>> {
+  assertSafeBase(process.env.PM_API_BASE ?? "http://localhost:3000"); // same base api.ts and the SSE stream use
   const t = await loadToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
 export async function login(apiBase: string, password: string): Promise<void> {
+  assertSafeBase(apiBase);
   const res = await fetch(new URL("/api/login", apiBase), {
     method: "POST",
     headers: { "content-type": "application/json", "x-client": "tui" },

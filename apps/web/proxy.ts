@@ -5,8 +5,8 @@ const PUBLIC = new Set(["/login", "/api/login"]);
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  // Workflow runtime routes (queue deliveries, webhooks) authenticate their own callers (@workflow docs).
-  if (PUBLIC.has(pathname) || pathname.startsWith("/.well-known/workflow/")) return NextResponse.next();
+  // Workflow runtime routes: only on Vercel, where queue deliveries are signature-verified. The local world does not verify, so self-hosted keeps the guard.
+  if (PUBLIC.has(pathname) || (process.env.VERCEL && pathname.startsWith("/.well-known/workflow/"))) return NextResponse.next();
 
   const auth = req.headers.get("authorization");
   const isApi = pathname === "/api" || pathname.startsWith("/api/");

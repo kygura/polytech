@@ -6,9 +6,11 @@ import { proxy } from "../proxy";
 import { checkCron, clientIp, loginRateLimit, safeNext, signSession, verifySession } from "./auth";
 
 const SECRET = "x".repeat(32);
+const CRON = "c".repeat(32);
 beforeEach(() => {
   process.env.JWT_SECRET = SECRET;
-  process.env.CRON_SECRET = "cron-secret";
+  process.env.CRON_SECRET = CRON;
+  delete process.env.VERCEL;
 });
 const key = (s = SECRET) => new TextEncoder().encode(s);
 
@@ -68,15 +70,28 @@ describe("login rate limit", () => {
     expect((await loginRateLimit(kv, "1.2.3.4")).ok).toBe(false);
     expect((await loginRateLimit(kv, "5.6.7.8")).ok).toBe(true);
   });
-  it("uses first x-forwarded-for hop, then x-real-ip", () => {
-    expect(clientIp(new Headers({ "x-forwarded-for": "1.1.1.1, 2.2.2.2", "x-real-ip": "3.3.3.3" }))).toBe("1.1.1.1");
+  it("self-hosted: x-real-ip, else rightmost xff hop", () => {
+    expect(clientIp(new Headers({ "x-forwarded-for": "1.1.1.1, 2.2.2.2", "x-real-ip": "3.3.3.3" }))).toBe("2.2.2.2"); // spoofed x-real-ip ignored
     expect(clientIp(new Headers({ "x-real-ip": "3.3.3.3" }))).toBe("3.3.3.3");
+    expect(clientIp(new Headers())).toBe("unknown");
+  });
+  it("vercel: first xff hop", () => {
+    process.env.VERCEL = "1";
+    expect(clientIp(new Headers({ "x-forwarded-for": "1.1.1.1, 2.2.2.2", "x-real-ip": "3.3.3.3" }))).toBe("1.1.1.1");
+  });
+  it("unknown ip gets a high shared limit, not 5", async () => {
+    const kv = memoryKv();
+    for (let i = 0; i < 50; i++) expect((await loginRateLimit(kv, "unknown")).ok).toBe(true);
+    expect((await loginRateLimit(kv, "unknown")).ok).toBe(false);
   });
 });
 
 describe("cron bearer", () => {
+  it("rejects a secret shorter than 32 bytes", () => {
+    expect(checkCron("Bearer short", "short")).toBe(false);
+  });
   it("checks constant-time and fails closed", () => {
-    expect(checkCron("Bearer cron-secret")).toBe(true);
+    expect(checkCron(`Bearer ${CRON}`)).toBe(true);
     expect(checkCron("Bearer wrong")).toBe(false);
     expect(checkCron(null)).toBe(false);
     expect(checkCron("Bearer ", "")).toBe(false);
@@ -91,7 +106,11 @@ describe("proxy", () => {
   it("allows public paths", async () => {
     for (const p of ["/login", "/api/login"]) expect((await proxy(req(p))).headers.get("x-middleware-next")).toBe("1");
   });
-  it("lets workflow runtime routes through, nothing else under .well-known", async () => {
+  it("self-hosted: workflow routes stay guarded", async () => {
+    expect((await proxy(req("/.well-known/workflow/v1/flow"))).status).toBe(307);
+  });
+  it("vercel: lets workflow runtime routes through, nothing else under .well-known", async () => {
+    process.env.VERCEL = "1";
     for (const p of ["/.well-known/workflow/v1/flow", "/.well-known/workflow/v1/step", "/.well-known/workflow/v1/webhook/t"]) {
       expect((await proxy(req(p))).headers.get("x-middleware-next")).toBe("1");
     }
@@ -114,7 +133,7 @@ describe("proxy", () => {
   it("cron needs CRON_SECRET, not a session", async () => {
     const t = await signSession();
     expect((await proxy(req("/api/cron/sweep", { authorization: `Bearer ${t}` }))).status).toBe(401);
-    expect((await proxy(req("/api/cron/sweep", { authorization: "Bearer cron-secret" }))).headers.get("x-middleware-next")).toBe("1");
+    expect((await proxy(req("/api/cron/sweep", { authorization: `Bearer ${CRON}` }))).headers.get("x-middleware-next")).toBe("1");
     delete process.env.CRON_SECRET;
     expect((await proxy(req("/api/cron/sweep", { authorization: "Bearer undefined" }))).status).toBe(401);
   });
