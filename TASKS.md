@@ -104,15 +104,22 @@ SPEC phase 6: real CLOB orders behind per-order approval (web, TUI, ntfy push), 
 |---|---|---|---|---|
 | R3 | Execution stack research → `docs/research/execution.md` | L0 research haiku@high | — | done |
 | B1 | pnpm → bun (`1882378`) | L1 grunt haiku@max | — | done |
-| P1 | db migration 0002 + core pure logic (proposal expiry, limit-price policy, reconcile diff, paper/live exposure split) | L2 worker sonnet@medium | — | todo |
-| P2 | `packages/pm` Exchange seam: `clobExchange` (@polymarket/client) + `fakeExchange` + `clob-smoke` script | L3 heavy opus@medium (trigger: key handling / signing) | R3 | todo |
-| D2 | DESIGN.md addendum: approvals pane (web + TUI), live order/position states, kill confirm | L2 designer fable@medium | — | todo |
-| P3 | `apps/web/lib/jobs/live.ts`: propose / approve / reject / send (idempotent) / expire + approval routes + ntfy | L3 heavy opus@medium (trigger: money path, idempotency, unauth token route) | P1, P2 | todo |
-| P4 | fill sync + reconciliation cron + kill cancels live + autonomy unlock L2 + crons | L2 worker sonnet@medium | P3 | todo |
-| U3 | Web approvals pane + live states per D2 | L2 ui-impl fable@medium | D2, P3 | todo |
-| U4 | TUI approvals view per D2 | L2 ui-impl fable@medium | D2, P3 | todo |
+| P1 | db migration 0002 + core pure logic (proposal expiry, limit-price policy, reconcile diff, paper/live exposure split) | L2 worker sonnet@medium | — | done |
+| P2 | `packages/pm` Exchange seam: `clobExchange` (@polymarket/client) + `fakeExchange` + `clob-smoke` script | L3 heavy opus@medium (trigger: key handling / signing) | R3 | done |
+| D2 | DESIGN.md addendum: approvals pane (web + TUI), live order/position states, kill confirm | L2 designer fable@medium | — | done |
+| P3 | `apps/web/lib/jobs/live.ts`: propose / approve / reject / send (idempotent) / expire + approval routes + ntfy | L3 heavy opus@medium (trigger: money path, idempotency, unauth token route) | P1, P2 | done |
+| P4 | fill sync + reconciliation cron + kill cancels live + autonomy unlock L2 + crons | L2 worker sonnet@medium | P3 | done |
+| U3 | Web approvals pane + live states per D2 | L2 ui-impl fable@medium | D2, P3 | done |
+| U4 | TUI approvals view per D2 | L2 ui-impl fable@medium | D2, P3 | done |
 | V2 | Verification gate | reviewers | all | todo |
 
 ## Decisions so far (build 2)
 
 - 2026-10-17: B1 bun 1.4.3, 228 tests green. R3: unified `@polymarket/client` has trading (placeLimitOrder, cancel*, listOpenOrders, listAccountTrades, fetchBalanceAllowance); no fetch injection → tests use fakeExchange, real path via smoke script.
+- 2026-10-17: P1 done. Migration 0002_married_vargas; proposals partial-unique pending per thesis; core book/live (proposalExpiry, livelimitPrice, gtdExpiry, reconcile), fail-closed on NaN. core 135, db 6.
+- 2026-10-17: D2 done (DESIGN.md §8, 349–466). ApprovalsPane on /autonomy, Book nav w/ Live/Paper tabs, 2-step kill when live orders open, TUI a→y approve / x reject. SSE: proposal.created, proposal.updated, order.updated, order.filled, recon.done. UI state 'sending' = db status 'approved'.
+- 2026-10-17: P2 done. Exchange seam (ExchangeTrade name, clobExchange adds wallet()). Unverified until smoke: fee formula, trades 'after' unit, 6-dec collateral, deposit mode may deploy wallet on first use, issue #65. Rejected place → status 'rejected', never throws key.
+- 2026-10-17: P3 done. CAS pending→approved, order row 'sending' before place, throw → 'unknown' never resent. Push token in POST body (not query). Expiry reason stored in proposals.error. Tick fixed 0.01 (snapshots lack tick_size). Exposure split paper/live (fixed paper daily notional bug). web 73 tests.
+- 2026-10-17: U4 done. Footer confirm prompt swallows view keys; recent shows createdAt (no decidedAt); live summary without USDC/slippage (not in /api/book/live). tui 12 tests.
+- 2026-10-17: P4 done. Recon ledger = baseline usdc at first run + live fill cash flows; deposits/withdrawals/payouts trip mismatch (no re-baseline action yet). Kill cancels only 'live'; sending/unknown/matched left to sync. 3 failures since last mode change → L0. Crons propose 1-59/5, expire *, sync */2, reconcile 3-59/5. web 89 tests.
+- 2026-10-17: U3 done. Shell refetches /api/autonomy on events (not per page). Market link /markets/[id]. Halted approve → text 'orders halted'. Known pre-existing: disabled mode buttons look enabled (inline color overrides :disabled). Gate V2 dispatched.
