@@ -7,11 +7,15 @@ export type Side = "BUY" | "SELL";
 export type LimitOrder = { tokenId: string; side: Side; price: number; shares: number; expiresAt: Date };
 export type Placed = { orderId: string; status: "live" | "matched" | "rejected"; error?: string };
 export type OpenOrder = { orderId: string; tokenId: string; side: Side; price: number; shares: number; filled: number };
+/** Marketable order. FOK = all-or-nothing, FAK = take what is there, kill the rest. capPrice = worst acceptable price (BUY max / SELL min). */
+export type ImmediateOrder = { tokenId: string; side: Side; shares: number; capPrice: number; type: "FOK" | "FAK" };
+export type ImmediateResult = { status: "filled" | "partial" | "killed" | "rejected"; clobOrderId?: string; filledShares: number; avgPrice: number; error?: string };
 /** Named ExchangeTrade (not Trade) because schemas.ts already exports the Data API `Trade`. */
 export type ExchangeTrade = { tradeId: string; orderId: string; tokenId: string; side: Side; price: number; shares: number; fee: number; at: Date };
 export interface Exchange {
   address(): string;
   place(o: LimitOrder): Promise<Placed>; // GTD limit only, never market
+  placeImmediate(o: ImmediateOrder): Promise<ImmediateResult>; // throws on unknown outcome: caller must treat as unknown, never resend
   cancel(orderIds: string[]): Promise<void>;
   cancelAll(): Promise<void>;
   openOrders(): Promise<OpenOrder[]>;
@@ -29,6 +33,14 @@ export function validateOrder(o: LimitOrder, now = Date.now()): void {
   if (!(o.price > 0 && o.price < 1)) throw new Error(`order: price ${o.price} outside (0,1)`);
   if (!(o.shares > 0) || !Number.isFinite(o.shares)) throw new Error(`order: shares ${o.shares} must be > 0`);
   if (!(o.expiresAt instanceof Date) || !(o.expiresAt.getTime() >= now + MIN_EXPIRY_MS)) throw new Error("order: expiresAt must be >= now + 3 min");
+}
+
+export function validateImmediate(o: ImmediateOrder): void {
+  if (!o.tokenId) throw new Error("immediate: tokenId required");
+  if (o.side !== "BUY" && o.side !== "SELL") throw new Error(`immediate: bad side ${o.side}`);
+  if (o.type !== "FOK" && o.type !== "FAK") throw new Error(`immediate: bad type ${o.type}`);
+  if (!(o.capPrice > 0 && o.capPrice < 1)) throw new Error(`immediate: capPrice ${o.capPrice} outside (0,1)`);
+  if (!(o.shares > 0) || !Number.isFinite(o.shares)) throw new Error(`immediate: shares ${o.shares} must be > 0`);
 }
 
 const HEX64 = /(0x)?[0-9a-fA-F]{64}/g;
@@ -112,6 +124,27 @@ export function clobExchange(env: Record<string, string | undefined> = process.e
       if (!r.ok) return { orderId: "", status: "rejected", error: scrub(`${r.code}: ${r.message}`, secrets) };
       return { orderId: r.orderId, status: r.status === "matched" ? "matched" : "live" }; // "delayed" (queued by venue) -> live
     },
+    async placeImmediate(o) {
+      validateImmediate(o);
+      const { OrderSide, OrderType } = await import("@polymarket/client");
+      const type = o.type === "FOK" ? OrderType.FOK : OrderType.FAK;
+      // BUY is sized in USD: amount = shares*cap is the max spend, so a BUY may return more shares than asked if it fills below cap.
+      const r = await call((cl) =>
+        cl.placeMarketOrder(
+          o.side === "BUY"
+            ? { assetId: o.tokenId, side: OrderSide.BUY, amount: o.shares * o.capPrice, maxPrice: o.capPrice, orderType: type }
+            : { assetId: o.tokenId, side: OrderSide.SELL, shares: o.shares, minPrice: o.capPrice, orderType: type },
+        ),
+      );
+      if (!r.ok) {
+        const msg = scrub(`${r.code}: ${r.message}`, secrets);
+        return /^(unmatched|fok_not_filled|fak_not_filled)$/.test(r.code) ? { status: "killed", filledShares: 0, avgPrice: 0, error: msg } : { status: "rejected", filledShares: 0, avgPrice: 0, error: msg };
+      }
+      if (typeof r !== "object" || r.status !== "matched" || !r.orderId) throw new Error(`placeImmediate: unexpected response status ${String(r.status)}`);
+      const usd = num(o.side === "BUY" ? r.makingAmount : r.takingAmount), n = num(o.side === "BUY" ? r.takingAmount : r.makingAmount);
+      if (!(n > 0) || !(usd > 0)) throw new Error("placeImmediate: matched with no amounts");
+      return { status: n >= o.shares * (1 - 1e-6) ? "filled" : "partial", clobOrderId: r.orderId, filledShares: n, avgPrice: usd / n };
+    },
     async cancel(orderIds) {
       if (orderIds.length) await call((cl) => cl.cancelOrders({ orderIds }));
     },
@@ -171,6 +204,8 @@ export type FakeExchange = Exchange & {
   setBalance(usdc: number): void;
   /** Next call to place/cancel/cancelAll fails: a string makes place() return `rejected`, an Error is thrown by whichever runs. */
   failNext(error: string | Error): void;
+  /** Next placeImmediate on tokenId fills `filled` shares at capPrice (0 = killed). FOK with filled < shares is killed. Unscripted: fills fully. */
+  scriptImmediate(tokenId: string, filled: number): void;
 };
 
 /** In-memory deterministic exchange for tests and local demo. */
@@ -179,6 +214,7 @@ export function fakeExchange(opts: { usdc?: number; now?: () => Date; address?: 
   let usdc = opts.usdc ?? 1000;
   let seq = 0;
   let pending: string | Error | undefined;
+  const scripts = new Map<string, number>();
   const open = new Map<string, OpenOrder>();
   const done: ExchangeTrade[] = [];
   const pos: Record<string, number> = {};
@@ -198,6 +234,21 @@ export function fakeExchange(opts: { usdc?: number; now?: () => Date; address?: 
       const orderId = `fake-${++seq}`;
       open.set(orderId, { orderId, tokenId: o.tokenId, side: o.side, price: o.price, shares: o.shares, filled: 0 });
       return { orderId, status: "live" };
+    },
+    async placeImmediate(o) {
+      validateImmediate(o);
+      const f = failure();
+      if (f !== undefined) return { status: "rejected", filledShares: 0, avgPrice: 0, error: f };
+      const want = scripts.get(o.tokenId) ?? o.shares;
+      scripts.delete(o.tokenId);
+      const n = Math.min(want, o.shares);
+      if (!(n > 0) || (o.type === "FOK" && n < o.shares - 1e-9)) return { status: "killed", filledShares: 0, avgPrice: 0 };
+      const orderId = `fake-${++seq}`;
+      const sign = o.side === "BUY" ? 1 : -1;
+      pos[o.tokenId] = (pos[o.tokenId] ?? 0) + sign * n;
+      usdc -= sign * o.capPrice * n;
+      done.push({ tradeId: `fake-t-${++seq}`, orderId, tokenId: o.tokenId, side: o.side, price: o.capPrice, shares: n, fee: 0, at: now() });
+      return { status: n >= o.shares - 1e-9 ? "filled" : "partial", clobOrderId: orderId, filledShares: n, avgPrice: o.capPrice };
     },
     async cancel(ids) {
       failure();
@@ -228,5 +279,6 @@ export function fakeExchange(opts: { usdc?: number; now?: () => Date; address?: 
     },
     setBalance: (v) => void (usdc = v),
     failNext: (e) => void (pending = e),
+    scriptImmediate: (t, n) => void scripts.set(t, n),
   };
 }

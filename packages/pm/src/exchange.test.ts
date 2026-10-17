@@ -7,6 +7,37 @@ const order = (o: Partial<LimitOrder> = {}): LimitOrder => ({
   tokenId: "t1", side: "BUY", price: 0.4, shares: 10, expiresAt: new Date(NOW.getTime() + 15 * 60_000), ...o,
 });
 
+describe("placeImmediate (fake)", () => {
+  const imm = (o = {}) => ({ tokenId: "t1", side: "BUY" as const, shares: 10, capPrice: 0.5, type: "FOK" as const, ...o });
+  it("fills fully by default, moves position/usdc, records trade", async () => {
+    const ex = fakeExchange({ usdc: 100, now: () => NOW });
+    const r = await ex.placeImmediate(imm());
+    expect(r).toMatchObject({ status: "filled", filledShares: 10, avgPrice: 0.5, clobOrderId: "fake-1" });
+    expect(await ex.positions()).toEqual({ t1: 10 });
+    expect((await ex.balance()).usdc).toBeCloseTo(95);
+    expect((await ex.trades(NOW)).length).toBe(1);
+  });
+  it("scripted: kill, FAK partial, FOK partial = killed, one-shot per token", async () => {
+    const ex = fakeExchange({ now: () => NOW });
+    ex.scriptImmediate("t1", 0);
+    expect(await ex.placeImmediate(imm())).toEqual({ status: "killed", filledShares: 0, avgPrice: 0 });
+    ex.scriptImmediate("t1", 4);
+    expect(await ex.placeImmediate(imm({ type: "FAK" }))).toMatchObject({ status: "partial", filledShares: 4 });
+    ex.scriptImmediate("t1", 4);
+    expect((await ex.placeImmediate(imm())).status).toBe("killed");
+    expect(await ex.positions()).toEqual({ t1: 4 });
+    expect((await ex.placeImmediate(imm())).status).toBe("filled");
+  });
+  it("failNext rejects (string) or throws (Error); validates cap", async () => {
+    const ex = fakeExchange({ now: () => NOW });
+    ex.failNext("nope");
+    expect(await ex.placeImmediate(imm())).toMatchObject({ status: "rejected", error: "nope" });
+    ex.failNext(new Error("boom"));
+    await expect(ex.placeImmediate(imm())).rejects.toThrow("boom");
+    for (const bad of [{ capPrice: 0 }, { capPrice: 1 }, { shares: 0 }, { type: "GTC" }]) await expect(ex.placeImmediate(imm(bad))).rejects.toThrow(/immediate:/);
+  });
+});
+
 describe("fakeExchange", () => {
   it("place -> live, fill -> trade + position + usdc, order leaves book when fully filled", async () => {
     const ex = fakeExchange({ usdc: 100, now: () => NOW });
