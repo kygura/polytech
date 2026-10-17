@@ -10,9 +10,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "fixtures:gen": "tsx scripts/gen-fixtures.ts",
-    "fixtures:record": "tsx scripts/record-fixtures.ts"
+    "fixtures:record": "tsx scripts/record-fixtures.ts",
+    "clob-smoke": "tsx scripts/clob-smoke.ts"
   },
   "dependencies": {
+    "@polymarket/client": "0.13.0",
+    "viem": "2.57.3",
     "zod": "^4.6.7"
   },
   "devDependencies": {

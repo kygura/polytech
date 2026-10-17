@@ -7,6 +7,7 @@ import {
 
 export * from "./schemas";
 export { bucket } from "./bucket";
+export * from "./exchange";
 
 const BASE: Record<Host, string> = {
   gamma: "https://gamma-api.polymarket.com",
