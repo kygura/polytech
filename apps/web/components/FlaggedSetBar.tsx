@@ -28,8 +28,8 @@ export function FlaggedSetBar({ set: s, onAck }: { set: SetView; onAck: (id: str
           </tbody>
         </table>
       )}
-      {s.suggestedAction && <span className="ui">Suggested action: {s.suggestedAction}</span>}
-      <span className="ui muted">The engine will not retry. Positions stay in Book › Live until closed.{s.error ? ` Error: ${s.error}` : ""}</span>
+      {s.suggestedAction && <span className="ui">{s.suggestedAction}</span>}
+      <span className="ui muted">The engine will not retry. Positions stay in Book › Live until closed.</span>
       <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center" }}>
         <button type="button" disabled={busy} onClick={() => void ack()} aria-label={`Acknowledge flagged set ${s.setKind}, ${s.legs.length} legs, cost ${usd2(s.costUsd)}`}>Acknowledge</button>
         {err && <span className="neg ui">{err}</span>}

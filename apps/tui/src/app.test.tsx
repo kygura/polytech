@@ -57,6 +57,7 @@ function fakeFetch() {
     if (p === "/api/autonomy/kill") return (autonomy.mode = "L0"), Response.json(autonomy.liveOpenOrders ? { cancelled: 2, failed: [] } : { mode: "L0", cancelled: 0, failed: [] });
     if (p === "/api/proposals") return Response.json({ pending: [prop], recent: [{ ...prop, id: "p0", state: "expired", reason: "PRICE_MOVED" }], sets });
     if (p === "/api/sets/s1") return Response.json({ ok: true, state: "filled" });
+    if (p === "/api/sets/s8/ack") return Response.json({ ok: true, state: "acknowledged" });
     if (p === "/api/sets/s9/ack") return (sets = { pending: sets!.pending, recent: [] }, Object.assign(autonomy, { flaggedSets: 0 })), Response.json({ ok: true, state: "acknowledged" });
     if (p === "/api/proposals/p1") return Response.json(JSON.parse(String(init?.body)).action === "approve" ? { ok: true, state: "sent", orderId: "0x3fa1abcdef" } : { ok: true, state: "rejected" });
     if (p === "/api/book/live") return Response.json(book);
@@ -176,6 +177,7 @@ it("set row shows legs when selected and a then y sends the whole set", async ()
   expect(f).toMatch(/▶.*▾ SET sell-all 2 legs Fed decision/);
   expect(f).toContain("1/2 NO");
   expect(f).toContain("cap 0.312");
+  expect(f).toMatch(/lock 2.1¢ +\+\$8.40/); // E[P]$ column
   expect(f).toContain("L3 fallback: sets need structural auto (Settings)");
   await key("j"); // leg rows are skipped: next selectable row is the single proposal
   expect(await until(/▶.*Will the Fed cut/)).not.toContain("1/2 NO");
@@ -190,16 +192,20 @@ it("set row shows legs when selected and a then y sends the whole set", async ()
   app.unmount();
 });
 
-it("flagged set shows header chip and red block until A acknowledges it", async () => {
-  sets = { pending: [], recent: [flaggedSet] };
-  autonomy.flaggedSets = 1;
+it("flagged sets show header chip and red blocks; A acknowledges the selected one", async () => {
+  sets = { pending: [], recent: [{ ...flaggedSet, id: "s8", eventTitle: "Other event" }, flaggedSet] };
+  autonomy.flaggedSets = 2;
   const { app, key, until } = await onAutonomy();
   const f = await until("FLAGGED set");
-  expect(f).toContain("SET ✗ 1");
+  expect(f).toContain("SET ✗ 2");
   expect(f).toContain('FLAGGED set · buy-all · Election winner · holds YES 820 "Candidate A" avg 0.212 bid 0.190 · suggested: SELL 820 YES');
+  expect(f).toMatch(/▶FLAGGED set · buy-all · Other event/);
+  await key("j");
+  await until(/▶FLAGGED set · buy-all · Election winner/);
   await key("A");
   expect(await until("acknowledged")).toContain("acknowledged");
   expect(calls).toContain("POST /api/sets/s9/ack");
+  expect(calls).not.toContain("POST /api/sets/s8/ack");
   const g = await until(/^(?![\s\S]*FLAGGED set)/); // refetch after ack drops the block
   expect(g).not.toContain("FLAGGED set");
   app.unmount();

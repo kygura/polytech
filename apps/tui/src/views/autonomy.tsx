@@ -28,6 +28,7 @@ export function setState(s: SetView): [string, string] {
     case "filled": return [`filled ${n}/${n}`, "green"];
     case "unwinding": case "unwound": return [s.state, "yellow"];
     case "failed": case "flagged": return [s.state, "red"];
+    case "acknowledged": return ["flagged · acknowledged", "gray"];
     default: return [s.state, "gray"];
   }
 }
@@ -58,6 +59,7 @@ const cols = (now: number, sending: string | null, open: string | null): Col<Row
   { h: "Limit", w: 6, r: true, cell: (r) => r.k === "s" ? `Σ${num(r.s.legs.reduce((t, l) => t + l.capPrice, 0))}` : r.k === "p" ? (r.p.kind === "exit" ? `≥${num(r.p.limitPrice)}` : num(r.p.limitPrice)) : "" },
   { h: "Cost$", w: 9, r: true, cell: (r) => (r.k === "s" ? `Σ${money(r.s.costUsd)}` : r.k === "p" ? (r.p.kind === "exit" ? `+${money(r.p.costUsd)}` : money(r.p.costUsd)) : "") },
   { h: "Edge¢", w: 9, r: true, cell: (r) => r.k === "s" ? [`lock ${num(r.s.lockedC, 1)}¢`, "green"] : r.k === "p" ? (r.p.kind === "exit" ? "—" : [signed(r.p.edgeC, 1), signColor(r.p.edgeC)]) : "" },
+  { h: "E[P]$", w: 9, r: true, cell: (r) => { if (r.k !== "s" && r.k !== "p") return ""; const v = r.k === "s" ? r.s.expectedProfitUsd : r.p.expectedProfitUsd; return [(v < 0 ? "-" : "+") + money(Math.abs(v)), signColor(v)]; } },
   {
     h: "Drift¢", w: 7, r: true, cell: (r): Cell => {
       if (r.k !== "p") return r.k === "s" ? "—" : "";
@@ -86,7 +88,7 @@ const RECENT_COLOR: Record<string, string> = { sent: "green", rejected: "gray", 
 const recentText = (p: Proposal): [string, string] =>
   p.state === "expired" ? [`${hhmm(p.createdAt)} expired ${p.reason ?? ""}`.trim(), p.reason === "PRICE_MOVED" ? "yellow" : "gray"]
   : [`${hhmm(p.createdAt)} ${p.kind === "exit" ? "EXIT " : ""}${p.state}${p.state === "sent" && p.orderId ? ` ord ${p.orderId.slice(0, 6)}` : p.state === "failed" ? ` ${left(p.error, 40).trim()}` : ""}`, RECENT_COLOR[p.state] ?? "gray"];
-const recentSet = (s: SetView): [string, string] => { const [t, c] = setState(s); return [`${hhmm(s.createdAt)} SET ${t}`, c]; };
+const recentSet = (s: SetView): [string, string] => { const [t, c] = setState(s); return [`${hhmm(s.createdAt)} ${t}`, c]; };
 
 export function Autonomy({ ctx, onMode }: { ctx: Ctx; onMode: (m: Mode) => void }) {
   const [local, setLocal] = useState(0);
@@ -99,8 +101,10 @@ export function Autonomy({ ctx, onMode }: { ctx: Ctx; onMode: (m: Mode) => void 
   }, []);
   const atL2 = ctx.mode >= "L2";
   const items: Item[] = atL2 ? [...(props?.sets?.pending ?? []).map((s): Item => ({ k: "s", s })), ...(props?.pending ?? []).map((p): Item => ({ k: "p", p }))] : [];
-  const cur = items[clamp(sel, items.length)];
+  // j/k walk the flagged sets first (A acks the selected one), then the proposal rows.
   const flagged = (props?.sets?.recent ?? []).filter((s) => s.state === "flagged");
+  const nSel = flagged.length + items.length, at = clamp(sel, nSel);
+  const fcur = at < flagged.length ? flagged[at] : undefined, cur = fcur ? undefined : items[at - flagged.length];
   const decideSet = async (s: SetView, action: "approve" | "reject") => {
     if (action === "approve") setSending(s.id);
     try {
@@ -129,12 +133,11 @@ export function Autonomy({ ctx, onMode }: { ctx: Ctx; onMode: (m: Mode) => void 
   };
   useInput(
     async (ch, key) => {
-      if (ch === "j" || key.downArrow) return setSel((s) => clamp(s + 1, items.length));
-      if (ch === "k" || key.upArrow) return setSel((s) => clamp(s - 1, items.length));
-      if (ch === "A" && flagged[0]) {
-        // ponytail: acks the top flagged block; per-set selection if several sets get flagged at once.
+      if (ch === "j" || key.downArrow) return setSel((s) => clamp(s + 1, nSel));
+      if (ch === "k" || key.upArrow) return setSel((s) => clamp(s - 1, nSel));
+      if (ch === "A" && fcur) {
         try {
-          await post(`/api/sets/${flagged[0].id}/ack`);
+          await post(`/api/sets/${fcur.id}/ack`);
           ctx.flash("acknowledged", "green");
         } catch (e) {
           ctx.flash(`ack failed: ${(e as Error).message}`, "red");
@@ -169,9 +172,9 @@ export function Autonomy({ ctx, onMode }: { ctx: Ctx; onMode: (m: Mode) => void 
   const bar = (used: number, max: number) => "▏".padEnd(Math.round(Math.min(1, max ? used / max : 0) * 10) + 1, "█");
   const exch = data.exchangeConfigured ?? data.executionEnabled, off = (m: Mode) => m >= "L2" && !exch;
   const [rText, rColor] = reconLine(data.recon, now);
-  const selIdx = clamp(sel, items.length), open = cur?.k === "s" ? cur.s.id : null;
+  const selIdx = at - flagged.length, open = cur?.k === "s" ? cur.s.id : null;
   const rows: Row[] = [];
-  let selRow = 0;
+  let selRow = -1; // -1: selection is on a flagged block line
   items.forEach((it, i) => {
     if (i === selIdx) selRow = rows.length;
     rows.push(it);
@@ -195,16 +198,16 @@ export function Autonomy({ ctx, onMode }: { ctx: Ctx; onMode: (m: Mode) => void 
       {flagged.flatMap((s) => {
         const head = `FLAGGED set · ${s.setKind} · ${left(setTitle(s), 30).trim()}`;
         return s.held.length
-          ? s.held.map((h) => <Text key={`${s.id}:${h.conditionId}`} color="red" bold wrap="truncate">{` ${head} · holds ${h.token} ${int(h.shares)} "${left(h.question, 24).trim()}" avg ${num(h.avgFill)} bid ${num(h.bidNow)} · suggested: SELL ${int(h.shares)} ${h.token}`}</Text>)
-          : [<Text key={s.id} color="red" bold wrap="truncate">{` ${head} · suggested: ${s.suggestedAction ?? "check positions on Polymarket"}`}</Text>];
+          ? s.held.map((h, j) => <Text key={`${s.id}:${h.conditionId}`} color="red" bold inverse={s === fcur && j === 0} wrap="truncate">{`${s === fcur && j === 0 ? "▶" : " "}${head} · holds ${h.token} ${int(h.shares)} "${left(h.question, 24).trim()}" avg ${num(h.avgFill)} bid ${num(h.bidNow)} · suggested: SELL ${int(h.shares)} ${h.token}`}</Text>)
+          : [<Text key={s.id} color="red" bold inverse={s === fcur} wrap="truncate">{`${s === fcur ? "▶" : " "}${head} · suggested: ${s.suggestedAction ?? "check positions on Polymarket"}`}</Text>];
       })}
-      {flagged.length > 0 && <Text color="gray">{"  A acknowledge (closes nothing) · the engine will not retry"}</Text>}
+      {flagged.length > 0 && <Text color="gray">{"  j/k select · A acknowledge selected (closes nothing) · the engine will not retry"}</Text>}
       <Text>
         {" Mode   "}
         {MODES.map((m) => (
           <Text key={m} color={MODE_COLOR[m]} bold={m === data.mode} inverse={m === data.mode} dimColor={off(m)}>{`${m === data.mode ? "[" : " "}${m} ${MODE_NAME[m]}${m === data.mode ? "]" : " "} `}</Text>
         ))}
-        {!exch && <Text color="gray">{"     ← L2–L4 need a configured exchange"}</Text>}
+        {!exch && <Text color="gray">{"     ← L2–L4 need a configured exchange (PM_PRIVATE_KEY on the server)."}</Text>}
       </Text>
       {atL2 ? (
         <>
