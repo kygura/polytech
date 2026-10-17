@@ -3,7 +3,7 @@ import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Exchange } from "@pm/pm";
 import { desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { currentMode, decide, deps, expireProposals, kill, propose, read, reconcileJob, rebaseline, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
+import { currentMode, decide, deps, orderUi, expireProposals, kill, propose, read, reconcileJob, rebaseline, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
 
 process.env.PGLITE_DIR = "memory://";
 delete process.env.NTFY_TOPIC;
@@ -153,6 +153,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     const id = await mkOrder({ status: "matched", clobOrderId: "fake-ghost", createdAt: new Date(t - 11 * MIN) });
     expect(await syncFills(d)).toMatchObject({ failedUnknown: 1 });
     expect((await order(id)).status).toBe("failed_unknown");
+    expect(orderUi("matched", 10, 10)).toBe("filled"); // fully matched order reads filled; with shares omitted it would read partial
   });
 
   it("ambiguous match (2 candidates) is never resent and never attached", async () => {

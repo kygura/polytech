@@ -263,7 +263,7 @@ export async function bookLive(r: ReadDeps) {
     .where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN))).orderBy(desc(s.orders.createdAt));
   const openOrders = ords.map(({ o, q }) => ({
     orderId: o.clobOrderId ?? o.id, conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: o.limitPrice, shares: o.size,
-    filledShares: filled.get(o.id) ?? 0, status: orderUi(o.status, filled.get(o.id) ?? 0), expiresAt: o.expiresAt?.getTime() ?? null,
+    filledShares: filled.get(o.id) ?? 0, status: orderUi(o.status, filled.get(o.id) ?? 0, o.size), expiresAt: o.expiresAt?.getTime() ?? null,
   }));
   const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId))
     .innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.fills.paper, false)).orderBy(desc(s.fills.ts), desc(s.fills.id)).limit(50);

@@ -62,7 +62,7 @@ export async function syncFills(d: Deps) {
     const claimed = new Set(orders.flatMap((o) => (o.clobOrderId ? [o.clobOrderId] : [])));
     const openIds = new Set(open.map((x) => x.orderId));
     const touched = new Set<string>();
-    const emit = (o: Order) => publish("order.updated", { id: o.id, orderId: o.clobOrderId ?? o.id, status: orderUi(o.status, filled.get(o.id) ?? 0), filledShares: filled.get(o.id) ?? 0 });
+    const emit = (o: Order) => publish("order.updated", { id: o.id, orderId: o.clobOrderId ?? o.id, status: orderUi(o.status, filled.get(o.id) ?? 0, o.size), filledShares: filled.get(o.id) ?? 0 });
     const setStatus = async (o: Order, status: string, extra: Partial<Order> = {}) => {
       Object.assign(o, { status, ...extra });
       await db.update(s.orders).set({ status, ...extra }).where(eq(s.orders.id, o.id));
