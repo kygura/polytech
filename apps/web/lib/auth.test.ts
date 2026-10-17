@@ -106,6 +106,10 @@ describe("proxy", () => {
   it("allows public paths", async () => {
     for (const p of ["/login", "/api/login"]) expect((await proxy(req(p))).headers.get("x-middleware-next")).toBe("1");
   });
+  it("exempts only the proposal push route from session auth", async () => {
+    expect((await proxy(req("/api/proposals/abc/push"))).headers.get("x-middleware-next")).toBe("1");
+    for (const p of ["/api/proposals", "/api/proposals/abc", "/api/proposals/abc/push/x", "/api/proposals/a/b/push"]) expect((await proxy(req(p))).status).toBe(401);
+  });
   it("self-hosted: workflow routes stay guarded", async () => {
     expect((await proxy(req("/.well-known/workflow/v1/flow"))).status).toBe(307);
   });

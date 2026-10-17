@@ -18,9 +18,9 @@ async function record(d: Pick<Deps, "db" | "now">, ev: AutonomyEvent) {
   publish("mode.changed", { from: ev.fromMode, to: ev.refused ? ev.fromMode : ev.toMode, reason: ev.reason, actor: ev.actor, refused: ev.refused, requested: ev.toMode });
 }
 
-/** Raises to L2+ are refused (EXECUTION_DISABLED) and logged; everything else applies. One action, no re-auth. */
-export async function setMode(d: Pick<Deps, "db" | "now">, to: Mode, reason = "manual", actor: Exclude<Actor, "kill"> = "user") {
-  const ch = requestModeChange(await currentMode(d.db), to, actor, reason);
+/** Raises to L3+ (and to L2 without a configured exchange) are refused (EXECUTION_DISABLED) and logged; everything else applies. One action, no re-auth. */
+export async function setMode(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exchange">>, to: Mode, reason = "manual", actor: Exclude<Actor, "kill"> = "user") {
+  const ch = requestModeChange(await currentMode(d.db), to, actor, reason, true, !!d.exchange);
   await record(d, ch.event);
   return { allowed: ch.allowed, mode: ch.mode, reason: ch.event.reason };
 }

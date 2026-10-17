@@ -1,4 +1,4 @@
-import { calibrateNightly, deps, getSettings, paperBook, read, researchShortlist, screenAll, snapshotBooks, sweepUniverse, type Deps } from "./jobs";
+import { calibrateNightly, deps, expireProposals, getSettings, paperBook, propose, read, researchShortlist, screenAll, snapshotBooks, sweepUniverse, type Decision, type Deps } from "./jobs";
 import type { z } from "zod";
 
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -32,5 +32,10 @@ export const JOBS = {
   research: () => getDeps().then((d) => researchShortlist(d)),
   paper: () => getDeps().then(paperBook),
   calibrate: () => getDeps().then(calibrateNightly),
+  propose: () => getDeps().then(propose),
+  expire: () => getDeps().then(expireProposals),
 };
 export type JobName = keyof typeof JOBS;
+
+/** Proposal decision -> HTTP. Refusals are 409 with the reason; the push route maps everything non-ok to one generic body itself. */
+export const decisionResponse = (r: Decision) => (r.ok ? json(r) : json({ error: r.error }, r.error === "NOT_FOUND" ? 404 : 409));

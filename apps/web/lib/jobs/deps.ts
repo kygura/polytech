@@ -1,7 +1,7 @@
 import { anthropicJudge, classifyR, fakeJudge, pickRunner, type AgentRunner, type Judge } from "@pm/agents";
 import { feeRateFor, type Market, type Snapshot } from "@pm/core";
 import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
-import { createPm, type Pm } from "@pm/pm";
+import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
 import { getSettings, type AppSettings } from "./settings";
 
 export type Deps = {
@@ -14,6 +14,8 @@ export type Deps = {
   judge: Judge;
   /** LLM researchability R in 0..1; absent => deterministic heuristic from rules text. */
   rScore?: (rules: string) => Promise<number>;
+  /** Live CLOB exchange; null = not configured (L2 refused). */
+  exchange: Exchange | null;
 };
 export type Skipped = { skipped: true; reason: string };
 
@@ -24,6 +26,16 @@ const FIXTURE_NOW = Date.parse("2026-10-15T12:00:00Z");
 const t0 = Date.now();
 /** Wall clock; with PM_FIXTURES=1 it starts at FIXTURE_NOW (fixtures are dated around it) and stays monotonic. */
 export const defaultNow = () => (process.env.PM_FIXTURES === "1" ? FIXTURE_NOW + (Date.now() - t0) : Date.now());
+
+/** exchangeFromEnv(), but a malformed key fails closed (null, L2 refused) instead of breaking every job. Message is zod-only, never the key. */
+export function envExchange(): Exchange | null {
+  try {
+    return exchangeFromEnv();
+  } catch (e) {
+    console.error("exchange not configured:", e instanceof Error ? e.message : "invalid env");
+    return null;
+  }
+}
 
 let ready: Promise<Db> | undefined;
 /** getDb(), migrated once per process when running on local PGlite (Neon is migrated at deploy). Cache cleared on reject. */
@@ -44,6 +56,7 @@ export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
     runner: over.runner ?? (await pickRunner()).runner,
     judge: over.judge ?? (client ? anthropicJudge(client) : fakeJudge),
     rScore: over.rScore ?? (client ? async (rules) => (await classifyR(rules, client)).R : undefined),
+    exchange: over.exchange !== undefined ? over.exchange : envExchange(),
   };
 }
 

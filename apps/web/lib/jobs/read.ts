@@ -3,14 +3,15 @@ import { schema as s, type Db } from "@pm/db";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
-import { DAY, dbReady, defaultNow, type Deps } from "./deps";
+import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
+import { uiState } from "./live";
 import { exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
 import { getSettings, putSettings } from "./settings";
 
 /** Everything the API needs for reads. */
-export type ReadDeps = Pick<Deps, "db" | "now">;
-export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow });
+export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean };
+export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null });
 
 type Th = typeof s.theses.$inferSelect;
 type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string };
@@ -254,8 +255,9 @@ export async function autonomy(r: ReadDeps) {
   const a = aggregate(f, () => "all").all;
   const x = await exposureOf(db, st.bankroll, now());
   const ev = await db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(50);
+  const pend = await db.select({ id: s.proposals.id }).from(s.proposals).where(eq(s.proposals.status, "pending"));
   return {
-    mode, executionEnabled: false, // L2-L4 refused with EXECUTION_DISABLED until phase 6
+    mode, executionEnabled: !!r.exchangeConfigured, exchangeConfigured: !!r.exchangeConfigured, pendingCount: pend.length, // L2 needs the exchange; L3-L4 refused until phase 7
     categories: cats.map((c) => ({ category: c, override: (st.overrides[c] ?? null) as Mode | null, effective: effectiveMode(mode, st.overrides[c]) })),
     limits: st.limits,
     usage: { totalOpen: x.totalOpen, dailyNotional: x.dailyNotional, dailyRealizedLoss: x.dailyRealizedLoss, byCategory: x.byCategory },
@@ -266,6 +268,31 @@ export async function autonomy(r: ReadDeps) {
     ],
     events: ev.map((e) => ({ id: e.id, ts: e.ts.getTime(), fromMode: e.fromMode as Mode, toMode: e.toMode as Mode, scope: e.scope, reason: e.reason, actor: e.actor })),
   };
+}
+
+// ---------------------------------------------------------------- proposals (DESIGN 8.1 / 8.7)
+/** Pending + sending (oldest first) and the last 10 resolved (newest first). */
+export async function proposals(r: ReadDeps) {
+  const { db } = r;
+  const q = () => db.select({ p: s.proposals, m: s.markets }).from(s.proposals).innerJoin(s.markets, eq(s.markets.conditionId, s.proposals.conditionId));
+  const [open, recent] = await Promise.all([
+    q().where(inArray(s.proposals.status, ["pending", "approved"])).orderBy(asc(s.proposals.createdAt)),
+    q().where(inArray(s.proposals.status, ["sent", "rejected", "expired", "failed"])).orderBy(desc(s.proposals.decidedAt)).limit(10),
+  ]);
+  const ids = [...new Set([...open, ...recent].map((x) => x.p.conditionId))];
+  const snaps = ids.length ? await latestSnaps(db, ids) : new Map<string, never>();
+  const ords = [...open, ...recent].flatMap((x) => (x.p.orderId ? [x.p.orderId] : []));
+  const clob = new Map((ords.length ? await db.select({ id: s.orders.id, c: s.orders.clobOrderId }).from(s.orders).where(inArray(s.orders.id, ords)) : []).map((o) => [o.id, o.c]));
+  const row = ({ p, m }: (typeof open)[number]) => {
+    const yes = snaps.get(p.conditionId)?.mid ?? null, isYes = p.tokenId === m.yesTokenId, expired = p.status === "expired";
+    return {
+      id: p.id, conditionId: p.conditionId, question: m.question, thesisId: p.thesisId, side: (isYes ? "YES" : "NO") as Side, orderSide: p.side as "BUY" | "SELL", kind: p.kind,
+      shares: p.shares, limitPrice: p.limitPrice, costUsd: p.shares * p.limitPrice, edgeC: p.shares ? (p.expectedProfit / p.shares) * 100 : null, expectedProfitUsd: p.expectedProfit,
+      midAtProposal: p.priceAtProposal, midNow: yes == null ? null : isYes ? yes : 1 - yes, createdAt: p.createdAt.getTime(), expiresAt: p.expiresAt.getTime(),
+      state: uiState(p.status), reason: expired ? p.error : null, error: expired ? null : p.error, orderId: p.orderId ? (clob.get(p.orderId) ?? null) : null,
+    };
+  };
+  return { pending: open.map(row), recent: recent.map(row) };
 }
 
 // ---------------------------------------------------------------- settings + flags

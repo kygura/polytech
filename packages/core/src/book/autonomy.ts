@@ -23,13 +23,13 @@ export interface ModeChange {
 }
 
 /**
- * Build 1 refuses every raise to L2+ (execution disabled). Lowering or keeping the mode is
- * always allowed (so a persisted L3 can still be downgraded to L2).
+ * Raises to L3+ are refused (phase 7); a raise to L2 only when the exchange is configured. Refusals carry
+ * reason EXECUTION_DISABLED. Lowering or keeping the mode is always allowed (a persisted L3 can drop to L2).
  * gateMet=false on an upward move is recorded as skippedGate (gates are advisory).
  */
-export function requestModeChange(from: Mode, to: Mode, actor: Actor, reason: string, gateMet = true): ModeChange {
+export function requestModeChange(from: Mode, to: Mode, actor: Actor, reason: string, gateMet = true, exchangeConfigured = false): ModeChange {
   const up = rank(to) > rank(from);
-  const refused = up && rank(to) >= rank("L2");
+  const refused = up && (rank(to) >= rank("L3") || (to === "L2" && !exchangeConfigured));
   const event: AutonomyEvent = {
     fromMode: from, toMode: to, actor,
     reason: refused ? "EXECUTION_DISABLED" : reason,
