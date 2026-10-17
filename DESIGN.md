@@ -345,3 +345,122 @@ Read-only key/value list grouped as in §3.8, scroll with j/k. Footer: `read-onl
 - Charts: `role="img"` + `aria-label` summary; the data they draw is also present as a text table (book levels, Brier table) so nothing is chart-only.
 - `prefers-reduced-motion`: disable the blink and the pod flash.
 - Keyboard shortcuts never fire while focus is in an input; `?` lists them.
+
+## Phase 6 — Live execution
+
+Scope: L2 Approve each. Extends sections 1–7; no new tokens, no new routes. Live money uses `--mode-2` (amber) as its identity color, the same color as the L2 badge, so "amber means real money" holds everywhere. Paper keeps `--mode-1` (blue).
+
+### 8.1 Pending approvals (web)
+
+Placement: a new `ApprovalsPane` on `/autonomy`, directly under `ModeSelector` and above `CategoryOverrides` (anchor `#approvals`). Not its own route: there is one operator, proposals are only produced at L2, and the decision to approve sits next to the controls that bound it (mode, risk limits, kill switch). Proposals are urgent, so the pane goes to the top of the view instead of after the gates.
+
+Header badge: `ApprovalsBadge` in the global header between `ModeBadge` and `KillSwitchButton`, reading `2 PENDING` in `--mode-2` border and text, linking to `/autonomy#approvals`. Hidden when the count is 0. `aria-label` "2 orders waiting for approval".
+
+Pane title line: `Approvals · 2 pending`, then the reconciliation status (8.4) right-aligned on the same line.
+
+The pane holds one `DataTable` of pending and sending proposals, oldest first (the one closest to expiry on top). Columns in order:
+
+| Header | Content |
+|---|---|
+| `Market` | question truncated to 48ch, link to `/m/[conditionId]` (the thesis lives there) |
+| `Side` | `BUY YES` / `BUY NO` (word plus pos/neg color); `SELL` for exit proposals |
+| `Shares` | int |
+| `Limit` | `0.000` |
+| `Cost$` | shares × limit, the money that leaves the wallet |
+| `Edge¢` | `EdgeBadge` at proposal time |
+| `E[P]$` | signed |
+| `Drift¢` | current mid minus mid at proposal, signed `+0.8`. At `|drift| ≥ 1.5` the cell turns `--warn` and gains a `⚠` prefix with title "Expires at 2.0¢ move". The server expires at > 2¢; the UI never decides expiry. |
+| `Expires` | countdown text `12:04 left`; under 2 min `⚠ 1:42 left` in `--warn`. Title holds the absolute time `expires 14:47:10`. |
+| actions | `Approve` and `Reject` buttons |
+
+Row states (shown in the actions cell, the row stays in place):
+- pending: `Approve` (border `--mode-2`) and `Reject` (plain).
+- confirm: clicking `Approve` swaps the cell to `Send $366.54 live?` with `Confirm` (bg `--mode-2`) and `Cancel`; focus moves to `Confirm`, `Esc` cancels. The confirm reverts to pending after 10 s without input. `Reject` has no confirm (no money moves).
+- sending: buttons replaced by `sending…` text plus the 12px spinner, row not interactive.
+- After the server answers, the row leaves the pending table and appears in `Recent` below.
+
+`Recent`: a second small table under the first, last 10 resolved proposals, newest first, columns `ts`, `Market`, `Side`, `Shares`, `Limit`, `State`. State text and color:
+- `sent · ord 0x3fa1…` in `--pos` (order id first 6 hex, title full id)
+- `rejected` in `--muted`
+- `expired · TIMEOUT` in `--muted`
+- `expired · PRICE_MOVED` in `--warn`
+- `failed · <error message>` in `--neg`, message truncated 60ch, title full
+
+Empty states: at L2 with nothing pending, `No pending approvals.` in `--muted`. Below L2 the whole pane collapses to one line: `Approvals appear at L2 Approve each.` `Recent` is hidden when empty.
+
+When reconciliation is in mismatch (8.4) or the mode is below L2 (e.g. after auto-downgrade), every `Approve` button is disabled with visible text `orders halted` in the actions cell and the reason in `title`. `Reject` stays enabled.
+
+### 8.2 Live vs paper (book)
+
+Nav label `Paper` becomes `Book`; the route stays `/paper` and `g p` still works. The view gets `Tabs` [`Live` `Paper`] with counts. Default tab: `Live` when the mode is L2 or above, otherwise `Paper`. Live and paper rows never share a table.
+
+Live tab, top to bottom:
+1. `PnlStrip` prefixed with a `LIVE` chip: `LIVE · open 3 · closed 1 · P&L +$12.40 · USDC $1,840.22 · slippage vs model +0.4¢`.
+2. `Open orders` table: `ts`, `Market`, `Side`, `Shares`, `Limit`, `Filled` (`120/820`), `Status` (`open` / `partial` / `filled` / `cancelled` / `expired`, text), `Expires`, `Order` (short id). Empty: `No open live orders.`
+3. `PositionsTable` and `FillsTable` as in 3.6, same columns.
+
+Every live row (orders, positions, fills) carries a `LIVE` chip: `--mode-2` border and text, mono `--fs-xs`, same shape as the existing `PAPER` chip in `--mode-1`. The chip is text, so the distinction never relies on color. The paper tab is unchanged apart from the tab bar and the strip gaining a `PAPER` chip prefix. The L0 empty state from 3.6 applies to the paper tab only; the live tab with no data shows `No live trades yet. Approvals appear at L2.`
+
+### 8.3 Kill switch with live orders
+
+`KillSwitchButton` gains `liveOpenOrders: number`.
+- `liveOpenOrders === 0` (always the case at L0/L1 unless orders were left over): unchanged, one click, no confirm.
+- `liveOpenOrders > 0`: the first click turns the button into `CONFIRM · CANCEL 3 LIVE ORDERS → L0` for 5 s; a second click (or `Enter`, since focus stays on it) fires; `Esc` or the timeout aborts. The `aria-label` reads "Kill switch: drop to L0 and cancel 3 live orders, press again to confirm".
+- Result, shown on the button for 3 s: `KILLED · L0 · 3 cancelled`. If any cancel failed: `KILLED · L0 · 2 cancelled · 1 FAILED`, and an `ErrorBar` appears on the current view: `Kill: 1 live order not cancelled (ord 0x3fa1…: <error>). Cancel it on Polymarket or retry.` with `Retry` firing the kill again (at L0 it only cancels). The bar stays until dismissed or a retry succeeds.
+
+### 8.4 Reconciliation status
+
+One `ReconStatus` line, shown in the `Approvals` pane title (right side) and as a row at the top of the book's Live tab:
+- ok: `recon ✓ ok · 14:35 (2 min ago)` in `--muted`, `✓` in `--pos`.
+- late (no run for > 10 min): `recon ⚠ late · 14:20 (17 min ago)` in `--warn`.
+- mismatch: `recon ✗ MISMATCH · new orders halted · 14:35` in `--neg`, followed by the server's detail (`position 0x… ledger 820 vs chain 700`, truncated, title full).
+- never run: `recon — not run yet` in `--muted`.
+
+On mismatch the header also shows a `RECON ✗` chip in `--neg` (text, not a dot) before `ApprovalsBadge`, linking to `/autonomy#approvals`. Nothing in the header when ok.
+
+### 8.5 Mode selector
+
+`enabledModes` is `L0 L1 L2` when the exchange is configured, `L0 L1` otherwise. L3 and L4 stay disabled.
+- L2 disabled title and visible line: `L2 needs a configured exchange (PM_PRIVATE_KEY on the server).`
+- L3/L4 title and visible line: `L3–L4 ship in phase 7.`
+- When both apply the line under the row reads `L2 needs a configured exchange · L3–L4 ship in phase 7.` This replaces `Execution ships in phase 6`. Selecting L2 stays one click (SPEC).
+
+### 8.6 TUI
+
+No new view. Approvals live at the top of the Autonomy view `[5]`, between the `Mode` line and `Overrides`, matching the web.
+
+Header: after the mode badge, `2 PENDING` in yellow when the count is > 0, and `RECON ✗` in red when in mismatch. Pressing `5` jumps there from any view.
+
+Approvals block: a title line `Approvals 2 pending` with the recon status right-aligned (same texts as 8.4, `✓`/`⚠`/`✗` glyphs). Then one row per pending proposal with the web columns in short form: market (truncated), side, shares, limit, cost, edge, drift (`⚠` prefix and yellow at ≥ 1.5¢), countdown `12:04` (`⚠` prefix and yellow under 2 min). Selected row inverse. Below L2: one gray line `approvals appear at L2`. Empty at L2: `no pending approvals`. A `recent` line lists the last 3 resolved proposals as `14:31 sent`, `14:20 expired PRICE_MOVED`, `14:02 failed <msg>` with the same colors as web.
+
+Keys inside the Autonomy view (checked against current bindings: global `q K ? R Tab 1-6`, Autonomy `0-4`; `a`, `x`, `y` are free here; `x` already means close/dismiss in the paper view, so the meaning carries over):
+- `j`/`k` move the selection among pending rows.
+- `a` approve: the footer turns into a prompt `SEND LIVE: BUY YES 820 @ 0.447 = $366.54 ? y = confirm, any other key aborts`, in yellow bold. `y` sends; the row shows `sending…` until the reply, then the footer flashes `sent ord 0x3fa1` (green) or `failed: <msg>` (red).
+- `x` reject, no prompt, footer flashes `rejected`.
+- Approve is refused with a footer message when recon is in mismatch: `orders halted: recon mismatch`.
+Footer key hints in this view gain `a approve  x reject`. Mode keys: `2` sets L2 when the exchange is configured, otherwise footer `disabled: L2 needs a configured exchange`; `3`/`4` say `disabled: L3–L4 ship in phase 7`.
+
+Book `[4]`: header label `Book`. `h`/`l` switch `Live`/`Paper` (same as watchlist tabs). Every row starts with a `LIVE` (yellow) or `PAPER` (blue) tag; the strip line starts with the same tag. The live tab adds an `open orders` block above positions with the 8.2 columns. `x` closes paper positions only; on a live row it flashes `live positions close via an exit proposal`.
+
+Kill: `K` with 0 live open orders is unchanged (immediate). With live open orders the footer shows `K again: kill + cancel 3 LIVE orders · any other key aborts` (red bold) for 5 s; a second `K` fires. Result in the footer: `KILLED → L0 · 3 cancelled`, or `KILLED → L0 · 2 cancelled · 1 FAILED (see Autonomy)` in red; the failed order ids are listed in the Autonomy events block.
+
+### 8.7 Live updates (SSE event names)
+
+Existing events stay (`mode.changed`, `paper.fill`, `pod.*`, …). New ones, payload ids plus state only; the client refetches the affected view on receipt:
+- `proposal.created` — id, conditionId. Bumps the pending count.
+- `proposal.updated` — id, state (`pending|sending|sent|rejected|expired|failed`), reason (`TIMEOUT|PRICE_MOVED` when expired), error (when failed), orderId (when sent).
+- `order.updated` — id, status (`open|partial|filled|cancelled|expired`), filledShares.
+- `order.filled` — id, fill price, shares (feeds the live fills table).
+- `recon.done` — at, status (`ok|mismatch`), detail. Covers both ok and mismatch so the indicator can clear.
+
+Countdowns tick client-side from `expiresAt`; drift updates on the existing snapshot refresh. No per-second server events.
+
+Data the UI reads (fields on the autonomy read payload and the shell status the header uses): `exchangeConfigured`, `pendingCount`, `liveOpenOrders`, `recon {at, status, detail}`, and per proposal `id, conditionId, question, thesisId, side, shares, limitPrice, costUsd, edgeC, expectedProfitUsd, midAtProposal, midNow, createdAt, expiresAt, state, reason, error, orderId`. Kill response: `cancelled` (count) and `failed` (list of order id and error).
+
+### 8.8 Accessibility
+
+- Countdowns and drift are text with a `⚠` glyph at the warning threshold; color only reinforces. Countdown cells are not `aria-live` (one announcement per second is noise); the pane title count is `aria-live="polite"` so new proposals are announced once.
+- `Approve`, `Confirm`, `Cancel`, `Reject` and the kill confirm are real `<button>`s in tab order; focus moves to `Confirm` when it appears and back to `Approve` on cancel. `Esc` cancels any pending confirm.
+- `Confirm` carries the full sentence `aria-label` "Send live order: buy YES 820 shares at 0.447, cost $366.54".
+- Disabled approve buttons keep the reason in visible text (`orders halted`) and in `title`, not only `disabled`.
+- `LIVE`/`PAPER` and `RECON ✗` are words, never color-only marks.
