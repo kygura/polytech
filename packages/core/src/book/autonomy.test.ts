@@ -25,9 +25,9 @@ describe("requestModeChange", () => {
       expect(r.event).toMatchObject({ fromMode: "L1", toMode: to, refused: true, reason: "EXECUTION_DISABLED", note: "go live" });
     }
   });
-  it("allows L2 only with a configured exchange; L3/L4 stay refused", () => {
+  it("allows L2-L4 only with a configured exchange", () => {
     expect(requestModeChange("L1", "L2", "user", "go", true, true)).toMatchObject({ allowed: true, mode: "L2" });
-    for (const to of ["L3", "L4"] as const) expect(requestModeChange("L2", to, "user", "go", true, true)).toMatchObject({ allowed: false, mode: "L2" });
+    for (const to of ["L3", "L4"] as const) expect(requestModeChange("L2", to, "user", "go", true, true)).toMatchObject({ allowed: true, mode: to });
   });
   it("flags skipped gate on upward moves", () => {
     expect(requestModeChange("L1", "L2", "user", "x", false).event.skippedGate).toBe(true);
