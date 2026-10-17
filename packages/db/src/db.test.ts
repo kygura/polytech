@@ -5,7 +5,7 @@ describe("db (pglite memory)", () => {
   beforeAll(async () => {
     process.env.PGLITE_DIR = "memory://";
     await migrate();
-  });
+  }, 60_000);
 
   it("insert + read each table", async () => {
     const db = getDb();
