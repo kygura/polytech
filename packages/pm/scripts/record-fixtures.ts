@@ -1,5 +1,5 @@
 // Records REAL raw responses into ../fixtures (same files gen-fixtures.ts writes). Run from an unblocked network:
-//   pnpm --filter @pm/pm fixtures:record [maxMarkets=60]
+//   bun --filter @pm/pm fixtures:record [maxMarkets=60]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createPm } from "../src/index";
 

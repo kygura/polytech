@@ -21,7 +21,7 @@ One TypeScript monorepo on Vercel. Crons trigger durable workflows; long agent r
 
 | Layer | Choice | Why |
 |---|---|---|
-| Monorepo | pnpm + Turborepo | Shared types between web, TUI and workers |
+| Monorepo | bun workspaces + Turborepo | Shared types between web, TUI and workers |
 | Web | Next.js (App Router) on Vercel | Same deploy as API and crons |
 | TUI | Ink, talks to the same HTTP API | One API, two clients |
 | Scheduling | Vercel Cron → Vercel Workflow | Cron only fires; Workflow holds multi-step state, retries, sleeps |

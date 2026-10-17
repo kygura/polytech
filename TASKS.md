@@ -22,14 +22,14 @@ Phases 1–5 of SPEC.md: screener + structural detectors, research pods + judge 
 ## Build decisions (binding for every agent)
 
 1. Scope = phases 1–5. Modes L2/L3/L4 exist in types and Settings, but the autonomy controller refuses to enter them (`EXECUTION_DISABLED` reason, logged to `autonomy_events`). No `@polymarket/clob-client`, no wallet key handling in this build.
-2. Stack per SPEC: pnpm workspaces + Turborepo, TypeScript, Next.js App Router, Ink, Drizzle, zod, vitest.
+2. Stack per SPEC: bun workspaces + Turborepo (pnpm until 2026-10-17), TypeScript, Next.js App Router, Ink, Drizzle, zod, vitest.
 3. Offline-verifiable. This machine cannot reach Polymarket (ISP block) and has no credentials.
    - DB: `DATABASE_URL` set → Neon (`@neondatabase/serverless` + drizzle). Unset → PGlite (`@electric-sql/pglite`, file at `.data/pglite`) with the same Drizzle schema.
    - Redis: Upstash env set → `@upstash/redis`. Unset → in-memory shim with the same small interface (lock, rate-limit bucket).
    - Polymarket: `PM_FIXTURES=1` (default when unreachable / in tests) → clients read recorded JSON fixtures from `packages/pm/fixtures`.
    - Anthropic/Exa: keys unset → research pods use a deterministic fake runner (test + local demo). Real path coded against the documented SDKs.
    - Vercel Workflow/Sandbox: step logic in plain async functions (`packages/agents`, `apps/web/lib/jobs`); Workflow/Sandbox adapters thin. Locally a step runner calls the same functions in-process.
-4. Done = `pnpm install && pnpm turbo typecheck test build` green, `pnpm dev` serves the web app with a populated watchlist from fixtures, `pnpm --filter tui start` renders the watchlist against the local API.
+4. Done = `bun install && bunx turbo typecheck test build` green, `bun run dev` serves the web app with a populated watchlist from fixtures, `bun --filter tui start` renders the watchlist against the local API.
 5. Model ids in code: `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` (router defaults per SPEC).
 
 ## Tasks

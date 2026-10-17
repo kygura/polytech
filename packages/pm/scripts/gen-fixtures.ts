@@ -1,5 +1,5 @@
 // Builds the offline fixture universe (raw, Gamma/CLOB/Data-shaped JSON) into ../fixtures. Deterministic.
-// Run: pnpm --filter @pm/pm fixtures:gen
+// Run: bun --filter @pm/pm fixtures:gen
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 

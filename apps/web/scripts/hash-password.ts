@@ -1,4 +1,4 @@
-// Usage: printf '%s' 'my password' | pnpm --filter web hash-password
+// Usage: printf '%s' 'my password' | bun run --cwd apps/web hash-password
 // Prints the hash with every `$` escaped as `\$`: required in .env files (Next runs dotenv-expand),
 // and also accepted as-is by the login route anywhere else (e.g. Vercel dashboard).
 import { hash } from "@node-rs/argon2";

@@ -1,7 +1,9 @@
 {
   "name": "polytech",
   "private": true,
-  "packageManager": "pnpm@12.11.2",
+  "packageManager": "bun@1.4.3",
+  "workspaces": ["apps/*", "packages/*"],
+  "trustedDependencies": ["@swc/core", "cbor-extract", "esbuild"],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
