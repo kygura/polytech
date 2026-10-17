@@ -7,23 +7,29 @@ import { ErrorBar } from "../../../components/ErrorBar";
 import { NumCell } from "../../../components/NumCell";
 import { Tabs } from "../../../components/Tabs";
 import { hm, mmdd } from "../../../components/fmt";
-import { shortId, type Recon } from "../../../components/live";
+import { approvalChip, shortId, type Recon } from "../../../components/live";
 import css from "../../../components/panels.module.css";
 
 // GET /api/book/live (DESIGN 8.2).
 type LivePos = { conditionId: string; question: string; tokenId: string; outcome: string; shares: number; avgPrice: number; markPrice: number | null; unrealizedUsd: number | null };
-type LiveOrder = { orderId: string; conditionId: string; question: string; side: string; price: number; shares: number; filledShares: number; status: string; expiresAt: string | number | null };
-type LiveFill = { tradeId: string; conditionId: string; question: string; side: string; price: number; shares: number; feeUsd: number; at: string | number };
+type Sent = { approval?: string | null; modeAtSend?: string | null; setId?: string | null };
+type LiveOrder = Sent & { orderId: string; conditionId: string; question: string; side: string; price: number; shares: number; filledShares: number; status: string; expiresAt: string | number | null };
+type LiveFill = Sent & { tradeId: string; conditionId: string; question: string; side: string; price: number; shares: number; feeUsd: number; at: string | number };
 type LiveBook = { positions: LivePos[]; openOrders: LiveOrder[]; fills: LiveFill[]; recon: Recon | null };
 
 const LIVE = <span className={`${css.chip} ${css.chipLive}`}>LIVE</span>;
 const mkt = (r: { question: string }) => <><MarketCell question={r.question} category={null} max={40} />{LIVE}</>;
+// Orders and fills also say who sent them and whether they are a set leg (DESIGN 9.2, 9.3).
+const sentMkt = (r: Sent & { question: string }) => {
+  const a = approvalChip(r);
+  return <>{mkt(r)}{r.setId && <span className={css.chip} style={{ borderColor: "var(--border)", color: "var(--text)" }}>SET</span>}{a.text !== "user" && <span className={css.chip} style={{ borderColor: a.color, color: a.color }}>{a.text}</span>}</>;
+};
 const sideCls = (s: string) => (/YES/i.test(s) ? "pos" : /NO/i.test(s) ? "neg" : undefined);
 const t = (v: string | number) => new Date(v).getTime();
 
 const ORDER_CLS: Record<string, string> = { failed: "neg", sending: "muted", unknown: "muted" };
 const ORDER_COLS: Column<LiveOrder>[] = [
-  { id: "market", header: "Market", align: "l", cell: mkt },
+  { id: "market", header: "Market", align: "l", cell: sentMkt },
   { id: "side", header: "Side", align: "l", cell: (o) => <span className={sideCls(o.side)}>{o.side}</span> },
   { id: "shares", header: "Shares", align: "r", cell: (o) => <NumCell value={o.shares} fmt="int" /> },
   { id: "limit", header: "Limit", align: "r", cell: (o) => <NumCell value={o.price} fmt="p" /> },
@@ -42,7 +48,7 @@ const POS_COLS: Column<LivePos>[] = [
 ];
 const FILL_COLS: Column<LiveFill>[] = [
   { id: "ts", header: "ts", align: "r", cell: (f) => `${mmdd(t(f.at))} ${hm(t(f.at))}` },
-  { id: "market", header: "Market", align: "l", cell: mkt },
+  { id: "market", header: "Market", align: "l", cell: sentMkt },
   { id: "side", header: "Side", align: "l", cell: (f) => <span className={sideCls(f.side)}>{f.side}</span> },
   { id: "price", header: "Price", align: "r", cell: (f) => <NumCell value={f.price} fmt="p" /> },
   { id: "size", header: "Size", align: "r", cell: (f) => <NumCell value={f.shares} fmt="int" /> },

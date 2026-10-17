@@ -13,7 +13,8 @@ export function ModeSelector({ mode, enabledModes, reasons, note, onChange }: { 
           const n = m.slice(1), en = enabledModes.includes(m), sel = m === mode, why = reasons[m] ?? "";
           return (
             <button key={m} type="button" role="radio" aria-checked={sel} disabled={!en} title={en ? undefined : why} className={css.modeOpt}
-              style={{ borderColor: `var(--mode-${n})`, ...(sel ? { background: `var(--mode-${n})`, color: "var(--bg)" } : { color: `var(--mode-${n})` }) }}
+              // Disabled and not current: no inline color, so .modeOpt:disabled (faint) applies.
+              style={sel ? { borderColor: `var(--mode-${n})`, background: `var(--mode-${n})`, color: "var(--bg)" } : en ? { borderColor: `var(--mode-${n})`, color: `var(--mode-${n})` } : undefined}
               aria-label={`Set mode ${m} ${MODE_NAME[m]}${sel ? " (current)" : ""}${en ? "" : `, disabled: ${why}`}`}
               onClick={() => !sel && onChange(m)}>
               {m} {MODE_NAME[m]}

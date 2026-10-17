@@ -30,3 +30,4 @@
 .dots { display: inline-flex; gap: 3px; }
 .bins { margin-top: var(--sp-2); }
 .bins summary { color: var(--muted); font-family: var(--font-ui); cursor: pointer; }
+.legRow { background: var(--surface-2); }

@@ -7,6 +7,15 @@ export type Proposal = {
   shares: number; limitPrice: number; costUsd: number; edgeC: number | null; expectedProfitUsd: number;
   midAtProposal: number; midNow: number | null; createdAt: number; expiresAt: number;
   state: string; reason: string | null; error: string | null; orderId: string | null;
+  exitReason?: string | null; fallbackReason?: string | null; decidedVia?: string | null; approval?: string | null; modeAtSend?: string | null;
+};
+// Phase 7 neg-risk set (DESIGN 9.1, 9.2, 9.8). failedLeg is 0-based.
+export type SetLeg = { conditionId: string; question: string; token: "YES" | "NO"; capPrice: number; shares: number; costUsd: number; state: string };
+export type SetView = {
+  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; eventTitle?: string | null; state: string; shares: number; costUsd: number;
+  lockedC: number | null; expectedProfitUsd: number; createdAt: number; expiresAt: number; decidedVia: string | null; failedLeg: number | null; error: string | null;
+  fallbackReason?: string | null; legs: SetLeg[];
+  held: { conditionId: string; question: string; token: "YES" | "NO"; shares: number; avgFill: number; bidNow: number | null }[]; suggestedAction: string | null;
 };
 export type KillResult = { cancelled: number; failed: { orderId: string; error: string }[] };
 
@@ -37,6 +46,56 @@ export function stateText(p: Pick<Proposal, "state" | "reason" | "error" | "orde
     case "failed": return { text: `failed · ${truncate(p.error ?? "unknown error", 60)}`, cls: "neg", title: p.error ?? undefined };
     default: return { text: p.state, cls: "muted" };
   }
+}
+
+/** Set progress / Recent text (9.2). */
+export function setStateText(s: Pick<SetView, "state" | "legs" | "failedLeg" | "error" | "held">): Shown {
+  const n = s.legs.length, leg = `leg ${(s.failedLeg ?? 0) + 1}`, err = truncate(s.error ?? "", 60);
+  switch (s.state) {
+    case "sending": return { text: `sending leg ${Math.min(n, s.legs.filter((l) => l.state === "filled").length + 1)}/${n}…`, cls: "muted" };
+    case "unwinding": return { text: `unwinding · ${leg} failed`, cls: "warn" };
+    case "filled": return { text: `filled · ${n}/${n} legs`, cls: "pos" };
+    case "unwound": return { text: `unwound · ${leg} ${err}`.trim(), cls: "warn", title: s.error ?? undefined };
+    case "failed": return { text: `failed · ${leg} ${err}`.trim(), cls: "neg", title: s.error ?? undefined };
+    case "flagged": return { text: `flagged · ${s.held.length} leg${s.held.length === 1 ? "" : "s"} held`, cls: "neg" };
+    case "acknowledged": return { text: "flagged · acknowledged", cls: "muted" };
+    default: return { text: s.state, cls: "muted" };
+  }
+}
+
+/** Who sent it (9.3): orders carry approval auto|user + modeAtSend, proposals and sets decidedVia. Plain `AUTO` when the mode is unknown. */
+export function approvalChip(x: { approval?: string | null; modeAtSend?: string | null; decidedVia?: string | null }): { text: string; color: string } {
+  const auto = x.approval === "auto" || x.approval === "auto_l3" || x.approval === "auto_l4" || x.decidedVia === "auto";
+  if (!auto) return { text: "user", color: "var(--muted)" };
+  const m = x.approval === "auto_l4" || x.modeAtSend === "L4" ? "L4" : x.approval === "auto_l3" || x.modeAtSend === "L3" ? "L3" : null;
+  return m ? { text: `AUTO ${m}`, color: `var(--mode-${m.slice(1)})` } : { text: "AUTO", color: "var(--mode-3)" };
+}
+
+/** L3 fallback line (9.3). The server sends only the code, so the daily used amount and the category are not shown. */
+export function fallbackText(code: string | null | undefined, costUsd: number, l3?: { perTradeUsd: number; dailyNotional: number }): string | null {
+  if (!code) return null;
+  const t: Record<string, string> = {
+    PER_TRADE: `over L3 per-trade${l3 ? ` $${l3.perTradeUsd}` : ""} (this ${usd2(costUsd)})`,
+    DAILY_AUTO_NOTIONAL: `daily auto notional${l3 ? ` $${l3.dailyNotional}` : ""} used`,
+    CATEGORY_NOT_ALLOWED: "category not in L3 allowlist",
+    STRUCTURAL_AUTO_OFF: "sets need structural auto (Settings)",
+  };
+  return `L3 fallback: ${t[code] ?? code}`;
+}
+
+export type Gate = { gate: "L1->L2" | "L2->L3" | "L3->L4"; met: boolean; detail: string; approvedTrades?: number; avgSlippageC?: number | null; liveTrades?: number; realizedEdge30dC?: number | null };
+/** L2→L3 / L3→L4 criteria (9.7), each met separately; null for L1→L2 (keeps the server detail). The meter tracks the trade count. */
+export function gateParts(g: Gate): { value: number; max: number; parts: { text: string; met: boolean }[] } | null {
+  const c = (v: number) => `${fmt(v, "cents", true)}¢`;
+  if (g.gate === "L2->L3") {
+    const n = g.approvedTrades ?? 0, s = g.avgSlippageC;
+    return { value: n, max: 30, parts: [{ text: `${n}/30 approved trades`, met: n >= 30 }, { text: s == null ? "avg slip —" : `avg slip ${c(s)} vs ≤ 1.0¢`, met: s != null && Math.abs(s) <= 1 }] };
+  }
+  if (g.gate === "L3->L4") {
+    const n = g.liveTrades ?? 0, e = g.realizedEdge30dC;
+    return { value: n, max: 100, parts: [{ text: `${n}/100 live trades`, met: n >= 100 }, { text: `realized edge 30d ${e == null ? "—" : c(e)}`, met: e != null && e > 0 }] };
+  }
+  return null;
 }
 
 const LATE_MS = 10 * 60_000;

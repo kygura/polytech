@@ -16,9 +16,9 @@ import { STALE_MS, StaleBanner } from "./StaleBanner";
 import css from "./Shell.module.css";
 
 const NAV = [["/watchlist", "Watchlist"], ["/fleet", "Fleet"], ["/calibration", "Calibration"], ["/paper", "Book"], ["/autonomy", "Autonomy"], ["/settings", "Settings"]] as const;
-const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done"]);
-const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done"]);
-type Status = { pendingCount?: number; liveOpenOrders?: number; recon?: Recon | null };
+const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
+const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done", "set.updated"]);
+type Status = { pendingCount?: number; flaggedSets?: number; liveOpenOrders?: number; recon?: Recon | null };
 
 export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mode: Mode; lastSnapshotAt: number | null; now: number; children: ReactNode }) {
   const router = useRouter();
@@ -89,7 +89,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
           <button type="button" className={css.themeBtn} onClick={toggle} aria-label="toggle theme (t)" title="toggle theme (t)">theme</button>
           <SseIndicator status={sse.status} lastEventAt={sse.lastEventAt} />
           <ModeBadge mode={mode} size="lg" />
-          <ApprovalsBadge pendingCount={status.pendingCount ?? 0} recon={status.recon} />
+          <ApprovalsBadge pendingCount={status.pendingCount ?? 0} recon={status.recon} flaggedSets={status.flaggedSets ?? 0} />
           <KillSwitchButton mode={mode} liveOpenOrders={status.liveOpenOrders ?? 0} onKill={kill} />
         </div>
       </header>

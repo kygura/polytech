@@ -32,14 +32,16 @@ export function fitCols<T>(cols: Col<T>[], width: number): Col<T>[] {
 
 const pad = (s: string, c: Col<unknown>) => (s.length > c.w ? s.slice(0, c.w) : c.r ? s.padStart(c.w) : s.padEnd(c.w));
 
-export function Table<T>({ cols, rows, sel, height, width, prefix }: { cols: Col<T>[]; rows: T[]; sel: number; height: number; width: number; prefix?: (row: T) => ReactNode }) {
+/** `line` renders a row as one free-form line instead of cells (detail rows under a selection). */
+export function Table<T>({ cols, rows, sel, height, width, prefix, line }: { cols: Col<T>[]; rows: T[]; sel: number; height: number; width: number; prefix?: (row: T) => ReactNode; line?: (row: T) => ReactNode }) {
   const cs = fitCols(cols, width - 2);
   const h = Math.max(1, height - 1), start = windowStart(sel, h, rows.length);
   return (
     <Box flexDirection="column">
       <Text color="gray">{"  " + cs.map((c) => pad(c.h, c as Col<unknown>)).join(" ")}</Text>
       {rows.slice(start, start + h).map((row, i) => {
-        const idx = start + i, on = idx === sel;
+        const idx = start + i, on = idx === sel, l = line?.(row);
+        if (l != null) return <Text key={idx} wrap="truncate">{l}</Text>;
         return (
           <Text key={idx} inverse={on} wrap="truncate">
             {on ? "▶" : " "}

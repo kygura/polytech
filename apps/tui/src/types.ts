@@ -44,11 +44,11 @@ export type PaperBook = {
 
 export type Autonomy = {
   mode: Mode; executionEnabled: boolean;
-  exchangeConfigured?: boolean; pendingCount?: number; liveOpenOrders?: number; recon?: Recon | null;
+  exchangeConfigured?: boolean; pendingCount?: number; liveOpenOrders?: number; recon?: Recon | null; flaggedSets?: number;
   categories: { category: string; override: Mode | null; effective: Mode }[];
-  limits: { perTradeUsd: number; perTradePct: number; dailyLoss: number };
+  limits: { perTradeUsd: number; perTradePct: number; dailyLoss: number; l3?: { perTradeUsd: number; dailyNotional: number } };
   usage: { totalOpen: number; dailyNotional: number; dailyRealizedLoss: number };
-  gates: { gate: string; met: boolean; detail: string }[];
+  gates: { gate: string; met: boolean; detail: string; approvedTrades?: number; avgSlippageC?: N; liveTrades?: number; realizedEdge30dC?: N }[];
   events: { id: number; ts: number; fromMode: Mode; toMode: Mode; scope: string; reason: string; actor: string }[];
 };
 
@@ -58,8 +58,16 @@ export type Proposal = {
   id: string; conditionId: string; question: string; side: Side; orderSide?: "BUY" | "SELL"; shares: number; limitPrice: number; costUsd: number;
   edgeC: N; expectedProfitUsd: number; midAtProposal: number; midNow: N; createdAt: number; expiresAt: number;
   state: "pending" | "sending" | "sent" | "rejected" | "expired" | "failed"; reason: string | null; error: string | null; orderId: string | null;
+  kind?: string; exitReason?: string | null; fallbackReason?: string | null; decidedVia?: string | null; approval?: string | null; modeAtSend?: string | null;
 };
-export type Proposals = { pending: Proposal[]; recent: Proposal[] };
+// Phase 7 neg-risk set (DESIGN 9.5, 9.8). failedLeg is 0-based.
+export type SetView = {
+  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; eventTitle?: string | null; state: string; shares: number; costUsd: number;
+  lockedC: N; expectedProfitUsd: number; createdAt: number; expiresAt: number; decidedVia: string | null; failedLeg: N; error: string | null; fallbackReason?: string | null;
+  legs: { conditionId: string; question: string; token: Side; capPrice: number; shares: number; costUsd: number; state: string }[];
+  held: { conditionId: string; question: string; token: Side; shares: number; avgFill: number; bidNow: N }[]; suggestedAction: string | null;
+};
+export type Proposals = { pending: Proposal[]; recent: Proposal[]; sets?: { pending: SetView[]; recent: SetView[] } };
 export type LiveBook = {
   positions: { conditionId: string; question: string; tokenId: string; outcome: string; shares: number; avgPrice: number; markPrice: N; unrealizedUsd: N }[];
   openOrders: { orderId: string; question: string; side: string; price: number; shares: number; filledShares: number; status: string; expiresAt: N }[];

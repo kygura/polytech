@@ -100,9 +100,9 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
         {num("limits.perTradeUsd", "per-trade", "USD")}{num("limits.perTradePct", "per-trade", "×B")}
         {num("limits.perMarket", "per-market", "USD")}{num("limits.perEvent", "per-event", "USD")}{num("limits.perCategory", "per-category", "USD")}
         {num("limits.totalOpen", "total open", "USD")}{num("limits.dailyNotional", "daily notional", "USD")}{num("limits.dailyLoss", "daily loss", "USD")}
-        {num("limits.l3.perTradeUsd", "L3 auto ceiling (applies from phase 6)", "USD")}{num("limits.l3.dailyNotional", "daily auto notional (applies from phase 6)", "USD")}
-        {multi("limits.l3.categoryAllowlist", "category allowlist (applies from phase 6)")}
-        <Field label="structural auto (applies from phase 6)" error={errors["limits.l3.structuralAuto"]} htmlFor="limits.l3.structuralAuto">
+        {num("limits.l3.perTradeUsd", "L3 auto ceiling", "USD")}{num("limits.l3.dailyNotional", "daily auto notional", "USD")}
+        {multi("limits.l3.categoryAllowlist", "category allowlist")}
+        <Field label="structural auto" error={errors["limits.l3.structuralAuto"]} htmlFor="limits.l3.structuralAuto">
           <input id="limits.l3.structuralAuto" type="checkbox" checked={s.limits.l3.structuralAuto} onChange={(e) => set("limits.l3.structuralAuto", e.target.checked)} />
         </Field>
       </>)}

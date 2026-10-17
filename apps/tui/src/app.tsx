@@ -15,7 +15,7 @@ import { Watchlist } from "./views/watchlist";
 
 const VIEWS = ["Watchlist", "Fleet", "Calib", "Book", "Autonomy", "Settings"] as const;
 // Which SSE events make a view refetch.
-const RELEVANT: RegExp[] = [/^(sweep|snapshot|screen|thesis|pod|mode)\./, /^pod\./, /^calibration\./, /^(paper|snapshot|mode|order)\./, /^(mode|proposal|order|recon)\./, /^$/];
+const RELEVANT: RegExp[] = [/^(sweep|snapshot|screen|thesis|pod|mode)\./, /^pod\./, /^calibration\./, /^(paper|snapshot|mode|order)\./, /^(mode|proposal|order|recon|set)\./, /^$/];
 const KEYS = "j/k move  Enter open  / filter  s/S sort  r research  p pin  m mute  R refresh  K kill  ? help  q quit";
 const KEYS_NARROW = "j/k Enter / s/S r p m R K ? q";
 const HELP = [
@@ -24,7 +24,7 @@ const HELP = [
   "r  re-research   p  pin   m  mute   R  refresh        q  quit",
   "Book: h/l  Live/Paper tab   x  close selected paper position at best bid",
   "K  KILL SWITCH → L0 (any view; with live orders press K twice)",
-  "Autonomy: 0-2 set mode, 3-4 refused   j/k select   a approve (y confirms)   x reject",
+  "Autonomy: 0-4 set mode   j/k select   a approve (y confirms)   x reject   A ack flagged set",
   "Calibration: Tab cycles selects, ←/→ change value",
 ];
 
@@ -51,7 +51,7 @@ export function App() {
       (e) => {
         if (e.event === "ping") return;
         if (/^(sweep|snapshot)\./.test(e.event)) setSweptAt(Date.now());
-        if (/^(mode|proposal|order|recon)\./.test(e.event)) setModeTick((t) => t + 1); // header badges + live order count
+        if (/^(mode|proposal|order|recon|set)\./.test(e.event)) setModeTick((t) => t + 1); // header badges + live order count
         if (RELEVANT[viewRef.current]!.test(e.event)) setTick((t) => t + 1);
       },
       setLive, ac.signal,
@@ -122,6 +122,7 @@ export function App() {
             {live ? <Text color="green">● live</Text> : <Text color="red">● offline</Text>}
             {"  "}
             <Text color={MODE_COLOR[mode]} bold>{mode} {MODE_NAME[mode]}</Text>
+            {aut?.flaggedSets ? <Text color="red" bold>{`  SET ✗ ${aut.flaggedSets}`}</Text> : null}
             {aut?.pendingCount ? <Text color="yellow" bold>{`  ${aut.pendingCount} PENDING`}</Text> : null}
             {aut?.recon?.status === "mismatch" && <Text color="red" bold>  RECON ✗</Text>}
             <Text color="gray">   K=KILL</Text>

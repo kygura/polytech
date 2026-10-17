@@ -28,6 +28,13 @@ const watch = [
 ];
 const autonomy = { mode: "L1" as string, executionEnabled: false, categories: [], limits: { perTradeUsd: 50, perTradePct: 0.05, dailyLoss: 100 }, usage: { totalOpen: 0, dailyNotional: 0, dailyRealizedLoss: 0 }, gates: [], events: [] } as Record<string, unknown>;
 const prop = { id: "p1", conditionId: "c1", question: "Will the Fed cut in Dec 2026?", side: "YES", orderSide: "BUY", shares: 820, limitPrice: 0.447, costUsd: 366.54, edgeC: 9.5, expectedProfitUsd: 77.9, midAtProposal: 0.44, midNow: 0.448, createdAt: Date.now(), expiresAt: Date.now() + 12 * 60_000, state: "pending", reason: null, error: null, orderId: null };
+const legs = [
+  { conditionId: "e1", question: "25 bps cut?", token: "NO", capPrice: 0.312, shares: 400, costUsd: 124.8, state: "queued" },
+  { conditionId: "e2", question: "No change?", token: "NO", capPrice: 0.402, shares: 400, costUsd: 160.8, state: "queued" },
+];
+const set = { id: "s1", kind: "set", setKind: "sell-all", eventId: "ev1", eventTitle: "Fed decision", state: "pending", shares: 400, costUsd: 285.6, lockedC: 2.1, expectedProfitUsd: 8.4, createdAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, decidedVia: null, failedLeg: null, error: null, fallbackReason: "STRUCTURAL_AUTO_OFF", legs, held: [], suggestedAction: null };
+const flaggedSet = { ...set, id: "s9", setKind: "buy-all", eventTitle: "Election winner", state: "flagged", fallbackReason: null, held: [{ conditionId: "e3", question: "Candidate A", token: "YES", shares: 820, avgFill: 0.212, bidNow: 0.19 }], suggestedAction: "SELL 820 YES on Polymarket, bid 0.190" };
+let sets: { pending: unknown[]; recent: unknown[] } | undefined;
 const book = {
   positions: [{ conditionId: "c1", question: "Will the Fed cut in Dec 2026?", tokenId: "t1", outcome: "YES", shares: 820, avgPrice: 0.447, markPrice: 0.46, unrealizedUsd: 10.66 }],
   openOrders: [{ orderId: "0x3fa1abcdef", question: "Senate confirms X by Nov 30?", side: "BUY", price: 0.3, shares: 100, filledShares: 20, status: "partial", expiresAt: null }],
@@ -48,14 +55,16 @@ function fakeFetch() {
     if (p === "/api/watchlist") return Response.json(watch);
     if (p === "/api/autonomy") return Response.json(autonomy);
     if (p === "/api/autonomy/kill") return (autonomy.mode = "L0"), Response.json(autonomy.liveOpenOrders ? { cancelled: 2, failed: [] } : { mode: "L0", cancelled: 0, failed: [] });
-    if (p === "/api/proposals") return Response.json({ pending: [prop], recent: [{ ...prop, id: "p0", state: "expired", reason: "PRICE_MOVED" }] });
+    if (p === "/api/proposals") return Response.json({ pending: [prop], recent: [{ ...prop, id: "p0", state: "expired", reason: "PRICE_MOVED" }], sets });
+    if (p === "/api/sets/s1") return Response.json({ ok: true, state: "filled" });
+    if (p === "/api/sets/s9/ack") return (sets = { pending: sets!.pending, recent: [] }, Object.assign(autonomy, { flaggedSets: 0 })), Response.json({ ok: true, state: "acknowledged" });
     if (p === "/api/proposals/p1") return Response.json(JSON.parse(String(init?.body)).action === "approve" ? { ok: true, state: "sent", orderId: "0x3fa1abcdef" } : { ok: true, state: "rejected" });
     if (p === "/api/book/live") return Response.json(book);
     if (p === "/api/paper") return Response.json(paper);
     return Response.json({}, { status: 404 });
   }));
 }
-afterEach(() => (vi.unstubAllGlobals(), calls.splice(0), bodies.splice(0), Object.assign(autonomy, { mode: "L1", executionEnabled: false, exchangeConfigured: undefined, pendingCount: undefined, liveOpenOrders: undefined, recon: undefined })));
+afterEach(() => (vi.unstubAllGlobals(), calls.splice(0), bodies.splice(0), sets = undefined, Object.assign(autonomy, { mode: "L1", executionEnabled: false, exchangeConfigured: undefined, pendingCount: undefined, liveOpenOrders: undefined, recon: undefined, flaggedSets: undefined })));
 
 it("renders watchlist rows with question and signed, right-aligned edge", async () => {
   fakeFetch();
@@ -157,5 +166,41 @@ it("Book defaults to Live at L2 and h/l switch to Paper with text tags", async (
   const g = await until("Paper only market");
   expect(g).toMatch(/PAPER +Paper only market/);
   expect(g).not.toContain("open orders 1");
+  app.unmount();
+});
+
+it("set row shows legs when selected and a then y sends the whole set", async () => {
+  sets = { pending: [set], recent: [] };
+  const { app, key, until } = await onAutonomy();
+  const f = await until("Approvals 2 pending");
+  expect(f).toMatch(/▶.*▾ SET sell-all 2 legs Fed decision/);
+  expect(f).toContain("1/2 NO");
+  expect(f).toContain("cap 0.312");
+  expect(f).toContain("L3 fallback: sets need structural auto (Settings)");
+  await key("j"); // leg rows are skipped: next selectable row is the single proposal
+  expect(await until(/▶.*Will the Fed cut/)).not.toContain("1/2 NO");
+  await key("k");
+  await until(/▶.*▾ SET/);
+  await key("a");
+  expect(await until("SEND LIVE SET")).toContain("SEND LIVE SET: sell-all 2 legs × 400 = $285.60 ? y = confirm, any other key aborts");
+  await key("y");
+  expect(await until("set filled 2/2")).toContain("set filled 2/2");
+  expect(calls).toContain("POST /api/sets/s1");
+  expect(bodies).toContainEqual({ action: "approve", via: "tui" });
+  app.unmount();
+});
+
+it("flagged set shows header chip and red block until A acknowledges it", async () => {
+  sets = { pending: [], recent: [flaggedSet] };
+  autonomy.flaggedSets = 1;
+  const { app, key, until } = await onAutonomy();
+  const f = await until("FLAGGED set");
+  expect(f).toContain("SET ✗ 1");
+  expect(f).toContain('FLAGGED set · buy-all · Election winner · holds YES 820 "Candidate A" avg 0.212 bid 0.190 · suggested: SELL 820 YES');
+  await key("A");
+  expect(await until("acknowledged")).toContain("acknowledged");
+  expect(calls).toContain("POST /api/sets/s9/ack");
+  const g = await until(/^(?![\s\S]*FLAGGED set)/); // refetch after ack drops the block
+  expect(g).not.toContain("FLAGGED set");
   app.unmount();
 });
