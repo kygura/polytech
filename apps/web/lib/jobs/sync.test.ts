@@ -196,7 +196,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
   it("rebaseline 409s on a lost (failed_unknown) order newer than the baseline, naming count + position diff; ack proceeds", async () => {
     await reraise();
     const r = await rebaseline(d);
-    expect(r).toEqual({ ok: false, error: expect.stringMatching(/\d+ live order\(s\) in failed_unknown.*inspect the venue.*diff/s) });
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/\d+ live order\(s\) in failed_unknown.*inspect the venue.*diff/s), code: "FAILED_UNKNOWN", diff: expect.any(String) });
     expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true, diff: expect.any(String) });
     expect(await rebaseline(d)).toMatchObject({ ok: true }); // nothing newer than the fresh baseline
   });

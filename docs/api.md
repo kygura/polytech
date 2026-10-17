@@ -20,7 +20,7 @@ Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types expo
 | POST | /api/proposals/:id | `{action:"approve"\|"reject", via:"web"\|"tui"}` (via defaults to web) | `{ok, state, reason?, error?, orderId?}`; 404 `NOT_FOUND`; 409 `{error}` |
 | POST | /api/proposals/:id/push | `{action, token}`; no session, single-use token from the ntfy action | `{state}`; 403 `{error:"invalid"}`; 409 `{error:"refused"}`; 429 rate limit |
 | GET | /api/book/live | — | `{positions, openOrders, fills, recon}` |
-| POST | /api/recon/rebaseline | — | 200 `{ok, at}`; 409 `{error}` |
+| POST | /api/recon/rebaseline | optional `{ack?: boolean}` | 200 `{ok, at, diff}` (`diff`: exchange vs DB positions, `"none"` if equal); 400 `{error, issues}`; 409 `{error, needsAck, diff?}`: `needsAck:true` = a failed_unknown live order is newer than the baseline, so check the venue and re-POST `{ack:true}`; other 409s have `needsAck:false` and no `diff` |
 | GET | /api/settings | — | `AppSettings` |
 | PUT | /api/settings | partial `AppSettings` | `AppSettings` or 400 `{issues}` |
 | GET | /api/stream | — | SSE: `event: <type>` per `lib/jobs/events.ts`, `data: <json>`; `event: ping` every 15 s. Live-execution types: `proposal.created`, `proposal.updated`, `order.updated`, `order.filled`, `order.error`, `recon.done`, `mode.changed` |

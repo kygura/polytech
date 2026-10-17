@@ -16,24 +16,28 @@ export function ReconStatus({ recon, now }: { recon: Recon | null | undefined; n
   return <span className={`ui ${r.cls}`} title={r.title}>recon <span className={r.glyphCls}>{r.glyph}</span> {r.text}{recon?.status === "mismatch" && <> <Rebaseline /></>}</span>;
 }
 
-/** Mismatch only. Confirm step (10 s, Esc cancels, like Approve), then POST /api/recon/rebaseline; a 409 body's error shows inline. */
+/** Mismatch only. Confirm step (10 s, Esc cancels, like Approve), then POST /api/recon/rebaseline. needsAck 409 (failed_unknown order newer than the baseline): diff plus a second confirm that re-POSTs {ack:true}. Other 409s: error text only. */
 function Rebaseline() {
   const router = useRouter();
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null);
-  const confirmRef = useRef<HTMLButtonElement>(null), openRef = useRef<HTMLButtonElement>(null);
+  const [ackPrompt, setAckPrompt] = useState<{ error: string; diff?: string } | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null), openRef = useRef<HTMLButtonElement>(null), ackCancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!confirm) return;
     confirmRef.current?.focus();
     const t = setTimeout(() => setConfirm(false), 10_000);
     return () => clearTimeout(t);
   }, [confirm]);
-  const cancel = () => { setConfirm(false); setTimeout(() => openRef.current?.focus()); };
-  const run = async () => {
-    setConfirm(false); setBusy(true); setErr(null);
-    const r = await fetch("/api/recon/rebaseline", { method: "POST" }).catch(() => null);
+  // Cancel gets focus, not the override: the override is one Tab away.
+  useEffect(() => { if (ackPrompt) ackCancelRef.current?.focus(); }, [ackPrompt]);
+  const cancel = () => { setConfirm(false); setAckPrompt(null); setTimeout(() => openRef.current?.focus()); };
+  const run = async (ack = false) => {
+    setConfirm(false); setAckPrompt(null); setBusy(true); setErr(null);
+    const r = await fetch("/api/recon/rebaseline", ack ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ack: true }) } : { method: "POST" }).catch(() => null);
     setBusy(false);
     if (r?.ok) return router.refresh();
     const j = await r?.json().catch(() => null);
+    if (j?.needsAck) return setAckPrompt({ error: j.error, diff: j.diff });
     setErr(j?.error ?? `Re-baseline failed: ${r ? r.status : "network error"}`);
   };
   return (
@@ -43,6 +47,13 @@ function Rebaseline() {
           <span className="ui">Re-baseline recon to current exchange balance?</span>
           <button ref={confirmRef} type="button" onClick={() => void run()}>Confirm</button>
           <button type="button" onClick={cancel}>Cancel</button>
+        </span>
+      ) : ackPrompt ? (
+        <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center", flexWrap: "wrap" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}>
+          <span role="alert" className="neg ui">{ackPrompt.error}</span>
+          {ackPrompt.diff && ackPrompt.diff !== "none" && ackPrompt.diff.split("; ").map((t) => <span key={t} className="ui muted">{t}</span>)}
+          <button type="button" onClick={() => void run(true)}>I checked the venue — re-baseline anyway</button>
+          <button ref={ackCancelRef} type="button" onClick={cancel}>Cancel</button>
         </span>
       ) : (
         <button ref={openRef} type="button" disabled={busy} onClick={() => setConfirm(true)}>{busy ? "Re-baselining…" : "Re-baseline"}</button>

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
@@ -11,6 +11,12 @@ const ctx = (o: Record<string, string>) => ({ params: Promise.resolve(o) });
 const put = (url: string, body: unknown) => new Request(url, { method: "PUT", body: JSON.stringify(body) });
 const post = (body?: unknown) => new Request("http://x/", { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 const U = "http://x/api";
+
+// The test env has no exchange, so the real rebaseline always refuses before the failed_unknown check. The mock keeps the real job and lets one test inject a needsAck refusal.
+vi.mock("../../lib/jobs", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/jobs")>();
+  return { ...real, rebaseline: vi.fn(real.rebaseline) };
+});
 
 let h: Record<string, any>;
 beforeAll(async () => {
@@ -62,10 +68,24 @@ describe("http api", () => {
     expect((await ok.json()).bankroll).toBe(2000);
   });
 
-  it("rebaseline: 409 with {error} when refused", async () => {
-    const r = await h.rebaseline!.POST();
+  it("rebaseline: body {ack?} validated; no exchange in tests -> 409 {error, needsAck:false}", async () => {
+    expect((await h.rebaseline!.POST(post({ ack: "yes" }))).status).toBe(400);
+    for (const body of [undefined, { ack: true }]) {
+      const r = await h.rebaseline!.POST(post(body));
+      expect(r.status).toBe(409);
+      expect(await r.json()).toEqual({ error: expect.any(String), needsAck: false });
+    }
+  });
+
+  it("rebaseline: needsAck 409 carries diff; ack flag reaches the job", async () => {
+    const { rebaseline } = await import("../../lib/jobs");
+    vi.mocked(rebaseline).mockResolvedValueOnce({ ok: false, error: "1 live order(s) in failed_unknown since the last baseline", code: "FAILED_UNKNOWN", diff: "tok: ledger 1 vs exchange 0" });
+    const r = await h.rebaseline!.POST(post());
     expect(r.status).toBe(409);
-    expect(await r.json()).toEqual({ error: expect.any(String) });
+    expect(await r.json()).toEqual({ error: expect.any(String), needsAck: true, diff: "tok: ledger 1 vs exchange 0" });
+    expect(vi.mocked(rebaseline)).toHaveBeenLastCalledWith(expect.anything(), { ack: false });
+    await h.rebaseline!.POST(post({ ack: true }));
+    expect(vi.mocked(rebaseline)).toHaveBeenLastCalledWith(expect.anything(), { ack: true });
   });
 
   it("mode L2 refused, L1 allowed, kill -> L0", async () => {

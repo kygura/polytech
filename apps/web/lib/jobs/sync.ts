@@ -195,7 +195,7 @@ export async function reconcileJob(d: Deps) {
 }
 
 /** Accept the current exchange state as the new ledger base (deposit, withdrawal, payout, pre-existing holdings). Clears a recon halt; never changes mode. */
-export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise<{ ok: true; at: string; diff: string } | { ok: false; error: string }> {
+export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise<{ ok: true; at: string; diff: string } | { ok: false; error: string; code?: "FAILED_UNKNOWN"; diff?: string }> {
   const ex = d.exchange;
   if (!ex) return { ok: false, error: "exchange not configured" };
   const r = await withLock(d, "reconcile", 5 * MIN, async () => {
@@ -213,7 +213,7 @@ export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise
     const diff = reconDetail(Object.keys({ ...mine, ...snap.positions }).flatMap((key) => (Math.abs((mine[key] ?? 0) - (snap.positions[key] ?? 0)) > 0.01 ? [{ key, ledger: mine[key] ?? 0, exchange: snap.positions[key] ?? 0 }] : []))) ?? "none";
     const [base] = await d.db.select({ at: s.reconciliations.at }).from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
     const [lost] = opts.ack ? [] : await d.db.select({ n: count() }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.status, "failed_unknown"), base ? gt(s.orders.createdAt, base.at) : undefined));
-    if (lost?.n) return { ok: false as const, error: `${lost.n} live order(s) in failed_unknown since the last baseline: inspect the venue before rebaselining (it would mask a lost order). Position diff exchange vs DB: ${diff}` };
+    if (lost?.n) return { ok: false as const, error: `${lost.n} live order(s) in failed_unknown since the last baseline: inspect the venue before rebaselining (it would mask a lost order). Position diff exchange vs DB: ${diff}`, code: "FAILED_UNKNOWN" as const, diff };
     await insertBaseline(d, at, snap, "rebaseline");
     return { ok: true as const, at: at.toISOString(), diff };
   });
