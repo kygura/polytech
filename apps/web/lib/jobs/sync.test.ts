@@ -1,9 +1,9 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Exchange } from "@pm/pm";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { currentMode, decide, deps, kill, propose, read, reconcileJob, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
+import { currentMode, decide, deps, expireProposals, kill, propose, read, reconcileJob, rebaseline, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
 
 process.env.PGLITE_DIR = "memory://";
 delete process.env.NTFY_TOPIC;
@@ -134,8 +134,89 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect(await syncFills(d)).toMatchObject({ failedUnknown: 1 });
     expect((await order(o.id)).status).toBe("failed_unknown");
     expect(events.some((e) => e.type === "order.error" && e.payload.id === o.id)).toBe(true);
+    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, pid)))[0]).toMatchObject({ status: "failed", error: "ORDER_FAILED_UNKNOWN" });
+    expect(events.some((e) => e.type === "proposal.updated" && e.payload.id === pid && e.payload.error === "ORDER_FAILED_UNKNOWN")).toBe(true);
     await syncFills(d);
     expect(places).toBe(before + 1); // the one failed attempt, nothing resent
+  });
+
+  const reraise = () => setMode(d, "L2", "test"); // sync auto-downgrades after 3 failed orders
+  let seqO = 0;
+  const mkOrder = async (v: Partial<typeof s.orders.$inferInsert>) => {
+    const n = ++seqO;
+    await d.db.insert(s.orders).values({ id: `ord_x${n}`, thesisId: `th_x${n}`, idempotencyKey: `th_x${n}:0`, conditionId: "c", tokenId: "tokX", side: "BUY", limitPrice: 0.4, size: 10, modeAtSend: "L2", paper: false, createdAt: new Date(d.now()), status: "sending", ...v });
+    return `ord_x${n}`;
+  };
+  const lastRecon = async () => (await d.db.select().from(s.reconciliations).orderBy(desc(s.reconciliations.id)).limit(1))[0]!;
+
+  it("'matched' order with no trade ever -> failed_unknown after 10 min", async () => {
+    const id = await mkOrder({ status: "matched", clobOrderId: "fake-ghost", createdAt: new Date(t - 11 * MIN) });
+    expect(await syncFills(d)).toMatchObject({ failedUnknown: 1 });
+    expect((await order(id)).status).toBe("failed_unknown");
+  });
+
+  it("ambiguous match (2 candidates) is never resent and never attached", async () => {
+    const exp = new Date(t + 3_600_000), before = places;
+    const mk = () => fx.place({ tokenId: "tokX", side: "BUY", price: 0.4, shares: 10, expiresAt: exp });
+    const [a, b] = [await mk(), await mk()];
+    const id = await mkOrder({ status: "unknown" });
+    await syncFills(d);
+    expect(await order(id)).toMatchObject({ status: "unknown", clobOrderId: null });
+    t += 10 * MIN;
+    expect(await syncFills(d)).toMatchObject({ failedUnknown: 1 });
+    expect(await order(id)).toMatchObject({ status: "failed_unknown", clobOrderId: null });
+    expect(events.some((e) => e.type === "order.error" && e.payload.id === id && e.payload.error === "AMBIGUOUS_MATCH")).toBe(true);
+    expect(places).toBe(before);
+    await fx.cancel([a.orderId, b.orderId]);
+  });
+
+  it("concurrent reconcile + sync with an unsynced fill: no false mismatch", async () => {
+    await reraise();
+    const o = (await fx.openOrders()).find((x) => x.filled < x.shares && x.tokenId !== "tokX")!;
+    t += 1000;
+    fx.fill(o.orderId, 0.5);
+    const [r] = await Promise.all([reconcileJob(d), syncFills(d)]);
+    expect(r).not.toMatchObject({ status: "mismatch" });
+    expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
+  });
+
+  it("rebaseline refused (409 text) while an order is sending/unknown", async () => {
+    await reraise();
+    await expireProposals(d); // clock jumped: stale pending ones would be refused
+    fx.failNext(new Error("socket hang up"));
+    const o = await ofProposal(await approveOne());
+    expect(o.status).toBe("unknown");
+    expect(await rebaseline(d)).toEqual({ ok: false, error: expect.stringContaining("sending or unknown") });
+    t += 10 * MIN;
+    await syncFills(d);
+    expect((await order(o.id)).status).toBe("failed_unknown");
+  });
+
+  it("deposit -> mismatch halts -> rebaseline ok, clears halt, keeps mode", async () => {
+    await reraise();
+    fx.setBalance((await fx.balance()).usdc + 500);
+    expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
+    expect(await rebaseline(d)).toMatchObject({ ok: true });
+    expect(await lastRecon()).toMatchObject({ ok: true, baseline: true });
+    expect(events.at(-1)).toMatchObject({ type: "recon.done", payload: { status: "ok", detail: "rebaseline" } });
+    expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
+    expect(await currentMode(d.db)).toBe("L2");
+    expect(await propose(big())).not.toMatchObject({ skipped: { RECON_HALTED: expect.anything() } });
+  });
+
+  it("pre-existing holdings are captured in the baseline, later fills still reconcile", async () => {
+    const real = ex.positions;
+    (ex as any).positions = async () => ({ ...(await real()), tokPre: 7 });
+    expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
+    expect(await rebaseline(d)).toMatchObject({ ok: true });
+    expect((await lastRecon()).positions).toMatchObject({ tokPre: 7 });
+    expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
+    const o = (await fx.openOrders()).find((x) => x.filled < x.shares)!;
+    t += 1000;
+    fx.fill(o.orderId, 0.25);
+    expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
+    (ex as any).positions = real;
+    expect(await rebaseline(d)).toMatchObject({ ok: true });
   });
 
   it("kill cancels all live orders, expires pending proposals, returns counts", async () => {

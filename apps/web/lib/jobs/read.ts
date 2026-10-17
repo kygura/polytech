@@ -299,12 +299,12 @@ export async function autonomy(r: ReadDeps) {
 }
 
 // ---------------------------------------------------------------- proposals (DESIGN 8.1 / 8.7)
-/** Pending + sending (oldest first) and the last 10 resolved (newest first). */
+/** Pending + sending (soonest expiry first) and the last 10 resolved (newest first). */
 export async function proposals(r: ReadDeps) {
   const { db } = r;
   const q = () => db.select({ p: s.proposals, m: s.markets }).from(s.proposals).innerJoin(s.markets, eq(s.markets.conditionId, s.proposals.conditionId));
   const [open, recent] = await Promise.all([
-    q().where(inArray(s.proposals.status, ["pending", "approved"])).orderBy(asc(s.proposals.createdAt)),
+    q().where(inArray(s.proposals.status, ["pending", "approved"])).orderBy(asc(s.proposals.expiresAt)),
     q().where(inArray(s.proposals.status, ["sent", "rejected", "expired", "failed"])).orderBy(desc(s.proposals.decidedAt)).limit(10),
   ]);
   const ids = [...new Set([...open, ...recent].map((x) => x.p.conditionId))];

@@ -27,6 +27,7 @@ beforeAll(async () => {
     mode: await import("./autonomy/mode/route"),
     kill: await import("./autonomy/kill/route"),
     autonomy: await import("./autonomy/route"),
+    rebaseline: await import("./recon/rebaseline/route"),
     bookLive: await import("./book/live/route"),
     stream: await import("./stream/route"),
     cron: await import("./cron/[job]/route"),
@@ -59,6 +60,12 @@ describe("http api", () => {
     expect((await bad.json()).issues.length).toBeGreaterThan(0);
     const ok = await h.settings!.PUT(put(`${U}/settings`, { bankroll: 2000 }));
     expect((await ok.json()).bankroll).toBe(2000);
+  });
+
+  it("rebaseline: 409 with {error} when refused", async () => {
+    const r = await h.rebaseline!.POST();
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: expect.any(String) });
   });
 
   it("mode L2 refused, L1 allowed, kill -> L0", async () => {

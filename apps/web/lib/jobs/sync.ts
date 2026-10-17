@@ -1,7 +1,7 @@
 import { applyFill, reconcile } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, asc, desc, eq, gt, isNull, max } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, max } from "drizzle-orm";
 import { downgradeOn } from "./autonomy";
 import { DAY, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -66,6 +66,9 @@ export async function syncFills(d: Deps) {
     const setStatus = async (o: Order, status: string, extra: Partial<Order> = {}) => {
       Object.assign(o, { status, ...extra });
       await db.update(s.orders).set({ status, ...extra }).where(eq(s.orders.id, o.id));
+      if (status !== "failed_unknown") return;
+      for (const p of await db.update(s.proposals).set({ status: "failed", error: "ORDER_FAILED_UNKNOWN" }).where(eq(s.proposals.orderId, o.id)).returning({ id: s.proposals.id }))
+        publish("proposal.updated", { id: p.id, state: "failed", error: "ORDER_FAILED_UNKNOWN", orderId: o.clobOrderId ?? o.id });
     };
 
     // 1. sending/unknown orders without a clob id: attach by unique (token, side, price, shares) match; else 10 min => failed_unknown. Never resend.
@@ -127,32 +130,68 @@ export async function syncFills(d: Deps) {
 // ---------------------------------------------------------------- reconcile
 /**
  * Ledger definition (documented, deliberately simple):
- *  - first run stores a baseline row (ok, ledger = exchange usdc); positions are not compared on it.
- *  - later runs: usdc ledger = baseline usdc + cash flow of live fills newer than the baseline (BUY -price*size-fee, SELL +price*size-fee);
- *    position ledger = open live positions (tokenId -> shares). Both compared via core reconcile (tol 0.01).
- *  Deposits, withdrawals and settlement payouts are not in the ledger, so they show as a mismatch (halt) until handled by a human.
+ *  - base = newest reconciliation row with baseline=true (first run / POST /api/recon/rebaseline insert one: ledger = exchange, positions = exchange).
+ *  - usdc ledger = base.usdc + cash flow of live fills newer than base.at (BUY -price*size-fee, SELL +price*size-fee);
+ *    position ledger = base.positions + signed live fill shares by token after base.at (BUY +, SELL -). Compared via core reconcile (tol 0.01).
+ *  Deposits, withdrawals and settlement payouts are not in the ledger, so they show as a mismatch (halt) until a human rebaselines.
  */
+const snapshot = async (ex: NonNullable<Deps["exchange"]>) => {
+  const [bal, positions] = await Promise.all([ex.balance(), ex.positions()]);
+  return { usdc: bal.usdc, positions };
+};
+const insertBaseline = async (d: Deps, at: Date, x: { usdc: number; positions: Record<string, number> }, detail: string | null) => {
+  await d.db.insert(s.reconciliations).values({ at, ok: true, baseline: true, usdcLedger: x.usdc, usdcExchange: x.usdc, positions: x.positions });
+  publish("recon.done", { at: at.toISOString(), status: "ok", detail });
+};
+
 export async function reconcileJob(d: Deps) {
   const ex = d.exchange;
   if (!ex) return { status: null };
   return withLock(d, "reconcile", 5 * MIN, async () => {
     const { db } = d, at = new Date(d.now());
-    await syncFills(d); // book what the exchange already shows, or in-flight trades read as drift
-    const [bal, exPos] = await Promise.all([ex.balance(), ex.positions()]);
-    const [base] = await db.select().from(s.reconciliations).orderBy(asc(s.reconciliations.id)).limit(1);
-    let ledger = bal.usdc, positions: Record<string, number> = {};
-    if (base) {
-      const rows = await db.select({ f: s.fills, side: s.orders.side }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(and(eq(s.fills.paper, false), gt(s.fills.ts, base.at)));
-      ledger = base.usdcExchange + rows.reduce((t, { f, side }) => t + (side === "BUY" ? -1 : 1) * f.price * f.size - f.fee, 0);
-      for (const p of await db.select().from(s.positions).where(and(eq(s.positions.paper, false), isNull(s.positions.closedAt)))) positions[p.tokenId] = (positions[p.tokenId] ?? 0) + p.size;
+    const synced = async () => { const r = await syncFills(d); return !("skipped" in r) && !r.error; }; // book what the exchange already shows, or in-flight trades read as drift
+    if (!(await synced())) return { status: null }; // stale ledger: judging it would be a false alarm
+    const [base] = await db.select().from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
+    let x = await snapshot(ex);
+    if (!base) return (await insertBaseline(d, at, x, null), { status: "ok", mismatches: 0 });
+    const check = async () => {
+      const rows = await db.select({ f: s.fills, side: s.orders.side, tok: s.orders.tokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(and(eq(s.fills.paper, false), gt(s.fills.ts, base.at)));
+      const positions = { ...base.positions };
+      for (const { f, side, tok } of rows) positions[tok] = (positions[tok] ?? 0) + (side === "BUY" ? 1 : -1) * f.size;
+      const ledger = base.usdcExchange + rows.reduce((t, { f, side }) => t + (side === "BUY" ? -1 : 1) * f.price * f.size - f.fee, 0);
+      return { ledger, r: reconcile({ usdc: ledger, positions }, x) };
+    };
+    let c = await check();
+    if (!c.r.ok) { // one retry: a trade may have landed between the sync and the balance read
+      if (!(await synced())) return { status: null };
+      x = await snapshot(ex);
+      c = await check();
     }
-    const r = base ? reconcile({ usdc: ledger, positions }, { usdc: bal.usdc, positions: exPos }) : { ok: true, mismatches: [] };
-    await db.insert(s.reconciliations).values({ at, ok: r.ok, usdcLedger: ledger, usdcExchange: bal.usdc, mismatches: r.mismatches });
+    const { ledger, r } = c;
+    await db.insert(s.reconciliations).values({ at, ok: r.ok, usdcLedger: ledger, usdcExchange: x.usdc, mismatches: r.mismatches });
     const status = r.ok ? "ok" : "mismatch";
     publish("recon.done", { at: at.toISOString(), status, detail: reconDetail(r.mismatches) });
     if (!r.ok) await downgradeOn(d, { balanceMismatch: true });
     return { status, mismatches: r.mismatches.length };
   });
+}
+
+/** Accept the current exchange state as the new ledger base (deposit, withdrawal, payout, pre-existing holdings). Clears a recon halt; never changes mode. */
+export async function rebaseline(d: Deps): Promise<{ ok: true; at: string } | { ok: false; error: string }> {
+  const ex = d.exchange;
+  if (!ex) return { ok: false, error: "exchange not configured" };
+  const r = await withLock(d, "reconcile", 5 * MIN, async () => {
+    const [busy] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, ["sending", "unknown"]))).limit(1);
+    if (busy) return { ok: false as const, error: "live orders are still sending or unknown" };
+    const sy = await syncFills(d);
+    if ("skipped" in sy || sy.error) return { ok: false as const, error: "fill sync unavailable, retry" };
+    const [still] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, ["sending", "unknown"]))).limit(1);
+    if (still) return { ok: false as const, error: "live orders are still sending or unknown" };
+    const at = new Date(d.now());
+    await insertBaseline(d, at, await snapshot(ex), "rebaseline");
+    return { ok: true as const, at: at.toISOString() };
+  });
+  return "skipped" in r ? { ok: false, error: "reconcile in progress, retry" } : r;
 }
 
 export const reconDetail = (mm: { key: string; ledger: number; exchange: number }[]) =>

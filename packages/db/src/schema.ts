@@ -220,6 +220,8 @@ export const reconciliations = pgTable("reconciliations", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   at: ts("at").notNull().defaultNow(),
   ok: boolean("ok").notNull(),
+  baseline: boolean("baseline").notNull().default(false),
+  positions: jsonb("positions").$type<Record<string, number>>().notNull().default({}),
   usdcLedger: dp("usdc_ledger").notNull(),
   usdcExchange: dp("usdc_exchange").notNull(),
   mismatches: jsonb("mismatches").$type<{ key: string; ledger: number; exchange: number }[]>().notNull().default([]),
