@@ -5,7 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { SHORTCUTS, useGlobalKeys } from "../hooks/useGlobalKeys";
 import { useSse, type SseEvent } from "../hooks/useSse";
+import { ApprovalsBadge } from "./ApprovalsBadge";
 import { ErrorBar } from "./ErrorBar";
+import { killError, postKill, type Recon } from "./live";
 import { useTheme } from "../hooks/useTheme";
 import { KillSwitchButton } from "./KillSwitchButton";
 import { ModeBadge } from "./ModeBadge";
@@ -13,8 +15,10 @@ import { SseIndicator } from "./SseIndicator";
 import { STALE_MS, StaleBanner } from "./StaleBanner";
 import css from "./Shell.module.css";
 
-const NAV = [["/watchlist", "Watchlist"], ["/fleet", "Fleet"], ["/calibration", "Calibration"], ["/paper", "Paper"], ["/autonomy", "Autonomy"], ["/settings", "Settings"]] as const;
-const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done"]);
+const NAV = [["/watchlist", "Watchlist"], ["/fleet", "Fleet"], ["/calibration", "Calibration"], ["/paper", "Book"], ["/autonomy", "Autonomy"], ["/settings", "Settings"]] as const;
+const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "recon.done"]);
+const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done"]);
+type Status = { pendingCount?: number; liveOpenOrders?: number; recon?: Recon | null };
 
 export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mode: Mode; lastSnapshotAt: number | null; now: number; children: ReactNode }) {
   const router = useRouter();
@@ -39,25 +43,39 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(refreshNow, 400);
   }, [refreshNow]);
+  // Header status (DESIGN 8.7): pending count, live open orders, recon. Refetched on the events that move it.
+  const [status, setStatus] = useState<Status>({});
+  const loadStatus = useCallback(() => {
+    fetch("/api/autonomy").then((r) => (r.ok ? r.json() : null)).then((j) => j && setStatus(j)).catch(() => {});
+  }, []);
+  useEffect(loadStatus, [loadStatus]);
   const sse = useSse((e) => {
     if (e.type === "mode.changed") setMode(e.payload.to as Mode);
     if (REFRESH_ON.has(e.type)) refresh();
+    if (STATUS_ON.has(e.type)) loadStatus();
   });
   // Polling fallback while SSE is down.
   useEffect(() => {
     if (sse.status === "live") return;
-    const id = setInterval(refreshNow, 30_000);
+    const id = setInterval(() => { void refreshNow(); loadStatus(); }, 30_000);
     return () => clearInterval(id);
-  }, [sse.status, refreshNow]);
+  }, [sse.status, refreshNow, loadStatus]);
 
   useGlobalKeys({
     onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []),
     onTheme: toggle,
   });
 
+  const [killErr, setKillErr] = useState<string | null>(null);
   const kill = async () => {
-    const r = await fetch("/api/autonomy/kill", { method: "POST" });
-    if (r.ok) { setMode("L0"); router.refresh(); }
+    try {
+      const res = await postKill();
+      setMode("L0");
+      setKillErr(killError(res));
+      loadStatus();
+      router.refresh();
+      return res;
+    } catch (e) { setKillErr((e as Error).message); }
   };
 
   return (
@@ -71,10 +89,12 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
           <button type="button" className={css.themeBtn} onClick={toggle} aria-label="toggle theme (t)" title="toggle theme (t)">theme</button>
           <SseIndicator status={sse.status} lastEventAt={sse.lastEventAt} />
           <ModeBadge mode={mode} size="lg" />
-          <KillSwitchButton mode={mode} onKill={kill} />
+          <ApprovalsBadge pendingCount={status.pendingCount ?? 0} recon={status.recon} />
+          <KillSwitchButton mode={mode} liveOpenOrders={status.liveOpenOrders ?? 0} onKill={kill} />
         </div>
       </header>
       <main className={css.main}>
+        {killErr && <ErrorBar message={killErr} onRetry={() => void kill()} onDismiss={() => setKillErr(null)} />}
         {refreshErr && <ErrorBar message={refreshErr} onRetry={refreshNow} />}
         {/* Watchlist renders its own banner (it also mutes its numbers); settings is not a data view. */}
         {lastSnapshotAt != null && now - lastSnapshotAt > STALE_MS && !/^\/(watchlist|settings)/.test(path) && <StaleBanner lastSnapshotAt={lastSnapshotAt} now={now} />}

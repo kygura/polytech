@@ -37,7 +37,7 @@ export function useGlobalKeys({ onHelp, onTheme }: { onHelp: () => void; onTheme
 }
 
 export const SHORTCUTS: [string, string][] = [
-  ["g w / g f / g c / g p / g a / g s", "watchlist / fleet / calibration / paper / autonomy / settings"],
+  ["g w / g f / g c / g p / g a / g s", "watchlist / fleet / calibration / book / autonomy / settings"],
   ["j / k", "move selection"], ["Enter", "open row"], ["/", "focus filter"], ["Esc", "blur / close"],
   ["p / m / r", "pin / mute / re-research selected"], ["t", "toggle theme"], ["?", "this sheet"],
 ];

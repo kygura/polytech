@@ -17,6 +17,7 @@
 .divider { color: var(--muted); font-family: var(--font-ui); padding: var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border); margin-top: var(--sp-3); }
 
 .chip { font-size: var(--fs-xs); line-height: var(--lh-xs); border: 1px solid var(--mode-1); color: var(--mode-1); border-radius: var(--radius); padding: 0 var(--sp-1); margin-left: var(--sp-1); }
+.chipLive { border-color: var(--mode-2); color: var(--mode-2); }
 .tag { font-size: var(--fs-xs); line-height: var(--lh-xs); border: 1px solid var(--warn); color: var(--warn); border-radius: var(--radius); padding: 0 var(--sp-1); margin-left: var(--sp-1); }
 
 .modes { display: flex; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-3) var(--sp-3) 0; }
