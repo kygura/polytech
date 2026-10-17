@@ -44,9 +44,26 @@ export type PaperBook = {
 
 export type Autonomy = {
   mode: Mode; executionEnabled: boolean;
+  exchangeConfigured?: boolean; pendingCount?: number; liveOpenOrders?: number; recon?: Recon | null;
   categories: { category: string; override: Mode | null; effective: Mode }[];
   limits: { perTradeUsd: number; perTradePct: number; dailyLoss: number };
   usage: { totalOpen: number; dailyNotional: number; dailyRealizedLoss: number };
   gates: { gate: string; met: boolean; detail: string }[];
   events: { id: number; ts: number; fromMode: Mode; toMode: Mode; scope: string; reason: string; actor: string }[];
 };
+
+// Phase 6 live execution (DESIGN 8.6/8.7), mirrored from apps/web/lib/jobs/read.ts.
+export type Recon = { at: N; status: "ok" | "mismatch" | "late" | null; detail: string | null };
+export type Proposal = {
+  id: string; conditionId: string; question: string; side: Side; orderSide?: "BUY" | "SELL"; shares: number; limitPrice: number; costUsd: number;
+  edgeC: N; expectedProfitUsd: number; midAtProposal: number; midNow: N; createdAt: number; expiresAt: number;
+  state: "pending" | "sending" | "sent" | "rejected" | "expired" | "failed"; reason: string | null; error: string | null; orderId: string | null;
+};
+export type Proposals = { pending: Proposal[]; recent: Proposal[] };
+export type LiveBook = {
+  positions: { conditionId: string; question: string; tokenId: string; outcome: string; shares: number; avgPrice: number; markPrice: N; unrealizedUsd: N }[];
+  openOrders: { orderId: string; question: string; side: string; price: number; shares: number; filledShares: number; status: string; expiresAt: N }[];
+  fills: { tradeId: string; question: string; side: string; price: number; shares: number; feeUsd: number; at: number }[];
+  recon?: Recon;
+};
+export type KillResult = { cancelled?: number; cancelledOrders?: number; failed?: { orderId: string; error: string }[] };

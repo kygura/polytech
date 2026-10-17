@@ -9,7 +9,12 @@ export const signColor = (v: number | null | undefined) => (v == null ? undefine
 export const sideColor = (s: string | null | undefined) => (s === "YES" ? "green" : s === "NO" ? "red" : "gray");
 
 /** Shared by every view: refresh tick, body size, footer flash, typing guard, current mode. */
-export type Ctx = { tick: number; w: number; h: number; active: boolean; mode: Mode; flash: (text: string, color?: string) => void; setTyping: (on: boolean) => void };
+export type Ctx = {
+  tick: number; w: number; h: number; active: boolean; mode: Mode; flash: (text: string, color?: string) => void; setTyping: (on: boolean) => void;
+  /** Footer prompt: only `key` runs `run`, any other key aborts (live money never moves on one keystroke). */
+  confirm: (text: string, key: string, run: () => void) => void;
+  killFailed: { orderId: string; error: string }[];
+};
 
 /** Cell: plain string (padded by the column) or [string, color]. */
 export type Cell = string | [string, string | undefined];

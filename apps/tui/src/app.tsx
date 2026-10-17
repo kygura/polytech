@@ -4,7 +4,7 @@ import { authHeaders } from "./auth";
 import { BASE, post, useFetch } from "./api";
 import { hhmm } from "./fmt";
 import { streamEvents } from "./sse";
-import type { Autonomy as AutT, Mode } from "./types";
+import type { Autonomy as AutT, KillResult, Mode } from "./types";
 import { type Ctx, MODE_COLOR, MODE_NAME } from "./ui";
 import { Autonomy } from "./views/autonomy";
 import { Calibration } from "./views/calibration";
@@ -13,17 +13,18 @@ import { Paper } from "./views/paper";
 import { Settings } from "./views/settings";
 import { Watchlist } from "./views/watchlist";
 
-const VIEWS = ["Watchlist", "Fleet", "Calib", "Paper", "Autonomy", "Settings"] as const;
+const VIEWS = ["Watchlist", "Fleet", "Calib", "Book", "Autonomy", "Settings"] as const;
 // Which SSE events make a view refetch.
-const RELEVANT: RegExp[] = [/^(sweep|snapshot|screen|thesis|pod|mode)\./, /^pod\./, /^calibration\./, /^(paper|snapshot|mode)\./, /^mode\./, /^$/];
+const RELEVANT: RegExp[] = [/^(sweep|snapshot|screen|thesis|pod|mode)\./, /^pod\./, /^calibration\./, /^(paper|snapshot|mode|order)\./, /^(mode|proposal|order|recon)\./, /^$/];
 const KEYS = "j/k move  Enter open  / filter  s/S sort  r research  p pin  m mute  R refresh  K kill  ? help  q quit";
 const KEYS_NARROW = "j/k Enter / s/S r p m R K ? q";
 const HELP = [
   "1-6 Tab/S-Tab  switch view        j/k ↑/↓  move      Enter  open   Esc  back",
   "/  filter (Enter apply, Esc clear) s/S  sort col/dir  h/l ←/→  watchlist tab",
   "r  re-research   p  pin   m  mute   R  refresh        q  quit",
-  "Paper: x  close selected open position at best bid",
-  "K  KILL SWITCH → L0 (any view)     Autonomy: 0/1 set L0/L1, 2-4 refused",
+  "Book: h/l  Live/Paper tab   x  close selected paper position at best bid",
+  "K  KILL SWITCH → L0 (any view; with live orders press K twice)",
+  "Autonomy: 0-2 set mode, 3-4 refused   j/k select   a approve (y confirms)   x reject",
   "Calibration: Tab cycles selects, ←/→ change value",
 ];
 
@@ -35,10 +36,12 @@ export function App() {
   const [flash, setFlash] = useState<{ text: string; color?: string; kill?: boolean } | null>(null);
   const [mode, setMode] = useState<Mode>("L0"), [modeTick, setModeTick] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const [prompt, setPrompt] = useState<{ text: string; key: string; run: () => void; color: string } | null>(null);
+  const [killFailed, setKillFailed] = useState<NonNullable<KillResult["failed"]>>([]);
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  const aut = useFetch<AutT>("/api/autonomy", modeTick).data;
+  const aut = useFetch<AutT>("/api/autonomy", modeTick + tick).data;
   useEffect(() => void (aut && setMode(aut.mode)), [aut]);
 
   useEffect(() => {
@@ -48,7 +51,7 @@ export function App() {
       (e) => {
         if (e.event === "ping") return;
         if (/^(sweep|snapshot)\./.test(e.event)) setSweptAt(Date.now());
-        if (e.event === "mode.changed") setModeTick((t) => t + 1);
+        if (/^(mode|proposal|order|recon)\./.test(e.event)) setModeTick((t) => t + 1); // header badges + live order count
         if (RELEVANT[viewRef.current]!.test(e.event)) setTick((t) => t + 1);
       },
       setLive, ac.signal,
@@ -63,20 +66,30 @@ export function App() {
   };
   const kill = async () => {
     try {
-      await post("/api/autonomy/kill");
+      const r = await post<KillResult>("/api/autonomy/kill");
+      const n = r.cancelled ?? r.cancelledOrders ?? 0, failed = r.failed ?? [];
       setMode("L0");
       setModeTick((t) => t + 1);
-      say("KILLED → L0", undefined, true);
+      setKillFailed(failed);
+      if (failed.length) say(`KILLED → L0 · ${n} cancelled · ${failed.length} FAILED (see Autonomy)`, "red");
+      else say(`KILLED → L0${n ? ` · ${n} cancelled` : ""}`, undefined, true);
     } catch (e) {
       say(`kill failed: ${(e as Error).message}`, "red");
     }
   };
 
+  const confirm = (text: string, k: string, run: () => void, color = "yellow", ms?: number) => {
+    const p = { text, key: k, run, color };
+    setPrompt(p);
+    if (ms) setTimeout(() => setPrompt((x) => (x === p ? null : x)), ms);
+  };
   useInput(
     (ch, key) => {
+      if (prompt) return setPrompt(null), ch === prompt.key ? prompt.run() : say("aborted", "gray");
       if (help) return setHelp(false);
       if (ch === "q") return exit();
-      if (ch === "K") return void kill();
+      const live = aut?.liveOpenOrders ?? 0;
+      if (ch === "K") return live > 0 ? confirm(`K again: kill + cancel ${live} LIVE orders · any other key aborts`, "K", () => void kill(), "red", 5000) : void kill();
       if (ch === "?") return setHelp(true);
       if (ch === "R") return setTick((t) => t + 1);
       // Autonomy view owns 0-4 (mode keys); Calibration owns plain Tab (select cycling).
@@ -88,7 +101,7 @@ export function App() {
   );
 
   const h = Math.max(5, rows - 4), w = columns;
-  const ctx: Ctx = { tick, w, h, active: !help && !typing, mode, flash: say, setTyping };
+  const ctx: Ctx = { tick, w, h, active: !help && !typing && !prompt, mode, flash: say, setTyping, confirm: (t, k, run) => confirm(t, k, run), killFailed };
   const stale = sweptAt != null && now - sweptAt > 5 * 60_000 ? `STALE ${Math.round((now - sweptAt) / 60_000)}m` : null;
   const rule = "─".repeat(Math.max(0, w - 2));
   const body = [<Watchlist ctx={ctx} />, <Fleet ctx={ctx} />, <Calibration ctx={ctx} />, <Paper ctx={ctx} />, <Autonomy ctx={ctx} onMode={setMode} />, <Settings ctx={ctx} />][view];
@@ -109,6 +122,8 @@ export function App() {
             {live ? <Text color="green">● live</Text> : <Text color="red">● offline</Text>}
             {"  "}
             <Text color={MODE_COLOR[mode]} bold>{mode} {MODE_NAME[mode]}</Text>
+            {aut?.pendingCount ? <Text color="yellow" bold>{`  ${aut.pendingCount} PENDING`}</Text> : null}
+            {aut?.recon?.status === "mismatch" && <Text color="red" bold>  RECON ✗</Text>}
             <Text color="gray">   K=KILL</Text>
           </Text>
         </Box>
@@ -125,9 +140,9 @@ export function App() {
       <Text color="gray"> {rule}</Text>
       <Text wrap="truncate">
         {" "}
-        {flash ? (
+        {prompt ? <Text color={prompt.color} bold>{prompt.text}</Text> : flash ? (
           flash.kill ? <Text backgroundColor="red" color="white" bold> {flash.text} </Text> : <Text color={flash.color}>{flash.text}</Text>
-        ) : <Text color="gray">{w < 100 ? KEYS_NARROW : KEYS}</Text>}
+        ) : <Text color="gray">{(w < 100 ? KEYS_NARROW : KEYS) + (view === 4 ? (w < 100 ? " a x" : "  a approve  x reject") : "")}</Text>}
         {"   "}
         {stale ? <Text color="yellow">{stale}</Text> : <Text color="gray">{sweptAt ? `swept ${hhmm(sweptAt)}` : ""}</Text>}
       </Text>
