@@ -111,7 +111,7 @@ SPEC phase 6: real CLOB orders behind per-order approval (web, TUI, ntfy push), 
 | P4 | fill sync + reconciliation cron + kill cancels live + autonomy unlock L2 + crons | L2 worker sonnet@medium | P3 | done |
 | U3 | Web approvals pane + live states per D2 | L2 ui-impl fable@medium | D2, P3 | done |
 | U4 | TUI approvals view per D2 | L2 ui-impl fable@medium | D2, P3 | done |
-| V2 | Verification gate | reviewers | all | todo |
+| V2 | Verification gate | reviewers | all | done |
 
 ## Decisions so far (build 2)
 
@@ -125,3 +125,6 @@ SPEC phase 6: real CLOB orders behind per-order approval (web, TUI, ntfy push), 
 - 2026-10-17: U3 done. Shell refetches /api/autonomy on events (not per page). Market link /markets/[id]. Halted approve → text 'orders halted'. Known pre-existing: disabled mode buttons look enabled (inline color overrides :disabled). Gate V2 dispatched.
 - 2026-10-17: gate V2 loop 1. Reviews: risk opus, reliability+finalizer sonnet, spec+ponytail sonnet, drift haiku. Planner calls: structural theses skipped in L2 (STRUCTURAL_PHASE7); CAS pending→approved + no-resend is the double-send guard, attempt key audit-only; expire cron */2 (Hobby). Fix batches (disjoint, no agent commits): A live.ts money path sonnet, B recon rebaseline+sync sonnet, C UI/docs/agent env allowlist/db test timeout haiku. Frontier kept ≤20%; opus re-review after.
 - 2026-10-17: V2 loop 1 fixes committed: B ddc205e, A ea264a9, B follow-up 787350e, C (this). Agent subprocess env now allowlisted (was leaking PM_PRIVATE_KEY to the local runner). Loop 2: full suite + opus risk re-review.
+- 2026-10-17: V2 loop 2. Suite green 2/3 (login dotenv test flake, pre-existing); live.test 5/5. Opus re-review: 8/8 loop-1 fixes confirmed; new HIGH live positions never settle on resolution → daily-loss dead at L2; MED rebaseline can mask failed_unknown fill; LOWs (post-kill proposal window, stuck sweep vs late order, category override mid-send, post-migration auto-baseline, pod.failed unscrubbed). Batches D (sonnet, jobs) + E (sonnet, login flake root cause).
+- 2026-10-17: V2 loop 3. Opus final risk: PASS (all loop-2 items fixed, no new HIGH/MED, single place() path). Deferred LOW → phase 7: rebaseline should also block on matched-with-zero-fills orders; stuck sweep matches by thesis not proposal; late SELL after settlement dropped (BUY-only today); send fail() double event. Suite 2/3 (pglite beforeAll 10s timeout under load) → 60s hook timeout fix in flight.
+- 2026-10-17: V2 PASS. db beforeAll 60s; 2/2 forced full runs green (13/13 tasks; core 136, pm 21, agents 16, tui 12, db 6, web 113). Phase 6 build complete; live path unverified until user runs clob-smoke from unblocked network.
