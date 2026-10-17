@@ -30,6 +30,12 @@ describe("db (pglite memory)", () => {
     await db.insert(s.marketFlags).values({ conditionId: "c1", pinned: true });
     await db.insert(s.spend).values({ day: "2026-10-15", anthropicUsd: 1.5 });
     await db.insert(s.rrCache).values({ conditionId: "c1", rulesHash: "h", r: 0.9, detail: { k: 1 } });
+    const prop = { thesisId: "t1", conditionId: "c1", tokenId: "tok", side: "BUY", kind: "entry", sizeUsd: 10, shares: 20, limitPrice: 0.5, expectedProfit: 1, priceAtProposal: 0.5, expiresAt: now, approveTokenHash: "a", rejectTokenHash: "r" };
+    await db.insert(s.proposals).values(prop);
+    await expect(db.insert(s.proposals).values(prop)).rejects.toThrow(); // one pending per thesis
+    await db.insert(s.proposals).values({ ...prop, status: "rejected" }); // non-pending may repeat
+    await db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    expect((await db.select().from(s.fills))[0]?.paper).toBe(true);
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);
   });

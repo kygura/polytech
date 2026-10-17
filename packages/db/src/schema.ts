@@ -1,4 +1,5 @@
-import { bigserial, boolean, date, doublePrecision as dp, index, integer, jsonb, pgTable, text, timestamp, primaryKey } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { bigserial, boolean, date, doublePrecision as dp, index, integer, jsonb, pgTable, text, timestamp, primaryKey, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 
@@ -124,6 +125,8 @@ export const orders = pgTable("orders", {
   status: text("status").notNull(),
   clobOrderId: text("clob_order_id"),
   expiresAt: ts("expires_at"),
+  paper: boolean("paper").notNull().default(true),
+  attempt: integer("attempt").notNull().default(0), // live key = `${thesisId}:${attempt}`
 });
 
 export const fills = pgTable("fills", {
@@ -134,6 +137,7 @@ export const fills = pgTable("fills", {
   size: dp("size").notNull(),
   fee: dp("fee").notNull().default(0),
   txHash: text("tx_hash"),
+  paper: boolean("paper").notNull().default(true),
 });
 
 export const positions = pgTable("positions", {
@@ -183,3 +187,38 @@ export const rrCache = pgTable("rr_cache", {
   r: dp("r").notNull(),
   detail: jsonb("detail"),
 }, (t) => [primaryKey({ columns: [t.conditionId, t.rulesHash] })]);
+
+export const proposals = pgTable("proposals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  thesisId: text("thesis_id").notNull(),
+  conditionId: text("condition_id").notNull(),
+  tokenId: text("token_id").notNull(),
+  side: text("side").notNull(), // BUY | SELL
+  kind: text("kind").notNull(), // entry | exit
+  sizeUsd: dp("size_usd").notNull(),
+  shares: dp("shares").notNull(),
+  limitPrice: dp("limit_price").notNull(),
+  expectedProfit: dp("expected_profit").notNull(),
+  priceAtProposal: dp("price_at_proposal").notNull(),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  expiresAt: ts("expires_at").notNull(),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected | expired | sent | failed
+  decidedAt: ts("decided_at"),
+  decidedVia: text("decided_via"), // web | tui | push
+  approveTokenHash: text("approve_token_hash").notNull(), // sha256 hex
+  rejectTokenHash: text("reject_token_hash").notNull(),
+  orderId: text("order_id").references(() => orders.id),
+  error: text("error"),
+}, (t) => [
+  index("proposals_status").on(t.status),
+  uniqueIndex("proposals_one_pending_per_thesis").on(t.thesisId).where(sql`${t.status} = 'pending'`),
+]);
+
+export const reconciliations = pgTable("reconciliations", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  at: ts("at").notNull().defaultNow(),
+  ok: boolean("ok").notNull(),
+  usdcLedger: dp("usdc_ledger").notNull(),
+  usdcExchange: dp("usdc_exchange").notNull(),
+  mismatches: jsonb("mismatches").$type<{ key: string; ledger: number; exchange: number }[]>().notNull().default([]),
+});
