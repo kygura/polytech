@@ -1,6 +1,7 @@
 "use client";
 import type { Mode } from "@pm/core";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { DataTable, MarketCell, type Column } from "./DataTable";
 import { EdgeBadge } from "./EdgeBadge";
@@ -12,7 +13,43 @@ import ui from "./ui.module.css";
 
 export function ReconStatus({ recon, now }: { recon: Recon | null | undefined; now: number }) {
   const r = reconText(recon, now);
-  return <span className={`ui ${r.cls}`} title={r.title}>recon <span className={r.glyphCls}>{r.glyph}</span> {r.text}</span>;
+  return <span className={`ui ${r.cls}`} title={r.title}>recon <span className={r.glyphCls}>{r.glyph}</span> {r.text}{recon?.status === "mismatch" && <> <Rebaseline /></>}</span>;
+}
+
+/** Mismatch only. Confirm step (10 s, Esc cancels, like Approve), then POST /api/recon/rebaseline; a 409 body's error shows inline. */
+function Rebaseline() {
+  const router = useRouter();
+  const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null), openRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!confirm) return;
+    confirmRef.current?.focus();
+    const t = setTimeout(() => setConfirm(false), 10_000);
+    return () => clearTimeout(t);
+  }, [confirm]);
+  const cancel = () => { setConfirm(false); setTimeout(() => openRef.current?.focus()); };
+  const run = async () => {
+    setConfirm(false); setBusy(true); setErr(null);
+    const r = await fetch("/api/recon/rebaseline", { method: "POST" }).catch(() => null);
+    setBusy(false);
+    if (r?.ok) return router.refresh();
+    const j = await r?.json().catch(() => null);
+    setErr(j?.error ?? `Re-baseline failed: ${r ? r.status : "network error"}`);
+  };
+  return (
+    <>
+      {confirm ? (
+        <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}>
+          <span className="ui">Re-baseline recon to current exchange balance?</span>
+          <button ref={confirmRef} type="button" onClick={() => void run()}>Confirm</button>
+          <button type="button" onClick={cancel}>Cancel</button>
+        </span>
+      ) : (
+        <button ref={openRef} type="button" disabled={busy} onClick={() => setConfirm(true)}>{busy ? "Re-baselining…" : "Re-baseline"}</button>
+      )}
+      {err && <span role="alert" className="neg ui">{err}</span>}
+    </>
+  );
 }
 
 const SideCell = ({ p }: { p: Proposal }) => (p.orderSide === "SELL" ? <span>SELL</span> : <span className={p.side === "YES" ? "pos" : "neg"}>BUY {p.side}</span>);
@@ -66,7 +103,7 @@ export function ApprovalsPane({ mode, pending, recent, recon, onDecide }: { mode
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const belowL2 = mode === "L0" || mode === "L1";
   const halted = recon?.status === "mismatch" ? "Reconciliation mismatch: new orders halted" : belowL2 ? `Mode is ${mode}; approvals need L2` : null;
-  const n = pending.filter((p) => p.state === "pending").length;
+  const n = pending.length;
 
   if (belowL2 && !pending.length)
     return <section className="pane" id="approvals"><p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Approvals appear at L2 Approve each.</p></section>;

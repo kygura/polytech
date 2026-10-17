@@ -8,7 +8,7 @@
     { "path": "/api/cron/research", "schedule": "20 * * * *" },
     { "path": "/api/cron/paper", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/propose", "schedule": "1-59/5 * * * *" },
-    { "path": "/api/cron/expire", "schedule": "* * * * *" },
+    { "path": "/api/cron/expire", "schedule": "*/2 * * * *" },
     { "path": "/api/cron/sync", "schedule": "*/2 * * * *" },
     { "path": "/api/cron/reconcile", "schedule": "3-59/5 * * * *" },
     { "path": "/api/cron/calibrate", "schedule": "0 3 * * *" }

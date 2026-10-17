@@ -66,4 +66,4 @@ export type LiveBook = {
   fills: { tradeId: string; question: string; side: string; price: number; shares: number; feeUsd: number; at: number }[];
   recon?: Recon;
 };
-export type KillResult = { cancelled?: number; cancelledOrders?: number; failed?: { orderId: string; error: string }[] };
+export type KillResult = { cancelled: number; failed: { orderId: string; error: string }[] };

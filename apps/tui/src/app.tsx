@@ -67,7 +67,7 @@ export function App() {
   const kill = async () => {
     try {
       const r = await post<KillResult>("/api/autonomy/kill");
-      const n = r.cancelled ?? r.cancelledOrders ?? 0, failed = r.failed ?? [];
+      const n = r.cancelled, failed = r.failed;
       setMode("L0");
       setModeTick((t) => t + 1);
       setKillFailed(failed);

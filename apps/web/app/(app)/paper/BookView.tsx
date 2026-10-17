@@ -21,13 +21,14 @@ const mkt = (r: { question: string }) => <><MarketCell question={r.question} cat
 const sideCls = (s: string) => (/YES/i.test(s) ? "pos" : /NO/i.test(s) ? "neg" : undefined);
 const t = (v: string | number) => new Date(v).getTime();
 
+const ORDER_CLS: Record<string, string> = { failed: "neg", sending: "muted", unknown: "muted" };
 const ORDER_COLS: Column<LiveOrder>[] = [
   { id: "market", header: "Market", align: "l", cell: mkt },
   { id: "side", header: "Side", align: "l", cell: (o) => <span className={sideCls(o.side)}>{o.side}</span> },
   { id: "shares", header: "Shares", align: "r", cell: (o) => <NumCell value={o.shares} fmt="int" /> },
   { id: "limit", header: "Limit", align: "r", cell: (o) => <NumCell value={o.price} fmt="p" /> },
   { id: "filled", header: "Filled", align: "r", cell: (o) => `${Math.round(o.filledShares)}/${Math.round(o.shares)}` },
-  { id: "status", header: "Status", align: "l", cell: (o) => o.status },
+  { id: "status", header: "Status", align: "l", cell: (o) => <span className={ORDER_CLS[o.status]}>{o.status}</span> },
   { id: "exp", header: "Expires", align: "r", cell: (o) => (o.expiresAt == null ? <span className="muted">{"—"}</span> : hm(t(o.expiresAt))) },
   { id: "order", header: "Order", align: "l", cell: (o) => <span title={o.orderId}>{shortId(o.orderId)}</span> },
 ];

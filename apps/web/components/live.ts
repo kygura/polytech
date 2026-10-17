@@ -62,10 +62,10 @@ export function killError(r: KillResult | null): string | null {
   return `Kill: ${n} live order${n === 1 ? "" : "s"} not cancelled (${ids}). Cancel ${n === 1 ? "it" : "them"} on Polymarket or retry.`;
 }
 
-/** POST /api/autonomy/kill. Tolerates the pre-phase-6 shape ({cancelledOrders}). Throws on HTTP error. */
+/** POST /api/autonomy/kill. Throws on HTTP error. */
 export async function postKill(): Promise<KillResult> {
   const r = await fetch("/api/autonomy/kill", { method: "POST" });
   if (!r.ok) throw new Error(`Kill failed: ${r.status}`);
   const j = await r.json().catch(() => ({}));
-  return { cancelled: j.cancelled ?? j.cancelledOrders ?? 0, failed: Array.isArray(j.failed) ? j.failed : [] };
+  return { cancelled: j.cancelled, failed: j.failed ?? [] };
 }

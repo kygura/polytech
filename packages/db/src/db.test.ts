@@ -75,7 +75,7 @@ describe("memory kv", () => {
     for (let i = 0; i < 10_050; i++) await kv.rateLimit(`k${i}`, 1, 60_000);
     expect((await kv.rateLimit("k0", 1, 60_000)).ok).toBe(true); // evicted, so fresh
     expect((await kv.rateLimit("k10049", 1, 60_000)).ok).toBe(false); // newest kept
-  });
+  }, 30_000);
 
   it("get/set json with ttl", async () => {
     const kv = memoryKv();

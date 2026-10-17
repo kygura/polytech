@@ -24,6 +24,7 @@ const COLS: Col<Pos>[] = [
 // Live book (DESIGN 8.2/8.6): every row carries a LIVE text tag, never color alone.
 const TAG = { h: "", w: 4, cell: (): Cell => ["LIVE", "yellow"] };
 type L = LiveBook;
+const ORD_COLOR: Record<string, string> = { failed: "red", sending: "gray", unknown: "gray" };
 const ORD: Col<L["openOrders"][number]>[] = [
   TAG,
   { h: "Market", w: 30, cell: (o) => left(o.question, 30) },
@@ -31,7 +32,7 @@ const ORD: Col<L["openOrders"][number]>[] = [
   { h: "Shares", w: 6, r: true, cell: (o) => int(o.shares) },
   { h: "Limit", w: 5, r: true, cell: (o) => num(o.price) },
   { h: "Filled", w: 11, r: true, cell: (o) => `${int(o.filledShares)}/${int(o.shares)}` },
-  { h: "Status", w: 9, cell: (o) => o.status },
+  { h: "Status", w: 9, cell: (o) => [o.status, ORD_COLOR[o.status]] },
   { h: "Expires", w: 7, cell: (o) => (o.expiresAt == null ? "—" : hhmm(o.expiresAt)) },
   { h: "Order", w: 8, cell: (o) => o.orderId.slice(0, 8) },
 ];

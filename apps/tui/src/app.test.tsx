@@ -47,7 +47,7 @@ function fakeFetch() {
     if (p === "/api/stream") return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(": connected\n\n")); } }), { status: 200 });
     if (p === "/api/watchlist") return Response.json(watch);
     if (p === "/api/autonomy") return Response.json(autonomy);
-    if (p === "/api/autonomy/kill") return (autonomy.mode = "L0"), Response.json(autonomy.liveOpenOrders ? { cancelled: 2, failed: [] } : { mode: "L0", cancelledOrders: 0 });
+    if (p === "/api/autonomy/kill") return (autonomy.mode = "L0"), Response.json(autonomy.liveOpenOrders ? { cancelled: 2, failed: [] } : { mode: "L0", cancelled: 0, failed: [] });
     if (p === "/api/proposals") return Response.json({ pending: [prop], recent: [{ ...prop, id: "p0", state: "expired", reason: "PRICE_MOVED" }] });
     if (p === "/api/proposals/p1") return Response.json(JSON.parse(String(init?.body)).action === "approve" ? { ok: true, state: "sent", orderId: "0x3fa1abcdef" } : { ok: true, state: "rejected" });
     if (p === "/api/book/live") return Response.json(book);

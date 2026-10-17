@@ -43,7 +43,8 @@ export async function runAgent(input) {
         maxTurns: input.maxTurns ?? 20,
         outputFormat: { type: "json_schema", schema: input.schema },
         abortController: ac,
-        env: { ...process.env },
+        // allowlist: this subprocess reads untrusted web content
+        env: Object.fromEntries(["PATH", "HOME", "ANTHROPIC_API_KEY", "EXA_API_KEY"].filter((k) => process.env[k]).map((k) => [k, process.env[k]])),
       },
     })) if (msg.type === "result") last = msg;
   } finally {
