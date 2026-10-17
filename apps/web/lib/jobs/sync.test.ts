@@ -193,11 +193,19 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect((await order(o.id)).status).toBe("failed_unknown");
   });
 
+  it("rebaseline 409s on a lost (failed_unknown) order newer than the baseline, naming count + position diff; ack proceeds", async () => {
+    await reraise();
+    const r = await rebaseline(d);
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/\d+ live order\(s\) in failed_unknown.*inspect the venue.*diff/s) });
+    expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true, diff: expect.any(String) });
+    expect(await rebaseline(d)).toMatchObject({ ok: true }); // nothing newer than the fresh baseline
+  });
+
   it("deposit -> mismatch halts -> rebaseline ok, clears halt, keeps mode", async () => {
     await reraise();
     fx.setBalance((await fx.balance()).usdc + 500);
     expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
-    expect(await rebaseline(d)).toMatchObject({ ok: true });
+    expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true });
     expect(await lastRecon()).toMatchObject({ ok: true, baseline: true });
     expect(events.at(-1)).toMatchObject({ type: "recon.done", payload: { status: "ok", detail: "rebaseline" } });
     expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
@@ -209,7 +217,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     const real = ex.positions;
     (ex as any).positions = async () => ({ ...(await real()), tokPre: 7 });
     expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
-    expect(await rebaseline(d)).toMatchObject({ ok: true });
+    expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true });
     expect((await lastRecon()).positions).toMatchObject({ tokPre: 7 });
     expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
     const o = (await fx.openOrders()).find((x) => x.filled < x.shares)!;
@@ -217,7 +225,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     fx.fill(o.orderId, 0.25);
     expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
     (ex as any).positions = real;
-    expect(await rebaseline(d)).toMatchObject({ ok: true });
+    expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true });
   });
 
   it("kill cancels all live orders, expires pending proposals, returns counts", async () => {
@@ -267,6 +275,42 @@ describe("fill sync + reconcile (fake exchange)", () => {
     await setMode(d, "L2", "again"); // old failures predate this raise: not re-downgraded
     await syncFills(d);
     expect(await currentMode(d.db)).toBe("L2");
+  });
+
+  it("rows but no baseline row: recon writes ok=false 'needs rebaseline', rebaseline clears it", async () => {
+    await d.db.update(s.reconciliations).set({ baseline: false });
+    expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
+    expect(await lastRecon()).toMatchObject({ ok: false, baseline: false });
+    expect((await read.autonomy({ db: d.db, now: d.now })).recon).toMatchObject({ status: "mismatch", detail: "needs rebaseline" });
+    expect(await rebaseline(d, { ack: true })).toMatchObject({ ok: true });
+    expect(await reconcileJob(d)).toMatchObject({ status: "ok" });
+  });
+
+  it("live settlement: market resolves against a filled BUY -> position closed, loss realized, L2 downgrades on daily loss", async () => {
+    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    const m = (await d.db.select().from(s.markets))[0]!;
+    await d.db.insert(s.positions).values({ conditionId: m.conditionId, tokenId: m.yesTokenId!, size: 10, avgCost: 0.5, realizedPnl: 0, openedAt: new Date(t), paper: false });
+    await d.db.insert(s.outcomes).values({ conditionId: m.conditionId, result: "NO", resolvedAt: new Date(t) }).onConflictDoNothing();
+    await setMode(d, "L2", "test");
+    await syncFills(d);
+    const [pos] = await d.db.select().from(s.positions).where(eq(s.positions.conditionId, m.conditionId));
+    expect(pos).toMatchObject({ realizedPnl: -5 });
+    expect(pos!.closedAt).not.toBeNull();
+    expect(await propose({ ...d, settings: { ...d.settings, limits: { ...d.settings.limits, dailyLoss: 1 } } })).toMatchObject({ mode: "L0" });
+  });
+
+  it("approved proposal whose order is terminal -> sent/failed after sync", async () => {
+    await setMode(d, "L2", "test");
+    const [p] = await d.db.select().from(s.proposals).limit(1);
+    const mkP = async (id: string, orderId: string) => { await d.db.update(s.proposals).set({ status: "approved", orderId }).where(eq(s.proposals.id, p!.id)); };
+    const oid = await mkOrder({ status: "filled", clobOrderId: "fake-done", size: 1 });
+    await mkP(p!.id, oid);
+    await syncFills(d);
+    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, p!.id)))[0]).toMatchObject({ status: "sent" });
+    const oid2 = await mkOrder({ status: "cancelled", clobOrderId: "fake-gone" });
+    await mkP(p!.id, oid2);
+    await syncFills(d);
+    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, p!.id)))[0]).toMatchObject({ status: "failed", error: "ORDER_CANCELLED" });
   });
 
   it("no exchange: sync and reconcile are no-ops", async () => {

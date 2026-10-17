@@ -1,12 +1,12 @@
 import { applyFill, reconcile } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, desc, eq, gt, inArray, isNull, max } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, max } from "drizzle-orm";
 import { downgradeOn } from "./autonomy";
 import { DAY, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { liveFilled, orderUi } from "./live";
-import { LIVE_OPEN } from "./paper";
+import { LIVE_OPEN, settleResolved } from "./paper";
 
 const MIN = 60_000;
 const GRACE = 2 * MIN; // an order missing from open set + trades this young is just API lag
@@ -121,6 +121,17 @@ export async function syncFills(d: Deps) {
       emit(o);
     }
 
+    await settleResolved(d, false); // resolved live markets close like paper (realized PnL feeds the daily-loss downgrade)
+
+    // approved proposal whose order reached a terminal status: no permanent "sending"
+    for (const { p, st } of await db.select({ p: s.proposals, st: s.orders.status }).from(s.proposals).innerJoin(s.orders, eq(s.orders.id, s.proposals.orderId)).where(eq(s.proposals.status, "approved"))) {
+      const ok = st === "filled";
+      if (!ok && !["cancelled", "expired", "rejected", "failed_unknown"].includes(st)) continue;
+      const set = ok ? { status: "sent" } : { status: "failed", error: `ORDER_${st.toUpperCase()}` };
+      if ((await db.update(s.proposals).set(set).where(and(eq(s.proposals.id, p.id), eq(s.proposals.status, "approved"))).returning({ id: s.proposals.id })).length)
+        publish("proposal.updated", { id: p.id, state: set.status, ...(ok ? {} : { error: set.error }), orderId: p.orderId });
+    }
+
     const n = await orderErrors(d);
     if (n) await downgradeOn(d, { consecutiveOrderErrors: n });
     return res;
@@ -153,7 +164,14 @@ export async function reconcileJob(d: Deps) {
     if (!(await synced())) return { status: null }; // stale ledger: judging it would be a false alarm
     const [base] = await db.select().from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
     let x = await snapshot(ex);
-    if (!base) return (await insertBaseline(d, at, x, null), { status: "ok", mismatches: 0 });
+    if (!base) {
+      if ((await db.select({ n: count() }).from(s.reconciliations))[0]!.n) { // rows but no baseline (post-migration): a human must rebaseline
+        await db.insert(s.reconciliations).values({ at, ok: false, usdcLedger: 0, usdcExchange: x.usdc, mismatches: [{ key: NEEDS, ledger: 0, exchange: 0 }] });
+        publish("recon.done", { at: at.toISOString(), status: "mismatch", detail: reconDetail([{ key: NEEDS, ledger: 0, exchange: 0 }]) });
+        return { status: "mismatch", mismatches: 1 };
+      }
+      return (await insertBaseline(d, at, x, null), { status: "ok", mismatches: 0 });
+    }
     const check = async () => {
       const rows = await db.select({ f: s.fills, side: s.orders.side, tok: s.orders.tokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(and(eq(s.fills.paper, false), gt(s.fills.ts, base.at)));
       const positions = { ...base.positions };
@@ -177,7 +195,7 @@ export async function reconcileJob(d: Deps) {
 }
 
 /** Accept the current exchange state as the new ledger base (deposit, withdrawal, payout, pre-existing holdings). Clears a recon halt; never changes mode. */
-export async function rebaseline(d: Deps): Promise<{ ok: true; at: string } | { ok: false; error: string }> {
+export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise<{ ok: true; at: string; diff: string } | { ok: false; error: string }> {
   const ex = d.exchange;
   if (!ex) return { ok: false, error: "exchange not configured" };
   const r = await withLock(d, "reconcile", 5 * MIN, async () => {
@@ -188,14 +206,23 @@ export async function rebaseline(d: Deps): Promise<{ ok: true; at: string } | { 
     const [still] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, ["sending", "unknown"]))).limit(1);
     if (still) return { ok: false as const, error: "live orders are still sending or unknown" };
     const at = new Date(d.now());
-    await insertBaseline(d, at, await snapshot(ex), "rebaseline");
-    return { ok: true as const, at: at.toISOString() };
+    const snap = await snapshot(ex);
+    // exchange vs DB open live positions, per token: shows what the new baseline would swallow
+    const mine: Record<string, number> = {};
+    for (const p of await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), isNull(s.positions.closedAt)))) mine[p.tokenId] = (mine[p.tokenId] ?? 0) + p.size;
+    const diff = reconDetail(Object.keys({ ...mine, ...snap.positions }).flatMap((key) => (Math.abs((mine[key] ?? 0) - (snap.positions[key] ?? 0)) > 0.01 ? [{ key, ledger: mine[key] ?? 0, exchange: snap.positions[key] ?? 0 }] : []))) ?? "none";
+    const [base] = await d.db.select({ at: s.reconciliations.at }).from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
+    const [lost] = opts.ack ? [] : await d.db.select({ n: count() }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.status, "failed_unknown"), base ? gt(s.orders.createdAt, base.at) : undefined));
+    if (lost?.n) return { ok: false as const, error: `${lost.n} live order(s) in failed_unknown since the last baseline: inspect the venue before rebaselining (it would mask a lost order). Position diff exchange vs DB: ${diff}` };
+    await insertBaseline(d, at, snap, "rebaseline");
+    return { ok: true as const, at: at.toISOString(), diff };
   });
   return "skipped" in r ? { ok: false, error: "reconcile in progress, retry" } : r;
 }
 
+const NEEDS = "NEEDS_REBASELINE";
 export const reconDetail = (mm: { key: string; ledger: number; exchange: number }[]) =>
-  mm.length ? mm.map((m) => `${m.key.length > 12 ? `${m.key.slice(0, 8)}…` : m.key}: ledger ${+m.ledger.toFixed(4)} vs exchange ${+m.exchange.toFixed(4)}`).join("; ") : null;
+  mm.length ? mm.map((m) => m.key === NEEDS ? "needs rebaseline" : `${m.key.length > 12 ? `${m.key.slice(0, 8)}…` : m.key}: ledger ${+m.ledger.toFixed(4)} vs exchange ${+m.exchange.toFixed(4)}`).join("; ") : null;
 
 /** Latest reconciliation for the UI: late = last run older than 10 min. */
 export async function reconStatus(d: Pick<Deps, "db" | "now">) {

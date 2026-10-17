@@ -2,7 +2,7 @@ import { checkOrder, effectiveMode, gtdExpiry, livelimitPrice, proposalExpiry, t
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, ne, notExists, sql } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode, downgradeOn } from "./autonomy";
 import { withLock, type Deps } from "./deps";
@@ -119,6 +119,7 @@ export async function propose(d: Deps) {
         skip("DUPLICATE_PENDING"); // partial unique index: one pending per thesis
         continue;
       }
+      if ((await currentMode(db)) !== "L2") { await expire(d, p!, "KILLED"); skip("MODE_CHANGED"); break; } // killed between the check and the insert: no push
       addExposure(x, row, sizeUsd); // later candidates in this run see this one
       res.proposed++;
       publish("proposal.created", { id: p!.id, conditionId: t.conditionId });
@@ -215,7 +216,7 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
   return "skipped" in r ? { ok: false, error: "busy" } : r;
 }
 
-async function expire(d: Deps, p: Proposal, reason: "TIMEOUT" | "PRICE_MOVED"): Promise<Decision> {
+async function expire(d: Deps, p: Proposal, reason: "TIMEOUT" | "PRICE_MOVED" | "KILLED"): Promise<Decision> {
   // reason lives in `error` (no reason column); read model splits it back out for expired rows
   if (!(await cas(d, p.id, "pending", { status: "expired", error: reason, decidedAt: new Date(d.now()), ...BURNED }))) return { ok: false, error: "ALREADY_DECIDED" };
   updated(p, "expired", { reason });
@@ -234,6 +235,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
     return { ok: true as const, state: "failed", error };
   };
   const now = d.now();
+  const row = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, p.conditionId)))[0]!;
   const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
   const expiresAt = gtdExpiry(th?.expiresAt ?? null, new Date(now));
   if (!th || !expiresAt) return fail("thesis expiring");
@@ -253,7 +255,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   await d.db.update(s.proposals).set({ orderId }).where(eq(s.proposals.id, p.id));
 
   // kill/halt can land between the CAS and here: re-check right before the only exchange call
-  const blocked = (await currentMode(d.db)) !== "L2" ? "KILLED" : (await halted(d)) ? "orders halted" : null;
+  const blocked = (await liveMode(d, row)) !== "L2" ? "KILLED" : (await halted(d)) ? "orders halted" : null;
   if (blocked) {
     await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // never sent
     return fail(blocked, orderId);
@@ -267,7 +269,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   }
   await d.db.update(s.orders).set({ status: placed.status, clobOrderId: placed.orderId || null }).where(eq(s.orders.id, orderId));
   if (placed.status === "rejected") return fail(scrub(placed.error ?? "rejected").slice(0, 300), orderId);
-  if ((await currentMode(d.db)) !== "L2") { // killed while place was in flight: pull the order back
+  if ((await liveMode(d, row)) !== "L2") { // killed while place was in flight: pull the order back
     try {
       await d.exchange!.cancel([placed.orderId]);
       if (placed.status === "live") await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // matched stays for fill sync (may already be filled)
@@ -276,8 +278,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
       return fail(`KILLED: cancel failed, order left for sync: ${scrub(e instanceof Error ? e.message : "cancel failed")}`.slice(0, 300), orderId);
     }
   }
-  await cas(d, p.id, "approved", { status: "sent" });
-  updated(p, "sent", { orderId: placed.orderId });
+  if (await cas(d, p.id, "approved", { status: "sent" })) updated(p, "sent", { orderId: placed.orderId });
   return { ok: true, state: "sent", orderId: placed.orderId };
 }
 
@@ -285,7 +286,9 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
 /** Pending proposals past 15 min, or whose side mid (latest snapshot) moved > 2c, become expired. 'approved' with no order for > 2 min (crash before the order row) fails as STUCK_APPROVED. */
 export async function expireProposals(d: Deps) {
   const stuck = await d.db.update(s.proposals).set({ status: "failed", error: "STUCK_APPROVED" })
-    .where(and(eq(s.proposals.status, "approved"), isNull(s.proposals.orderId), lt(s.proposals.decidedAt, new Date(d.now() - 2 * MIN)))).returning({ id: s.proposals.id });
+    .where(and(eq(s.proposals.status, "approved"), isNull(s.proposals.orderId),
+      notExists(d.db.select({ x: sql`1` }).from(s.orders).where(and(eq(s.orders.thesisId, s.proposals.thesisId), eq(s.orders.paper, false), gte(s.orders.createdAt, s.proposals.decidedAt)))), // an order row exists: sync owns it
+      lt(s.proposals.decidedAt, new Date(d.now() - 2 * MIN)))).returning({ id: s.proposals.id });
   for (const p of stuck) updated(p, "failed", { error: "STUCK_APPROVED" });
   const pend = await d.db.select().from(s.proposals).where(eq(s.proposals.status, "pending"));
   const out = { checked: pend.length, expired: 0, stuck: stuck.length };

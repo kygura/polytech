@@ -1,6 +1,7 @@
 import { AnthropicOutageError, PodFailedError, modelFor, runPod, type AgentResult } from "@pm/agents";
 import { canStartPod, crowd, shouldReResearch, sizeTrade } from "@pm/core";
 import { schema as s } from "@pm/db";
+import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { categoryConfidence } from "./calib";
@@ -82,7 +83,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
         await db.update(s.pods).set({ status: "failed" }).where(eq(s.pods.id, podId));
         const lowered = outage ? await outageDowngrade(d) : null;
         const reason = outage ? "ANTHROPIC_OUTAGE" : "POD_FAILED";
-        publish("pod.failed", { podId, conditionId, reason, error: String(e instanceof Error ? e.message : e), downgradedTo: lowered });
+        publish("pod.failed", { podId, conditionId, reason, error: scrub(String(e instanceof Error ? e.message : e)), downgradedTo: lowered });
         return { podId, status: "failed", reason };
       }
 

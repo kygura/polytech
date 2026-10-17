@@ -277,6 +277,14 @@ describe("live L2 hardening", () => {
     expect((await proposal(b!.id)).status).toBe("approved");
   });
 
+  it("expireProposals does not fail an approved proposal that already has an order row", async () => {
+    const [a] = await fresh();
+    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
+    await d.db.insert(s.orders).values({ id: "ord_hasrow", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:stuckrow`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 2 * 60_000) });
+    expect(await expireProposals(d)).toMatchObject({ stuck: 0 });
+    expect((await proposal(a!.id)).status).toBe("approved");
+  });
+
   it("propose stops when killed mid-run (no proposal survives a kill)", async () => {
     await reset();
     await setMode(d, "L2", "test");

@@ -149,6 +149,16 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect((await read.autonomy(r)).mode).toBe("L1");
   });
 
+  it("pod.failed payload is scrubbed of key-shaped strings", async () => {
+    let msg = "";
+    const off = subscribe((e) => { if (e.type === "pod.failed") msg = (e.payload as { error: string }).error; });
+    const boom = (async () => { throw new Error(`boom 0x${"ab".repeat(32)}`); }) as unknown as Deps["judge"];
+    await researchMarket({ ...d, settings: await read.settingsGet(r), judge: boom }, cid("p3"), "manual");
+    off?.();
+    expect(msg).toContain("boom");
+    expect(msg).not.toContain("ab".repeat(32));
+  });
+
   it("resolved market: calibrate writes outcome, paperBook settles, calibration reads", async () => {
     const { p, m } = (await d.db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId)))[0]!;
     const gone = m.conditionId, yes = p.tokenId === m.yesTokenId;

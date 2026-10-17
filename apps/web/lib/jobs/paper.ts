@@ -100,6 +100,22 @@ export async function downgradeSignals(d: Deps, x: Exposure, nCands: number) {
   };
 }
 
+/** Close open positions of the paper or live book whose market resolved; realized PnL = payout - cost. */
+export async function settleResolved(d: Pick<Deps, "db" | "now">, paper: boolean) {
+  const { db } = d, now = d.now();
+  const outs = new Map((await db.select().from(s.outcomes)).map((o) => [o.conditionId, o.result]));
+  let settled = 0;
+  for (const { p, m } of await openBook(db, paper)) {
+    const res = outs.get(p.conditionId);
+    if (!res) continue;
+    const won = (res === "YES") === (p.tokenId === m.yesTokenId) ? 1 : 0;
+    const end = settle({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, won);
+    await db.update(s.positions).set({ realizedPnl: end.realizedPnl, closedAt: new Date(now) }).where(eq(s.positions.id, p.id));
+    settled++;
+  }
+  return settled;
+}
+
 /** L1: settle resolved paper positions, then fill every qualifying thesis at k(S) against a fresh book. */
 export async function paperBook(d: Deps) {
   return withLock(d, "paper", 5 * 60_000, async () => {
@@ -107,16 +123,7 @@ export async function paperBook(d: Deps) {
     const mode = await currentMode(db);
 
     // 1. settle (runs in any mode: positions that exist must not rot)
-    const outs = new Map((await db.select().from(s.outcomes)).map((o) => [o.conditionId, o.result]));
-    let settled = 0;
-    for (const { p, m } of await openPaper(db)) {
-      const res = outs.get(p.conditionId);
-      if (!res) continue;
-      const won = (res === "YES") === (p.tokenId === m.yesTokenId) ? 1 : 0;
-      const end = settle({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, won);
-      await db.update(s.positions).set({ realizedPnl: end.realizedPnl, closedAt: new Date(now) }).where(eq(s.positions.id, p.id));
-      settled++;
-    }
+    const settled = await settleResolved(d, true);
     const res = { mode, settled, candidates: 0, filled: 0, rejected: {} as Record<string, number>, violations: [] as { conditionId: string; rules: string[] }[] };
     if (mode !== "L1") return res; // L0 observes; L2+ is unreachable this build
 
