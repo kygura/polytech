@@ -154,7 +154,7 @@ Top: `PnlStrip`: `open 14 · closed 31 · paper P&L +$212.40 · modeled edge +$3
 
 Single column, panes in this order:
 
-1. `ModeSelector`: five `ModeOption` radio-like buttons in a row. Each shows `L0 Observe`, `L1 Paper`, `L2 Approve each`, `L3 Bounded auto`, `L4 Full auto`, colored border by `--mode-N`, selected one filled. L2–L4 are rendered `disabled` (`--faint` text, cursor not-allowed) with a line under the row: `L2–L4 disabled: Execution ships in phase 6`. Clicking an enabled option fires `POST /api/autonomy/mode` immediately (no confirm; SPEC one action). The server reply updates `ModeBadge` in the header via SSE. If the server refuses (`EXECUTION_DISABLED`) show the reason inline in `--neg`.
+1. `ModeSelector`: five `ModeOption` radio-like buttons in a row. Each shows `L0 Observe`, `L1 Paper`, `L2 Approve each`, `L3 Bounded auto`, `L4 Full auto`, colored border by `--mode-N`, selected one filled. Options the server does not allow are rendered `disabled` (`--faint` text, cursor not-allowed) with the reason on a line under the row (8.5, 9.6). Clicking an enabled option fires `POST /api/autonomy/mode` immediately (no confirm; SPEC one action). The server reply updates `ModeBadge` in the header via SSE. If the server refuses (`EXECUTION_DISABLED`) show the reason inline in `--neg`.
 2. `CategoryOverrides`: table `Category`, `Override` (`<select>`: `inherit`, `L0`, `L1` — options above the global mode are disabled with title `cannot raise above global`). Effective mode column computed server-side.
 3. `RiskLimits` (read-only here, edit in Settings): two-column key/value list: per-trade max USD / %B, per-market, per-event, per-category, total open, daily notional, daily loss. Each row shows `limit · used today · bar` using `MeterBar` (thin 4px, `--accent`, turns `--warn` at 80%, `--neg` at 100%).
 4. `GatePanel`: three rows `L1→L2`, `L2→L3`, `L3→L4`; each shows criteria text from SPEC and progress `MeterBar` + `12/50 resolved · Brier 0.19 vs mkt 0.21 ✓`. Unmet criteria in `--muted`, met in `--pos`. Header line: `Gates are advisory; skipping is logged.`
@@ -171,7 +171,7 @@ Groups and fields:
 - Bankroll & sizing: bankroll B, Kelly fraction (0.25), per-trade cap %B (0.05), min edge ¢ (2).
 - Models per role: six `<select>`s (rules, source, base_rate, news, red_team, judge) with options `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`.
 - Budget: max pods/day, max concurrent sandboxes, sandbox timeout min, Exa calls per pod, daily Anthropic spend cap USD.
-- Risk limits: the full list from SPEC (per-trade USD and %B, per-market, per-event, per-category, total open, daily notional, daily loss, L3 auto ceiling, daily auto notional, category allowlist, structural auto yes/no). L3 fields are editable but labeled `(applies from phase 6)`.
+- Risk limits: the full list from SPEC (per-trade USD and %B, per-market, per-event, per-category, total open, daily notional, daily loss, L3 auto ceiling, daily auto notional, category allowlist, structural auto yes/no). L3 fields bound L3 auto-sends (9.3).
 - Appearance: theme `dark/light/system`.
 
 Validation errors render under the field in `--neg`; server validates with zod and returns `{field, message}`.
@@ -234,7 +234,7 @@ Sign + color everywhere, same as web. Numbers right-aligned with fixed widths.
 
 ### Global keys
 
-`1`–`6` or `Tab`/`Shift-Tab` switch views (order as nav), `j`/`k` or arrows move, `Enter` open, `Esc`/`Backspace` back, `/` filter (type, `Enter` apply, `Esc` clear), `s` cycle sort column, `S` flip direction, `r` re-research, `p` pin, `m` mute, `K` kill switch (capital, immediate, no prompt; footer shows `KILLED → L0` for 3s), `R` force refresh, `?` help overlay, `q` quit. Mode change: in Autonomy view `0`/`1` set L0/L1; `2`–`4` show `disabled: Execution ships in phase 6` in the footer.
+`1`–`6` or `Tab`/`Shift-Tab` switch views (order as nav), `j`/`k` or arrows move, `Enter` open, `Esc`/`Backspace` back, `/` filter (type, `Enter` apply, `Esc` clear), `s` cycle sort column, `S` flip direction, `r` re-research, `p` pin, `m` mute, `K` kill switch (capital, immediate, no prompt; footer shows `KILLED → L0` for 3s), `R` force refresh, `?` help overlay, `q` quit. Mode change: in Autonomy view `0`/`1` set L0/L1; `2`–`4` set L2–L4 when the exchange is configured, otherwise the footer shows `disabled: L2–L4 need a configured exchange`.
 
 ### Header / footer (all views)
 
@@ -319,12 +319,12 @@ At L0: body shows `Paper book is off. Autonomy view: press 1 to set L1.`
 ### Autonomy
 
 ```
- Mode   [L0 Observe]  [L1 PAPER]  L2 Approve  L3 Bounded  L4 Full      ← L2–L4 disabled: Execution ships in phase 6
+ Mode   [L0 Observe]  [L1 PAPER]  L2 Approve  L3 Bounded  L4 Full      ← L2–L4 need a configured exchange
  Overrides   politics: inherit   crypto: L0   sports: L0            (o to edit, only lowering allowed)
  Limits      per-trade $250 (5%)  used 0 ▏          daily loss $500  used $0 ▏
  Gates       L1→L2  12/50 resolved · Brier 0.182 vs mkt 0.201 ✓        advisory
-             L2→L3  0/30 approved trades                               phase 6
-             L3→L4  0/100 live trades                                  phase 6
+             L2→L3  12/30 approved trades · avg slip +0.6¢ vs ≤1.0¢ ✓  advisory
+             L3→L4  12/100 live trades · realized edge 30d +1.4¢ ✓      advisory
  K  KILL SWITCH → L0, cancels open orders, immediate, no undo
  Events
   14:32 L1→L1  global   EXECUTION_DISABLED (requested L2)   user
@@ -420,10 +420,9 @@ On mismatch the header also shows a `RECON ✗` chip in `--neg` (text, not a dot
 
 ### 8.5 Mode selector
 
-`enabledModes` is `L0 L1 L2` when the exchange is configured, `L0 L1` otherwise. L3 and L4 stay disabled.
-- L2 disabled title and visible line: `L2 needs a configured exchange (PM_PRIVATE_KEY on the server).`
-- L3/L4 title and visible line: `L3–L4 ship in phase 7.`
-- When both apply the line under the row reads `L2 needs a configured exchange · L3–L4 ship in phase 7.` This replaces `Execution ships in phase 6`. Selecting L2 stays one click (SPEC).
+`enabledModes` is `L0 L1 L2 L3 L4` when the exchange is configured, `L0 L1` otherwise (amended in 9.6).
+- Disabled title and visible line: `L2–L4 need a configured exchange (PM_PRIVATE_KEY on the server).`
+- Selecting any enabled mode stays one click (SPEC).
 
 ### 8.6 TUI
 
@@ -438,7 +437,7 @@ Keys inside the Autonomy view (checked against current bindings: global `q K ? R
 - `a` approve: the footer turns into a prompt `SEND LIVE: BUY YES 820 @ 0.447 = $366.54 ? y = confirm, any other key aborts`, in yellow bold. `y` sends; the row shows `sending…` until the reply, then the footer flashes `sent ord 0x3fa1` (green) or `failed: <msg>` (red).
 - `x` reject, no prompt, footer flashes `rejected`.
 - Approve is refused with a footer message when recon is in mismatch: `orders halted: recon mismatch`.
-Footer key hints in this view gain `a approve  x reject`. Mode keys: `2` sets L2 when the exchange is configured, otherwise footer `disabled: L2 needs a configured exchange`; `3`/`4` say `disabled: L3–L4 ship in phase 7`.
+Footer key hints in this view gain `a approve  x reject`. Mode keys: `2`/`3`/`4` set L2/L3/L4 when the exchange is configured, otherwise footer `disabled: L2–L4 need a configured exchange`.
 
 Book `[4]`: header label `Book`. `h`/`l` switch `Live`/`Paper` (same as watchlist tabs). Every row starts with a `LIVE` (yellow) or `PAPER` (blue) tag; the strip line starts with the same tag. The live tab adds an `open orders` block above positions with the 8.2 columns. `x` closes paper positions only; on a live row it flashes `live positions close via an exit proposal`.
 
@@ -464,3 +463,125 @@ Data the UI reads (fields on the autonomy read payload and the shell status the 
 - `Confirm` carries the full sentence `aria-label` "Send live order: buy YES 820 shares at 0.447, cost $366.54".
 - Disabled approve buttons keep the reason in visible text (`orders halted`) and in `title`, not only `disabled`.
 - `LIVE`/`PAPER` and `RECON ✗` are words, never color-only marks.
+
+## Phase 7 — Autonomy (L3/L4) and neg-risk sets
+
+Scope: L3 bounded auto, L4 full auto, structural neg-risk sets, exit proposals, L2→L3 and L3→L4 gate stats. Extends section 8; no new tokens, no new routes. Amber `--mode-2` stays the live-money color; `--mode-3`/`--mode-4` mark what L3/L4 sent without a human. The `ApprovalsPane` is shown at L2, L3 and L4 (at L3 it holds fallbacks; at L4 it holds only `Recent` and flagged sets); below L2 it still collapses to one line.
+
+Proposals carry `kind`: `single` (section 8), `set`, or `exit`.
+
+### 9.1 Set proposal (web)
+
+A set is one row-group in the pending table: a set row plus leg rows, one `Approve`/`Reject` for the whole set (build decision 5). The set row reuses the 8.1 columns:
+
+| Header | Set row content |
+|---|---|
+| `Market` | `▸` toggle, `SET` chip (border `--border`, mono `--fs-xs`), then `buy-all · 5 legs · <event title>` truncated to 48ch, link to the event's first market |
+| `Side` | `BUY ALL` or `SELL ALL` (sell-all = BUY NO on every leg; the leg rows show that) |
+| `Shares` | shares per leg (equal on every leg) |
+| `Limit` | `Σ 0.962`: sum of leg caps |
+| `Cost$` | Σ leg costs, the money that leaves the wallet |
+| `Edge¢` | `lock 3.8¢`: locked margin per share set, in `--pos` |
+| `E[P]$` | expected profit for the whole set, signed |
+| `Drift¢` | largest absolute leg drift, same thresholds as 8.1 |
+| `Expires` | as 8.1 |
+| actions | `Approve` / `Reject` for the whole set |
+
+Expanded (`▾`, toggled by click or `Enter` on the focused row, collapsed by default), one leg row per leg, indented 16px, `--surface-2` background, no actions: `Market` (question, link), `Side` (`YES`/`NO` token word, pos/neg color), `Shares`, `Limit` (cap price `0.212`), `Cost$`, other cells empty. Legs list in send order (thinnest first), numbered `1/5 …`.
+
+Confirm text: `Send set: 5 legs, $482.10 live?`; `aria-label` "Send live set: buy all, 5 legs of 820 shares, cost $482.10". The 10 s revert and `Esc` rules from 8.1 apply.
+
+### 9.2 Set lifecycle
+
+| State | Where | Web | TUI |
+|---|---|---|---|
+| `pending` | pending table | as 9.1 | as 9.5 |
+| `sending` | pending table, row-group not interactive | actions cell `sending leg 2/5…` + spinner; expanded legs show `filled` (`--pos`), `sending…`, `queued` (`--muted`) per leg | `sending 2/5` |
+| `filled` | Recent | `filled · 5/5 legs` in `--pos` | green `filled 5/5` |
+| `unwinding` | pending table, not interactive | `unwinding · leg 3 failed` + spinner in `--warn`; legs show `unwinding…` / `unwound` | yellow `unwinding` |
+| `unwound` | Recent | `unwound · leg 3 <error>` in `--warn` (nothing held) | yellow `unwound` |
+| `failed` | Recent | `failed · leg 1 <error>` in `--neg` (first leg failed, nothing held) | red `failed` |
+| `flagged` | `FlaggedSetBar` + Recent | see below | see 9.5 |
+
+`flagged` is the loudest state and stays until acknowledged; it is the only state that means money is held in a shape the engine did not intend. It shows in three places:
+- Header: `SET ✗ 1` chip in `--neg` (text), before `RECON ✗`/`ApprovalsBadge`, linking to `/autonomy#flagged`.
+- `FlaggedSetBar`: an `ErrorBar` variant pinned at the top of `/autonomy` (above `ModeSelector`), one per flagged set, `role="alert"`. Title line: `Set needs manual action · buy-all · <event title> · flagged 14:36`. Body: a small table of legs still held: `Market`, `Token`, `Shares held`, `Avg fill`, `Bid now`, and the server's `Suggested action` text (e.g. `SELL 820 YES on Polymarket, bid 0.190`). One line under it: `The engine will not retry. Positions stay in Book › Live until closed.` Button `Acknowledge` (plain, no confirm) fires `POST /api/sets/:id/ack`, removes the bar and the header chip, and logs to `autonomy_events`. It does not close anything.
+- Recent: `flagged · 2 legs held` in `--neg`; after ack `flagged · acknowledged` in `--muted`.
+
+Leg orders appear in Book › Live like any order, each with the `SET` chip next to `LIVE`.
+
+### 9.3 Auto-sent orders and L3 fallback
+
+`Recent` lists every resolved proposal and every auto-sent order (auto sends never pass through the pending table). It gains an `Approval` column after `ts`:
+- `user`: plain `--muted` text.
+- `AUTO L3` chip in `--mode-3`, `AUTO L4` chip in `--mode-4` (border and text, same shape as `LIVE`).
+
+The same chip appears on the live order and fill rows in Book › Live, so every live row says who sent it.
+
+At L3, a proposal that fails `limits.l3` falls back to the pending table. Its `Market` cell gets a second line in `--muted` `--fs-xs`: `L3 fallback: <reason>`, where the reason maps from the server code:
+
+| Code | Text |
+|---|---|
+| `PER_TRADE` | `over L3 per-trade $100 (this $366.54)` |
+| `DAILY_AUTO_NOTIONAL` | `daily auto notional $480 / $500 used` |
+| `CATEGORY_NOT_ALLOWED` | `category sports not in L3 allowlist` |
+| `STRUCTURAL_AUTO_OFF` | `sets need structural auto (Settings)` |
+
+At L4 nothing falls back; a global risk-limit rejection is logged in the `EventLog` and shows no row.
+
+### 9.4 Exit proposals
+
+`kind: exit`, raised when a thesis is `killed` or `flipped` on re-research. Row differences from an entry:
+- `Market` cell starts with an `EXIT` chip in `--warn` (border and text), then `· killed` or `· flipped` in `--muted`.
+- `Side` reads `SELL YES` / `SELL NO` in `--text` (not pos/neg: an exit is neither a bullish nor a bearish bet).
+- `Limit` is the floor price `≥ 0.410`; `Cost$` becomes proceeds `+$336.20`; `Edge¢` shows `—`; `E[P]$` shows the estimated realized P&L of the exit vs entry, signed.
+- Confirm text `Sell 820 YES @ ≥ 0.410 live?`.
+In Recent the side keeps the `EXIT` chip. At L3/L4 auto-sent exits get the `AUTO` chip as in 9.3.
+
+### 9.5 TUI (Autonomy `[5]`)
+
+Set rows in the approvals block, indented legs always shown under a selected set and collapsed otherwise:
+```
+ ▸ SET buy-all 5 legs  Election winner…   820  Σ$482.10  lock 3.8¢  +$18.40  12:04
+ ▾ SET sell-all 3 legs Fed decision…       400  Σ$371.20  lock 2.1¢  +$8.40   ⚠ 1:42
+     1/3 NO  25 bps cut?         cap 0.312  400
+     2/3 NO  No change?          cap 0.402  400
+     3/3 NO  50 bps cut?         cap 0.214  400
+ EXIT killed  SELL YES  Will X…   820  ≥0.410  +$336.20  P&L -$12.30   09:12
+     L3 fallback: over L3 per-trade $100
+```
+- `j`/`k` move between proposal rows; leg rows are not selectable. `a`/`x` act on the whole set. Approve prompt: `SEND LIVE SET: buy-all 5 legs × 820 = $482.10 ? y = confirm, any other key aborts` (yellow bold). The set row then shows `sending 2/5`, `unwinding`, etc. per 9.2.
+- Exit rows start with `EXIT killed`/`EXIT flipped` in yellow.
+- Fallback reason on a gray line under the row, same texts as 9.3.
+- `recent` line entries gain the approval: `14:31 sent user`, `14:33 sent auto L3` (orange), `14:40 filled 5/5 auto L4` (red).
+- Flagged: header `SET ✗ 1` in red. A red block above `Mode`: `FLAGGED set · buy-all · Election winner… · holds YES 820 "Candidate A" avg 0.212 bid 0.190 · suggested: SELL 820 YES`, one line per held leg. `A` (capital, free in this view) acknowledges the selected flagged set; footer flashes `acknowledged`. The block persists until acknowledged.
+
+### 9.6 Mode selector and keys
+
+Covered by the amended 8.5 and 8.6: L2, L3 and L4 are enabled when the exchange is configured, with nothing else required for L3 (its limits already have defaults in Settings). Selecting L3 or L4 is one click / one key like L2. When the exchange is not configured the line under the row reads `L2–L4 need a configured exchange (PM_PRIVATE_KEY on the server).`
+
+### 9.7 GatePanel
+
+The `L2→L3` and `L3→L4` rows now show real numbers, same layout as `L1→L2`:
+
+| Row | Text | Met when |
+|---|---|---|
+| `L2→L3` | `12/30 approved trades · avg slip +0.6¢ vs ≤ 1.0¢` | trades ≥ 30 and abs(avg slip) ≤ 1.0¢ |
+| `L3→L4` | `12/100 live trades · realized edge 30d +1.4¢` | trades ≥ 100 and edge > 0 |
+
+`MeterBar` tracks the trade count. Each criterion is colored separately (`--muted` unmet, `--pos` met); the row gets `✓` only when all are met. With no data: `0/30 approved trades · avg slip —`. Values are server-computed (`gates.l2l3 {approvedTrades, avgSlippageC}`, `gates.l3l4 {liveTrades, realizedEdge30dC}`); the TUI uses the same text with `advisory` right-aligned (see the amended mock in 6).
+
+### 9.8 SSE and data
+
+Existing events keep their meaning. `proposal.created`/`proposal.updated` cover sets and exits too (payload adds `kind`). Leg orders emit the usual `order.updated`/`order.filled`. One new event:
+- `set.updated` — id, state (`sending|filled|unwinding|unwound|failed|flagged|acknowledged`), legsFilled, legsTotal, failedLeg, error. Drives the 9.2 progress text, the header `SET ✗` count and `FlaggedSetBar`.
+
+`gates` values refresh on `recon.done` and `order.filled`; no gate-specific event.
+
+Data added to the autonomy payload: `flaggedSets` (count, for the header), per proposal `kind`, `fallbackReason`, `exitReason` (`killed|flipped`), and for sets `setKind (buy-all|sell-all)`, `lockedC`, `legs [{conditionId, question, token, capPrice, shares, costUsd, state}]`; per resolved row and live order `approval (user|auto_l3|auto_l4)`; per flagged set `held [{question, token, shares, avgFill, bidNow}]` and `suggestedAction` (server text).
+
+### 9.9 Accessibility
+
+- The set toggle is a `<button aria-expanded>` labelled "Show 5 legs"; leg rows are plain rows, not in tab order.
+- `FlaggedSetBar` is `role="alert"` once on arrival, then static; `Acknowledge` is a real button.
+- `SET`, `EXIT`, `AUTO L3/L4`, `SET ✗` are words, never color-only marks.
