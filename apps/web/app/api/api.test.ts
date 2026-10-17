@@ -123,7 +123,7 @@ describe("http api", () => {
   });
 
   it("proposals: list shape; decide validates id/body; push answers one generic 403", async () => {
-    expect(await (await h.proposals!.GET()).json()).toEqual({ pending: [], recent: [] });
+    expect(await (await h.proposals!.GET()).json()).toEqual({ pending: [], recent: [], sets: { pending: [], recent: [] } });
     const uuid = "00000000-0000-4000-8000-000000000000";
     expect((await h.proposal!.POST(post({ action: "approve" }), ctx({ id: "nope" }))).status).toBe(404);
     expect((await h.proposal!.POST(post({ action: "launch" }), ctx({ id: uuid }))).status).toBe(400);

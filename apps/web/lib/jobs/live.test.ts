@@ -58,7 +58,7 @@ describe("live L2 (fake exchange)", () => {
     expect((await d.db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(1))[0]!.reason).toBe("go (gate not met)"); // advisory gate (0/50 resolved) logged, not blocking
     expect(pushed.at(-1)).toMatchObject({ title: "Mode changed", message: expect.stringContaining("L1 -> L2") });
     expect(pushed.at(-1).actions).toBeUndefined();
-    expect(await setMode(d, "L3", "go")).toMatchObject({ allowed: false, mode: "L2" });
+    expect(await setMode({ ...d, exchange: null }, "L3", "go")).toMatchObject({ allowed: false, mode: "L2" }); // phase 7: L3+ needs the exchange only
     expect(await read.autonomy({ db: d.db, now: d.now, exchangeConfigured: true })).toMatchObject({ mode: "L2", executionEnabled: true, exchangeConfigured: true, pendingCount: 0 });
   });
 

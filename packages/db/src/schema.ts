@@ -126,8 +126,10 @@ export const orders = pgTable("orders", {
   clobOrderId: text("clob_order_id"),
   expiresAt: ts("expires_at"),
   paper: boolean("paper").notNull().default(true),
-  attempt: integer("attempt").notNull().default(0), // live key = `${thesisId}:${attempt}`
+  attempt: integer("attempt").notNull().default(0), // live key = `${thesisId}:${attempt}`; set legs: `set:${setId}:${leg}` / `set:${setId}:u${leg}` (unwind)
   createdAt: ts("created_at").notNull().defaultNow(),
+  setId: uuid("set_id").references(() => proposalSets.id), // neg-risk set leg; thesisId = `set:${setId}` (sets are not theses)
+  proposalId: uuid("proposal_id"), // single-leg order: the proposal that sent it (no FK: proposals.order_id already points back)
 });
 
 export const fills = pgTable("fills", {
@@ -211,9 +213,37 @@ export const proposals = pgTable("proposals", {
   rejectTokenHash: text("reject_token_hash").notNull(),
   orderId: text("order_id").references(() => orders.id),
   error: text("error"),
+  fallbackReason: text("fallback_reason"), // L3 only: PER_TRADE | DAILY_AUTO_NOTIONAL | CATEGORY_NOT_ALLOWED (why it needs approval)
+  exitReason: text("exit_reason"), // kind=exit: killed | flipped
 }, (t) => [
   index("proposals_status").on(t.status),
   uniqueIndex("proposals_one_pending_per_thesis").on(t.thesisId).where(sql`${t.status} = 'pending'`),
+]);
+
+export type SetLegRow = { conditionId: string; token: string; shares: number; limit: number; price: number }; // limit = FOK cap, price = touch at proposal
+
+/** One neg-risk set = one approval, one risk check (build 3 decision 5). Legs live here, not as proposal rows, so single-leg decide/expire can never act on a leg. */
+export const proposalSets = pgTable("proposal_sets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: text("event_id").notNull(), // neg-risk group
+  kind: text("kind").notNull(), // buy-all | sell-all
+  legs: jsonb("legs").$type<SetLegRow[]>().notNull(), // send order (thinnest first)
+  shares: dp("shares").notNull(), // per leg
+  totalCost: dp("total_cost").notNull(),
+  edge: dp("edge").notNull(), // worst-case locked profit USD at the caps, after fees (= expected profit)
+  status: text("status").notNull().default("pending"), // pending | sending | filled | unwinding | unwound | failed | flagged | acknowledged | rejected | expired
+  createdAt: ts("created_at").notNull().defaultNow(),
+  expiresAt: ts("expires_at").notNull(),
+  decidedAt: ts("decided_at"),
+  decidedVia: text("decided_via"), // web | tui | push
+  approveTokenHash: text("approve_token_hash").notNull(), // sha256 hex, "" = burned
+  rejectTokenHash: text("reject_token_hash").notNull(),
+  failedLeg: integer("failed_leg"), // 0-based index into legs
+  error: text("error"),
+  fallbackReason: text("fallback_reason"), // L3 only: why the set needs approval (STRUCTURAL_AUTO_OFF | ...)
+}, (t) => [
+  index("proposal_sets_status").on(t.status),
+  uniqueIndex("proposal_sets_one_pending_per_event").on(t.eventId).where(sql`${t.status} = 'pending'`),
 ]);
 
 export const reconciliations = pgTable("reconciliations", {

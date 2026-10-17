@@ -45,6 +45,8 @@ export async function kill(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exc
   const dead = await d.db.update(s.proposals).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED })
     .where(eq(s.proposals.status, "pending")).returning({ id: s.proposals.id });
   for (const p of dead) publish("proposal.updated", { id: p.id, state: "expired", reason: "KILLED" });
+  for (const p of await d.db.update(s.proposalSets).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED }).where(eq(s.proposalSets.status, "pending")).returning({ id: s.proposalSets.id }))
+    publish("proposal.updated", { id: p.id, kind: "set", state: "expired", reason: "KILLED" }); // a set mid-send stops itself: sendSet re-checks the mode before every leg
 
   let cancelled = 0;
   const failed: { orderId: string; error: string }[] = [];

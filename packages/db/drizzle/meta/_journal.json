@@ -36,6 +36,20 @@
       "when": 1792231801982,
       "tag": "0004_icy_silk_fever",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792238778427,
+      "tag": "0005_acoustic_killraven",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792239359045,
+      "tag": "0006_stale_toxin",
+      "breakpoints": true
     }
   ]
 }

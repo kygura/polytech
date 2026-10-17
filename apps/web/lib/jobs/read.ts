@@ -282,9 +282,10 @@ export async function autonomy(r: ReadDeps) {
   const x = await exposureOf(db, st.bankroll, now());
   const ev = await db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(50);
   const pend = await db.select({ id: s.proposals.id }).from(s.proposals).where(eq(s.proposals.status, "pending"));
+  const flaggedSets = (await db.select({ id: s.proposalSets.id }).from(s.proposalSets).where(eq(s.proposalSets.status, "flagged"))).length;
   const liveOpen = await db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)));
   return {
-    liveOpenOrders: liveOpen.length, recon: await reconStatus(r),
+    liveOpenOrders: liveOpen.length, flaggedSets, recon: await reconStatus(r),
     mode, executionEnabled: !!r.exchangeConfigured, exchangeConfigured: !!r.exchangeConfigured, pendingCount: pend.length, // L2 needs the exchange; L3-L4 refused until phase 7
     categories: cats.map((c) => ({ category: c, override: (st.overrides[c] ?? null) as Mode | null, effective: effectiveMode(mode, st.overrides[c]) })),
     limits: st.limits,
@@ -320,7 +321,56 @@ export async function proposals(r: ReadDeps) {
       state: uiState(p.status), reason: expired ? p.error : null, error: expired ? null : p.error, orderId: p.orderId ? (clob.get(p.orderId) ?? null) : null,
     };
   };
-  return { pending: open.map(row), recent: recent.map(row) };
+  return { pending: open.map(row), recent: recent.map(row), sets: await setViews(db) };
+}
+
+// ---------------------------------------------------------------- sets (DESIGN 9.1 / 9.2 / 9.8)
+const SET_OPEN = ["pending", "sending", "unwinding"];
+/** Open sets (soonest expiry first), every flagged set, and the last 10 resolved. held/suggestedAction only for flagged sets (from booked fills). */
+async function setViews(db: Db) {
+  const q = db.select().from(s.proposalSets);
+  const [open, flagged, recent] = await Promise.all([
+    q.where(inArray(s.proposalSets.status, SET_OPEN)).orderBy(asc(s.proposalSets.expiresAt)),
+    db.select().from(s.proposalSets).where(eq(s.proposalSets.status, "flagged")),
+    db.select().from(s.proposalSets).where(inArray(s.proposalSets.status, ["filled", "unwound", "failed", "flagged", "acknowledged", "rejected", "expired"])).orderBy(desc(s.proposalSets.createdAt)).limit(10),
+  ]);
+  const done = [...new Map([...flagged, ...recent].map((p) => [p.id, p])).values()];
+  const all = [...open, ...done];
+  if (!all.length) return { pending: [], recent: [] };
+  const ids = [...new Set(all.flatMap((p) => p.legs.map((l) => l.conditionId)))];
+  const [mk, snaps, ords, fl] = await Promise.all([
+    db.select().from(s.markets).where(inArray(s.markets.conditionId, ids)),
+    latestSnaps(db, ids),
+    db.select().from(s.orders).where(inArray(s.orders.setId, all.map((p) => p.id))),
+    db.select({ f: s.fills, o: s.orders }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(inArray(s.orders.setId, all.map((p) => p.id))),
+  ]);
+  const M = new Map(mk.map((m) => [m.conditionId, m]));
+  const O = new Map(ords.map((o) => [o.idempotencyKey, o]));
+  const view = (p: (typeof all)[number]) => {
+    const legs = p.legs.map((l, i) => {
+      const m = M.get(l.conditionId), o = O.get(`set:${p.id}:${i}`), u = O.get(`set:${p.id}:u${i}`);
+      const state = !o ? "queued" : o.status === "sending" ? "sending" : u ? (u.status === "sending" ? "unwinding" : u.status === "filled" ? "unwound" : "held") : orderUi(o.status, 0);
+      return { conditionId: l.conditionId, question: m?.question ?? l.conditionId, token: (l.token === m?.yesTokenId ? "YES" : "NO") as Side, capPrice: l.limit, shares: l.shares, costUsd: l.shares * l.limit, state };
+    });
+    const held = p.status !== "flagged" ? [] : p.legs.flatMap((l, i) => {
+      const f = fl.filter((x) => x.o.setId === p.id && x.o.tokenId === l.token);
+      const buys = f.filter((x) => x.o.side === "BUY"), bought = buys.reduce((t, x) => t + x.f.size, 0);
+      const shares = bought - f.filter((x) => x.o.side === "SELL").reduce((t, x) => t + x.f.size, 0);
+      if (!(shares > 1e-6)) return [];
+      const sn = snaps.get(l.conditionId), yes = legs[i]!.token === "YES";
+      const bidNow = yes ? (sn?.bestBid ?? null) : sn?.bestAsk == null ? null : 1 - sn.bestAsk;
+      return [{ conditionId: l.conditionId, question: legs[i]!.question, token: legs[i]!.token, shares, avgFill: buys.reduce((t, x) => t + x.f.price * x.f.size, 0) / bought, bidNow }];
+    });
+    const unknown = p.status === "flagged" ? ords.filter((o) => o.setId === p.id && ["sending", "unknown", "failed_unknown"].includes(o.status)).length : 0;
+    const suggestedAction = p.status !== "flagged" ? null
+      : [...(unknown ? [`Check the venue: ${unknown} leg order(s) in unknown state`] : []), ...held.map((h) => `SELL ${+h.shares.toFixed(2)} ${h.token} on Polymarket, bid ${h.bidNow?.toFixed(3) ?? "n/a"}`)].join("; ") || "Check positions on Polymarket";
+    return {
+      id: p.id, kind: "set" as const, setKind: p.kind as "buy-all" | "sell-all", eventId: p.eventId, state: p.status, shares: p.shares, costUsd: p.totalCost,
+      lockedC: p.shares ? (p.edge / p.shares) * 100 : null, expectedProfitUsd: p.edge, createdAt: p.createdAt.getTime(), expiresAt: p.expiresAt.getTime(),
+      decidedVia: p.decidedVia, failedLeg: p.failedLeg, error: p.error, legs, held, suggestedAction,
+    };
+  };
+  return { pending: open.map(view), recent: done.map(view) };
 }
 
 // ---------------------------------------------------------------- settings + flags

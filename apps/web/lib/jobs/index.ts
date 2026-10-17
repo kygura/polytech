@@ -8,5 +8,6 @@ export * from "./research";
 export * from "./paper";
 export * from "./live";
 export * from "./sync";
+export * from "./sets";
 export * from "./calib";
 export * as read from "./read";

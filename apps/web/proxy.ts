@@ -3,7 +3,7 @@ import { SESSION_COOKIE, bearer, checkCron, verifySession } from "./lib/auth";
 
 const PUBLIC = new Set(["/login", "/api/login"]);
 // ntfy approve/reject actions: no session, authorized by a single-use token inside the route (rate-limited there).
-const PUSH = /^\/api\/proposals\/[^/]+\/push$/;
+const PUSH = /^\/api\/(proposals|sets)\/[^/]+\/push$/;
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

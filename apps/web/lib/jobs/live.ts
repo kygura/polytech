@@ -1,11 +1,11 @@
-import { checkOrder, effectiveMode, gtdExpiry, livelimitPrice, proposalExpiry, type Mode } from "@pm/core";
+import { autoAllowed, checkOrder, effectiveMode, exitDecision, gtdExpiry, livelimitPrice, proposalExpiry, type Mode } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNull, lt, ne, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, notInArray, notLike, sql } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode, downgradeOn } from "./autonomy";
-import { withLock, type Deps } from "./deps";
+import { today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { LIVE_OPEN, addExposure, assess, candidates, downgradeSignals, eventOf, exposureOf, openBook } from "./paper";
 import { latestSnaps } from "./screen";
@@ -19,12 +19,14 @@ const SHARE_STEP = 100; // shares rounded down to 0.01 so cost never exceeds the
 type Proposal = typeof s.proposals.$inferSelect;
 type Row = typeof s.markets.$inferSelect;
 export type Action = "approve" | "reject";
-export type Via = "web" | "tui" | "push";
+export type Via = "web" | "tui" | "push" | "auto";
+export const LIVE_MODES: Mode[] = ["L2", "L3", "L4"];
+export const isLive = (m: Mode) => LIVE_MODES.includes(m);
 /** UI state: db 'approved' is shown as 'sending' (DESIGN 8.7). */
 export const uiState = (st: string) => (st === "approved" ? "sending" : st);
 
-const sha256 = (t: string) => createHash("sha256").update(t).digest("hex");
-const newToken = () => randomBytes(32).toString("base64url");
+export const sha256 = (t: string) => createHash("sha256").update(t).digest("hex");
+export const newToken = () => randomBytes(32).toString("base64url");
 const sideMid = (yesMid: number, tokenId: string, m: Row) => (tokenId === m.yesTokenId ? yesMid : 1 - yesMid);
 
 function updated(p: Pick<Proposal, "id">, state: string, extra: { reason?: string; error?: string; orderId?: string } = {}) {
@@ -39,10 +41,11 @@ async function cas(d: Pick<Deps, "db">, id: string, from: string, set: Partial<P
 export const BURNED = { approveTokenHash: "", rejectTokenHash: "" };
 const decided = (d: Pick<Deps, "now">, via: Via) => ({ decidedAt: new Date(d.now()), decidedVia: via, ...BURNED });
 
-/** Latest reconciliation says mismatch => no new live orders. No row yet => not halted. */
-async function halted(d: Pick<Deps, "db">) {
+/** Latest reconciliation says mismatch, or a neg-risk set is flagged and not yet acknowledged => no new live orders. No recon row yet => not halted. */
+export async function halted(d: Pick<Deps, "db">) {
   const r = (await d.db.select().from(s.reconciliations).orderBy(desc(s.reconciliations.id)).limit(1))[0];
-  return r ? !r.ok : false;
+  if (r && !r.ok) return true;
+  return (await d.db.select({ id: s.proposalSets.id }).from(s.proposalSets).where(eq(s.proposalSets.status, "flagged")).limit(1)).length > 0;
 }
 
 /** orderId -> shares filled so far (live book). */
@@ -61,38 +64,55 @@ export const orderUi = (status: string, filled: number, shares = Infinity) =>
   : status === "rejected" || status === "failed_unknown" ? "failed"
   : status;
 
-async function liveMode(d: Deps, m: Row): Promise<Mode> {
+export async function liveMode(d: Pick<Deps, "db" | "settings">, m: Row): Promise<Mode> {
   return effectiveMode(await currentMode(d.db), d.settings.overrides[m.category ?? ""]);
 }
 
+const FALLBACK: Record<string, string> = { STRUCTURAL_NOT_AUTO: "STRUCTURAL_AUTO_OFF", L3_PER_TRADE: "PER_TRADE", L3_DAILY_NOTIONAL: "DAILY_AUTO_NOTIONAL", CATEGORY_NOT_ALLOWED: "CATEGORY_NOT_ALLOWED" };
+/** Notional of auto-sent orders created today (rejected/cancelled excluded). Read under the live-send lock so two auto sends cannot both pass the daily cap. */
+async function autoToday(d: Pick<Deps, "db" | "now">) {
+  const [r] = await d.db.select({ n: sql<number>`coalesce(sum(${s.orders.limitPrice} * ${s.orders.size}), 0)::float8` }).from(s.orders)
+    .where(and(eq(s.orders.paper, false), eq(s.orders.approval, "auto"), gte(s.orders.createdAt, new Date(`${today(d.now())}T00:00:00Z`)), notInArray(s.orders.status, ["rejected", "cancelled"])));
+  return r!.n;
+}
+/** null = may auto-send (L4 always; L3 inside limits.l3), else the DESIGN 9.3 fallback reason (needs approval). Callers only ask at L3/L4. */
+export async function autoGate(d: Pick<Deps, "db" | "now" | "settings">, mode: Mode, o: { sizeUsd: number; category: string; isSet?: boolean }): Promise<string | null> {
+  if (mode === "L4") return null;
+  const r = autoAllowed(o, d.settings.limits.l3, await autoToday(d));
+  return r.ok ? null : (FALLBACK[r.reason!] ?? r.reason!);
+}
+
 // ---------------------------------------------------------------- propose
-/** L2: every qualifying thesis becomes one pending proposal (no order yet). Same selection + checks as paper, risk against the live book only. */
+/** L2+: every qualifying thesis becomes one proposal (no order yet), then exits for killed/flipped theses. L3 auto-sends inside limits.l3 and falls back to pending; L4 auto-sends. Risk against the live book only. */
 export async function propose(d: Deps) {
   return withLock(d, "propose", 5 * MIN, async () => {
     const { db, settings: st } = d, now = d.now();
     const mode = await currentMode(db);
-    const res = { mode, candidates: 0, proposed: 0, skipped: {} as Record<string, number> };
-    if (mode !== "L2" || !d.exchange) return res;
+    const res = { mode, candidates: 0, proposed: 0, sent: 0, exits: 0, skipped: {} as Record<string, number> };
+    if (!isLive(mode) || !d.exchange) return res;
     const skip = (r: string) => void (res.skipped[r] = (res.skipped[r] ?? 0) + 1);
     if (await halted(d)) return (skip("RECON_HALTED"), res);
 
-    // held: open live position or live order on the market; theses with any non-expired proposal are done (rejected/failed are not re-proposed)
+    // held: open live position or live order on the market; theses with any non-expired entry proposal are done (rejected/failed are not re-proposed)
     const held = new Set((await openBook(db, false)).map((x) => x.p.conditionId));
     for (const o of await db.select({ c: s.orders.conditionId }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)))) held.add(o.c);
-    const done = new Set((await db.select({ t: s.proposals.thesisId }).from(s.proposals).where(ne(s.proposals.status, "expired"))).map((x) => x.t));
-    const { cands: all, mk } = await candidates(d, "L2", held);
-    const cands = all.filter((t) => !done.has(t.id));
+    const done = new Set((await db.select({ t: s.proposals.thesisId }).from(s.proposals).where(and(ne(s.proposals.status, "expired"), eq(s.proposals.kind, "entry")))).map((x) => x.t));
+    // a category override lowers the mode per market: one candidate pass per live level up to the global mode
+    const lv = await Promise.all(LIVE_MODES.slice(0, LIVE_MODES.indexOf(mode) + 1).map(async (m) => ({ m, ...(await candidates(d, m, held)) })));
+    const mk = lv[0]!.mk;
+    const cands = lv.flatMap((x) => x.cands.map((t) => ({ t, m: x.m }))).filter((x) => !done.has(x.t.id)).sort((a, b) => (b.t.rank ?? 0) - (a.t.rank ?? 0));
     res.candidates = cands.length;
-    if (cands.length) await takeSnapshots(d, cands.map((t) => t.conditionId)); // fresh book (< 60 s)
+    if (cands.length) await takeSnapshots(d, cands.map((x) => x.t.conditionId)); // fresh book (< 60 s)
     const x = await exposureOf(db, st.bankroll, now, false);
-    const dg = await downgradeOn(d, await downgradeSignals(d, x, cands.length)); // L2 auto-downgrades: daily loss (live realized), stale feed
+    const dg = await downgradeOn(d, await downgradeSignals(d, x, cands.length)); // auto-downgrades: daily loss (live realized), stale feed
     if (dg) return { ...res, mode: dg };
+    await cancelStaleEntries(d);
+    res.exits = await proposeExits(d, mode, skip);
     if (!cands.length) return res;
-    const snaps = await latestSnaps(db, cands.map((t) => t.conditionId));
+    const snaps = await latestSnaps(db, cands.map((c) => c.t.conditionId));
 
-    for (const t of cands) {
+    for (const { t, m: tmode } of cands) {
       const row = mk.get(t.conditionId)!;
-      if (row.negRiskGroup) { skip("STRUCTURAL_PHASE7"); continue; } // neg-risk set legs are structural: auto/arb execution is phase 7
       const a = assess(d, t, row, snaps.get(t.conditionId), now);
       if (!a.ok) { a.failed.forEach(skip); continue; }
       const { sz } = a;
@@ -103,34 +123,125 @@ export async function propose(d: Deps) {
       const shares = Math.floor((sz.sizeUsd / limit) * SHARE_STEP) / SHARE_STEP;
       if (!(shares > 0)) { skip("NO_LIMIT"); continue; }
       const sizeUsd = shares * limit;
-      const chk = checkOrder({ sizeUsd, marketId: t.conditionId, eventId: eventOf(row), category: row.category ?? "other" }, x, st.limits);
+      const category = row.category ?? "other";
+      const chk = checkOrder({ sizeUsd, marketId: t.conditionId, eventId: eventOf(row), category }, x, st.limits);
       if (!chk.ok) { chk.violations.forEach((v) => skip(`RISK_${v.rule}`)); continue; }
 
-      if ((await currentMode(db)) !== "L2") { skip("MODE_CHANGED"); break; } // killed mid-run
-      const approve = newToken(), reject = newToken();
-      let p: Proposal | undefined;
-      try {
-        [p] = await db.insert(s.proposals).values({
-          thesisId: t.id, conditionId: t.conditionId, tokenId, side: "BUY", kind: "entry", sizeUsd, shares, limitPrice: limit,
-          expectedProfit: shares * sz.e, priceAtProposal: sz.pMid, createdAt: new Date(now), expiresAt: new Date(now + TTL),
-          approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject),
-        }).returning();
-      } catch {
-        skip("DUPLICATE_PENDING"); // partial unique index: one pending per thesis
-        continue;
-      }
-      if ((await currentMode(db)) !== "L2") { await expire(d, p!, "KILLED"); skip("MODE_CHANGED"); break; } // killed between the check and the insert: no push
+      if ((await currentMode(db)) !== mode) { skip("MODE_CHANGED"); break; } // killed mid-run
+      const fallbackReason = tmode === "L3" ? await autoGate(d, tmode, { sizeUsd, category }) : null;
+      const ins = await insertProposal(d, { thesisId: t.id, conditionId: t.conditionId, tokenId, side: "BUY", kind: "entry", sizeUsd, shares, limitPrice: limit, expectedProfit: shares * sz.e, priceAtProposal: sz.pMid, fallbackReason }, row, t.side, now, tmode, mode, skip);
+      if (ins === "break") break;
+      if (!ins) continue;
       addExposure(x, row, sizeUsd); // later candidates in this run see this one
       res.proposed++;
-      publish("proposal.created", { id: p!.id, conditionId: t.conditionId });
-      await notify(p!, row.question, t.side, { approve, reject });
+      if (await autoSent(ins, d, tmode, fallbackReason)) res.sent++;
     }
     return res;
   });
 }
 
+type NewProposal = Pick<Proposal, "thesisId" | "conditionId" | "tokenId" | "side" | "kind" | "sizeUsd" | "shares" | "limitPrice" | "expectedProfit" | "priceAtProposal"> & Partial<Pick<Proposal, "fallbackReason" | "exitReason">>;
+/** Insert a pending proposal (partial unique index: one pending per thesis). "break" = killed between the check and the insert (no push); undefined = duplicate. */
+async function insertProposal(d: Deps, v: NewProposal, row: Row, side: string, now: number, tmode: Mode, top: Mode, skip: (r: string) => void) {
+  const approve = newToken(), reject = newToken();
+  let p: Proposal | undefined;
+  try {
+    [p] = await d.db.insert(s.proposals).values({ ...v, createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject) }).returning();
+  } catch {
+    skip("DUPLICATE_PENDING");
+    return undefined;
+  }
+  if ((await currentMode(d.db)) !== top) { await expire(d, p!, "KILLED"); skip("MODE_CHANGED"); return "break" as const; }
+  publish("proposal.created", { id: p!.id, conditionId: v.conditionId, kind: v.kind });
+  return { p: p!, tk: { approve, reject }, question: row.question, side };
+}
+type Inserted = NonNullable<Awaited<ReturnType<typeof insertProposal>>> & object;
+
+/** Auto-send a fresh proposal (L3 inside limits / L4); true = sent. Otherwise (L2, fallback, busy) it stays pending and the owner gets the approval push. */
+async function autoSent({ p, tk, question, side }: Exclude<Inserted, string>, d: Deps, tmode: Mode, fallbackReason: string | null | undefined) {
+  if (tmode !== "L2" && !fallbackReason) {
+    const r = await decide(d, p.id, "approve", "auto");
+    if (r.ok && r.state !== "pending") return r.state === "sent";
+    if (!r.ok && r.error !== "busy") return false;
+  }
+  await notify(p, question, side, tk);
+  return false;
+}
+
+/** Entry orders still resting for a killed thesis, or one superseded by a newer thesis (re-research): cancel the unfilled remainder. Failures stay live for the next run. */
+async function cancelStaleEntries(d: Deps) {
+  const open = await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), eq(s.orders.status, "live"), isNotNull(s.orders.clobOrderId), notLike(s.orders.thesisId, "set:%")));
+  if (!open.length) return;
+  const ths = await d.db.select().from(s.theses).where(inArray(s.theses.conditionId, [...new Set(open.map((o) => o.conditionId))])).orderBy(desc(s.theses.createdAt));
+  const latest = new Map<string, string>();
+  for (const t of ths) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t.id);
+  const filled = await liveFilled(d.db);
+  for (const o of open) {
+    const th = ths.find((t) => t.id === o.thesisId);
+    if (!th || !(isKilled(th) || latest.get(o.conditionId) !== th.id)) continue;
+    try {
+      await d.exchange!.cancel([o.clobOrderId!]);
+      await d.db.update(s.orders).set({ status: "cancelled" }).where(and(eq(s.orders.id, o.id), eq(s.orders.status, "live")));
+      publish("order.updated", { id: o.id, orderId: o.clobOrderId, status: orderUi("cancelled", 0), filledShares: filled.get(o.id) ?? 0 });
+    } catch { /* still live: retried next run */ }
+  }
+}
+// ponytail: theses have no status column and no producer marks one killed yet; a kill-criteria checker writes detail.status = "killed"
+const isKilled = (t: typeof s.theses.$inferSelect) => (t.detail as { status?: string } | null)?.status === "killed";
+
+/**
+ * Open live position (entered by a thesis) whose thesis was killed, or whose market's newest thesis flipped side => one exit proposal: SELL the whole position
+ * at a floor of best bid - 0.02 (marketable GTD limit, never below one tick). One open exit per position (pending, approved, rejected, or a SELL order resting).
+ * L2 pending; L3 auto inside limits.l3 (else fallback), L4 auto.
+ */
+async function proposeExits(d: Deps, top: Mode, skip: (r: string) => void) {
+  const { db } = d, now = d.now();
+  const book = await openBook(db, false);
+  if (!book.length) return 0;
+  const toks = book.map((x) => x.p.tokenId), conds = [...new Set(book.map((x) => x.p.conditionId))];
+  const entries = await db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), notLike(s.orders.thesisId, "set:%"), inArray(s.orders.tokenId, toks))).orderBy(desc(s.orders.createdAt));
+  const ths = await db.select().from(s.theses).where(inArray(s.theses.conditionId, conds)).orderBy(desc(s.theses.createdAt));
+  const exits = await db.select({ c: s.proposals.conditionId }).from(s.proposals).where(and(eq(s.proposals.kind, "exit"), inArray(s.proposals.status, ["pending", "approved", "rejected"]), inArray(s.proposals.conditionId, conds)));
+  const selling = await db.select({ t: s.orders.tokenId }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "SELL"), inArray(s.orders.status, LIVE_OPEN), inArray(s.orders.tokenId, toks)));
+  const busy = new Set([...exits.map((x) => x.c), ...selling.map((x) => x.t)]);
+
+  const todo = book.flatMap(({ p, m }) => {
+    const th = ths.find((t) => t.id === entries.find((o) => o.tokenId === p.tokenId)?.thesisId);
+    if (!th || busy.has(p.conditionId) || busy.has(p.tokenId)) return [];
+    const latest = ths.find((t) => t.conditionId === p.conditionId) ?? null;
+    const dec = exitDecision({ status: isKilled(th) ? "killed" : "open", side: th.side }, latest, { shares: p.size });
+    return dec.exit ? [{ p, m, th, reason: dec.reason! }] : [];
+  });
+  if (!todo.length) return 0;
+  await takeSnapshots(d, todo.map((x) => x.p.conditionId));
+  const snaps = await latestSnaps(db, todo.map((x) => x.p.conditionId));
+  let n = 0;
+  for (const { p, m, th, reason } of todo) {
+    const tmode = await liveMode(d, m);
+    if (!isLive(tmode)) continue;
+    const sn = snaps.get(p.conditionId), yes = p.tokenId === m.yesTokenId;
+    const bid = yes ? sn?.bestBid : sn?.bestAsk == null ? null : 1 - sn.bestAsk;
+    if (bid == null || sn?.mid == null) { skip("NO_BOOK"); continue; }
+    const limit = Math.max(TICK, Math.round(Math.floor(Math.round((bid - 0.02) / TICK * 1e6) / 1e6) * TICK * 1e8) / 1e8);
+    const shares = Math.floor(p.size * SHARE_STEP) / SHARE_STEP;
+    if (!(shares > 0)) continue;
+    const sizeUsd = shares * limit;
+    if ((await currentMode(db)) !== top) { skip("MODE_CHANGED"); break; }
+    const fallbackReason = tmode === "L3" ? await autoGate(d, tmode, { sizeUsd, category: m.category ?? "other" }) : null;
+    const ins = await insertProposal(d, {
+      thesisId: th.id, conditionId: p.conditionId, tokenId: p.tokenId, side: "SELL", kind: "exit", sizeUsd, shares, limitPrice: limit, expectedProfit: shares * (bid - p.avgCost),
+      priceAtProposal: sideMid(sn.mid, p.tokenId, m), fallbackReason, exitReason: reason,
+    }, m, yes ? "YES" : "NO", now, tmode, top, skip);
+    if (ins === "break") break;
+    if (!ins) continue;
+    n++;
+    await autoSent(ins, d, tmode, fallbackReason);
+  }
+  return n;
+}
+
 /** POST one ntfy message. NTFY_TOPIC unset => skipped. Never throws (5 s timeout), so it never blocks the caller's real work. */
-async function ntfy(msg: { title: string; message: string; priority: number; actions?: unknown[] }, env = process.env, f: typeof fetch = fetch) {
+export async function ntfy(msg: { title: string; message: string; priority: number; actions?: unknown[] }, env = process.env, f: typeof fetch = fetch) {
   const topic = env.NTFY_TOPIC;
   if (!topic) return false;
   try {

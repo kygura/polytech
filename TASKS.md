@@ -128,3 +128,45 @@ SPEC phase 6: real CLOB orders behind per-order approval (web, TUI, ntfy push), 
 - 2026-10-17: V2 loop 2. Suite green 2/3 (login dotenv test flake, pre-existing); live.test 5/5. Opus re-review: 8/8 loop-1 fixes confirmed; new HIGH live positions never settle on resolution → daily-loss dead at L2; MED rebaseline can mask failed_unknown fill; LOWs (post-kill proposal window, stuck sweep vs late order, category override mid-send, post-migration auto-baseline, pod.failed unscrubbed). Batches D (sonnet, jobs) + E (sonnet, login flake root cause).
 - 2026-10-17: V2 loop 3. Opus final risk: PASS (all loop-2 items fixed, no new HIGH/MED, single place() path). Deferred LOW → phase 7: rebaseline should also block on matched-with-zero-fills orders; stuck sweep matches by thesis not proposal; late SELL after settlement dropped (BUY-only today); send fail() double event. Suite 2/3 (pglite beforeAll 10s timeout under load) → 60s hook timeout fix in flight.
 - 2026-10-17: V2 PASS. db beforeAll 60s; 2/2 forced full runs green (13/13 tasks; core 136, pm 21, agents 16, tui 12, db 6, web 113). Phase 6 build complete; live path unverified until user runs clob-smoke from unblocked network.
+
+---
+
+# Build 3 — Phase 7: Autonomy (L3/L4) + neg-risk sets
+
+Planner: claude-opus-5-5 · roles as build 1 · started 2026-10-17
+
+## Destination
+
+SPEC phase 7: L3 bounded auto (auto-limits, fallback to approval), L4 full auto inside global limits, structural neg-risk sets executed as a set with unwind/flag on partial fill, exits on thesis kill/flip, L2→L3 and L3→L4 gate stats computed. Gate: `bun install && bunx turbo typecheck test build` green; fake-exchange integration tests cover set happy path, mid-set FOK failure → unwind, unwind failure → flagged manual, L3 auto vs fallback, L4 auto, exit proposal, kill during set.
+
+## Build decisions (binding)
+
+1. Sets in scope (user, 2026-10-17).
+2. Set execution = sequential legs, thinnest leg first, each leg FOK with a hard price cap (worst price = leg limit from sizing). A capped FOK is limit-priced, so SPEC "limit only, no market orders" holds in intent: no unbounded slippage. Fallback if the SDK has no buy price cap: GTD limit legs + 60 s fill window + cancel remainder.
+3. buy-all = BUY YES on every leg; sell-all = BUY NO on every leg (pays n−1, costs n−Σbids). All set legs are BUYs; equal shares per leg.
+4. Partial set → unwind filled legs with capped FAK SELL (floor = fill price − 0.02); anything left → set status `flagged`, push alert, manual action. Never retry a leg automatically.
+5. A set is one proposal row-group (one approval) and one risk check: per-event limit counts the whole set as one event; cost = Σ leg costs.
+6. L3: auto-send iff inside `limits.l3` (per-trade, daily auto notional, category allowlist, `structuralAuto` for sets); else falls back to L2 approval. L4: auto-send inside global risk limits. Kill switch, halt and auto-downgrade apply to every path.
+7. Exits: thesis killed or flipped sign on re-research → exit proposal (SELL held position, capped limit) at L2, auto at L3/L4 within limits.
+8. Single-leg directional theses on neg-risk markets are no longer skipped (the phase-6 skip covered them by accident); they count against the group's event limit.
+9. `convert`/`horizontalMerge` absent from @polymarket/client 0.13.0 → no on-chain conversion; CLOB only.
+
+## Tasks
+
+| id | task | level / role | deps | status |
+|---|---|---|---|---|
+| A1 | core pure logic: set risk check, L3 auto-limit check, set leg plan + unwind plan, exit decision, gate stats, allow L3/L4 in requestModeChange | L2 worker sonnet@medium | — | done |
+| A2 | pm seam: `placeFok` (capped FOK BUY, capped FAK SELL), fakeExchange FOK/FAK + per-order failure, smoke script FOK check | L2 worker sonnet@medium | — | done |
+| D3 | DESIGN.md addendum: set proposal row, set states (sending/partial/unwinding/flagged), L3/L4 enabled, gate stats, stale phase text | L2 designer fable@medium | — | done |
+| A3 | migration 0003 (sets, set legs link, exit kind) + `lib/jobs/sets.ts`: detect→propose set, approve, sequential send, unwind, flag, kill-during-set | L3 heavy opus@medium (trigger: schema design + multi-leg money path atomicity) | A1, A2 | done |
+| A4 | live.ts L3/L4 auto path, modeAtSend/approval, exits, gate stats feed, drop neg-risk skip, crons; deferred phase-6 LOWs | L2 worker sonnet@medium | A3 | todo |
+| U5 | web + TUI per D3 | L2 ui-impl fable@medium | D3, A4 | todo |
+| V3 | Verification gate | reviewers | all | todo |
+
+## Decisions so far (build 3)
+
+- 2026-10-17: scouts (sonnet map, haiku UI, haiku SDK). SDK 0.13.0: FOK/FAK only via placeMarketOrder, postOrders 1–15 signed, no convert/horizontalMerge (docs/research wrong on that). l3 settings exist unused; all 5 downgrade signals wired; exits missing; gate stats L2→L3/L3→L4 never fed.
+- 2026-10-17: A2 done. `placeImmediate` (maxPrice cap BUY, minPrice SELL, FOK|FAK); BUY sized in USD → may overfill shares, callers read filledShares; throw = unknown, never resend. fake `scriptImmediate(token, filled)`. No smoke FOK step (real order). pm 24.
+- 2026-10-17: A1 done. core/book/sets.ts: checkSet (reuses checkOrder on Σ, PER_MARKET per leg), autoAllowed (empty allowlist = none), setLegPlan (best level only, cap = best+0.01 ≤0.99, fee-aware, TOO_THIN|NO_EDGE), unwindPlan, exitDecision (killed|flipped), gateStats. requestModeChange allows L2+ when exchange configured. core 149.
+- 2026-10-17: D3 done (DESIGN §9, 467–587). SSE set.updated (sending|filled|unwinding|unwound|failed|flagged|acknowledged), proposal kind single|set|exit, POST /api/sets/:id/ack, FlaggedSetBar, AUTO L3/L4 chips. Planner: unacknowledged flagged set → halted() (fail closed); sent to A3.
+- 2026-10-17: A3 done. Migration 0005 proposal_sets (legs jsonb, no setId on proposals; orders.set_id, thesisId set:<id>, keys set:<id>:<leg>/u<leg>). sets.ts proposeSets/decideSet/sendSet/ackSet; fills booked by sync (recon balanced); halted() true on flagged set; kill expires pending sets. Routes /api/sets/[id], /push, /ack; cron sets 2-59/5. Risks: NO price = 1−YES bid; category from first leg; crash mid-send → 10 min stuck sweep. web 125.
