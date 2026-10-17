@@ -1,10 +1,11 @@
-import { autoDowngrade, kill as coreKill, requestModeChange, type Actor, type AutonomyEvent, type DowngradeSignals, type Mode } from "@pm/core";
+import { aggregate, autoDowngrade, gateProgress, kill as coreKill, requestModeChange, type Actor, type AutonomyEvent, type DowngradeSignals, type Mode } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { forecastRows } from "./calib";
 import type { Deps } from "./deps";
 import { publish } from "./events";
-import { liveFilled, orderUi } from "./live";
+import { BURNED, liveFilled, notifyMode, orderUi } from "./live";
 import { LIVE_OPEN } from "./paper";
 
 /** Global mode = to_mode of the newest global event (refused requests are logged with to == from). Default L0. */
@@ -13,18 +14,23 @@ export async function currentMode(db: Db): Promise<Mode> {
   return (r?.toMode as Mode | undefined) ?? "L0";
 }
 
+/** Logs + publishes a mode event. `sent` is the (never-rejecting) ntfy push, started but not awaited so callers can finish urgent work first. skippedGate rides in `reason`: autonomy_events has no column for it. */
 async function record(d: Pick<Deps, "db" | "now">, ev: AutonomyEvent) {
-  await d.db.insert(s.autonomyEvents).values({
-    ts: new Date(d.now()), fromMode: ev.fromMode, toMode: ev.refused ? ev.fromMode : ev.toMode,
-    scope: "global", reason: ev.reason, actor: ev.actor,
-  });
-  publish("mode.changed", { from: ev.fromMode, to: ev.refused ? ev.fromMode : ev.toMode, reason: ev.reason, actor: ev.actor, refused: ev.refused, requested: ev.toMode });
+  const reason = ev.skippedGate && !ev.refused ? `${ev.reason} (gate not met)` : ev.reason;
+  const to = ev.refused ? ev.fromMode : ev.toMode;
+  await d.db.insert(s.autonomyEvents).values({ ts: new Date(d.now()), fromMode: ev.fromMode, toMode: to, scope: "global", reason, actor: ev.actor });
+  publish("mode.changed", { from: ev.fromMode, to, reason, actor: ev.actor, refused: ev.refused, requested: ev.toMode });
+  return { sent: to !== ev.fromMode || ev.actor === "kill" ? notifyMode(`${ev.fromMode} -> ${to}: ${reason} (${ev.actor})`) : Promise.resolve(false) };
 }
 
 /** Raises to L3+ (and to L2 without a configured exchange) are refused (EXECUTION_DISABLED) and logged; everything else applies. One action, no re-auth. */
 export async function setMode(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exchange">>, to: Mode, reason = "manual", actor: Exclude<Actor, "kill"> = "user") {
-  const ch = requestModeChange(await currentMode(d.db), to, actor, reason, true, !!d.exchange);
-  await record(d, ch.event);
+  const cur = await currentMode(d.db);
+  // same L1->L2 gate inputs as read.autonomy; advisory: a missed gate is logged, never blocks
+  const a = cur !== "L2" && to === "L2" ? aggregate(await forecastRows(d.db), () => "all").all : undefined;
+  const met = cur === "L2" || to !== "L2" || gateProgress("L1->L2", { resolved: a?.n ?? 0, brier: a?.brier, marketBrier: a?.marketBrier }).met;
+  const ch = requestModeChange(cur, to, actor, reason, met, !!d.exchange);
+  await (await record(d, ch.event)).sent;
   return { allowed: ch.allowed, mode: ch.mode, reason: ch.event.reason };
 }
 
@@ -35,8 +41,8 @@ export async function setMode(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "
  */
 export async function kill(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exchange">>) {
   const ch = coreKill(await currentMode(d.db));
-  await record(d, ch.event);
-  const dead = await d.db.update(s.proposals).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), approveTokenHash: "", rejectTokenHash: "" })
+  const { sent } = await record(d, ch.event);
+  const dead = await d.db.update(s.proposals).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED })
     .where(eq(s.proposals.status, "pending")).returning({ id: s.proposals.id });
   for (const p of dead) publish("proposal.updated", { id: p.id, state: "expired", reason: "KILLED" });
 
@@ -56,26 +62,20 @@ export async function kill(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exc
       for (const o of await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)))) failed.push({ orderId: o.clobOrderId ?? o.id, error });
     }
   }
+  await sent;
   return { mode: ch.mode, cancelled, failed };
 }
 
 /** Anthropic outage mid-pod => SPEC auto-downgrade (only ever lowers the mode). */
-export async function outageDowngrade(d: Pick<Deps, "db" | "now">) {
-  const cur = await currentMode(d.db);
-  const dg = autoDowngrade({ dailyLossHit: false, consecutiveOrderErrors: 0, bookStaleMs: 0, balanceMismatch: false, anthropicOutageMidPod: true }, cur);
-  if (!dg) return null;
-  const ch = requestModeChange(cur, dg.mode, "auto-downgrade", dg.reason);
-  await record(d, ch.event);
-  return ch.mode;
-}
+export const outageDowngrade = (d: Pick<Deps, "db" | "now">) => downgradeOn(d, { anthropicOutageMidPod: true });
 
-/** L1-relevant auto-downgrades (daily loss, stale book). Core targets L2 for BOOK_STALE, which never lowers L1, so at L1 stale goes to L0. */
+/** Auto-downgrades (daily loss, order errors, stale book, mismatch, outage). Core targets L2 for BOOK_STALE, which never lowers L1/L2, so at L1/L2 stale goes to L0. */
 export async function downgradeOn(d: Pick<Deps, "db" | "now">, sig: Partial<DowngradeSignals>) {
   const cur = await currentMode(d.db);
   const all = { dailyLossHit: false, consecutiveOrderErrors: 0, bookStaleMs: 0, balanceMismatch: false, anthropicOutageMidPod: false, ...sig };
-  const dg = autoDowngrade(all, cur) ?? (all.bookStaleMs > 300_000 && cur === "L1" ? { mode: "L0" as Mode, reason: "BOOK_STALE" } : null);
+  const dg = autoDowngrade(all, cur) ?? (all.bookStaleMs > 300_000 && (cur === "L1" || cur === "L2") ? { mode: "L0" as Mode, reason: "BOOK_STALE" } : null);
   if (!dg) return null;
   const ch = requestModeChange(cur, dg.mode, "auto-downgrade", dg.reason);
-  await record(d, ch.event);
+  await (await record(d, ch.event)).sent;
   return ch.mode;
 }

@@ -90,6 +90,16 @@ export function assess(d: Deps, t: ThesisRow, row: MarketRow, snap: SnapRow | un
   return { ok: true, m, sz, snap: snap as SnapRow & { book: NonNullable<SnapRow["book"]>; mid: number } };
 }
 
+/** Auto-downgrade inputs shared by paper (L1) and propose (L2). Stale = newest snapshot anywhere (feed down), not one candidate; skipped on a DB with no snapshots yet. `x` must be the book's own exposure. */
+export async function downgradeSignals(d: Deps, x: Exposure, nCands: number) {
+  const now = d.now();
+  const last = ((await d.db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)) as [{ ts: Date | null }])[0].ts;
+  return {
+    dailyLossHit: d.settings.limits.dailyLoss > 0 && !(x.dailyRealizedLoss < d.settings.limits.dailyLoss), // 0 = disabled
+    bookStaleMs: !last ? 0 : nCands || now - last.getTime() > NO_CAND_STALE_MS ? now - last.getTime() : 0,
+  };
+}
+
 /** L1: settle resolved paper positions, then fill every qualifying thesis at k(S) against a fresh book. */
 export async function paperBook(d: Deps) {
   return withLock(d, "paper", 5 * 60_000, async () => {
@@ -115,13 +125,9 @@ export async function paperBook(d: Deps) {
     res.candidates = cands.length;
     if (cands.length) await takeSnapshots(d, cands.map((t) => t.conditionId)); // "fresh book (< 60 s at order time)"
 
-    // 3. auto-downgrades. Stale = newest snapshot anywhere (feed down), not one candidate; skipped on a DB with no snapshots yet.
+    // 3. auto-downgrades
     const x = await exposureOf(db, st.bankroll, now);
-    const last = ((await db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)) as [{ ts: Date | null }])[0].ts;
-    const dg = await downgradeOn(d, {
-      dailyLossHit: st.limits.dailyLoss > 0 && !(x.dailyRealizedLoss < st.limits.dailyLoss), // 0 = disabled
-      bookStaleMs: !last ? 0 : cands.length || now - last.getTime() > NO_CAND_STALE_MS ? now - last.getTime() : 0,
-    });
+    const dg = await downgradeOn(d, await downgradeSignals(d, x, cands.length));
     if (dg) return { ...res, mode: dg };
     if (!cands.length) return res;
     const snaps = await latestSnaps(db, cands.map((t) => t.conditionId));
