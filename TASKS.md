@@ -77,3 +77,42 @@ Phases 1–5 of SPEC.md: screener + structural detectors, research pods + judge 
 - 2026-10-15: D1 done → DESIGN.md. Watchlist API row includes `c` and `side`. Settings "weights" = SPEC constants only (C coef 0.5, crowd bonus 0.2, T decay 60 d, size targets). Fonts: system stacks (`ui-monospace`, `system-ui`), no font loading.
 - 2026-10-15: scope phases 1–5 (user). Offline verification via PGlite / memory Redis / fixtures / fake runner (planner).
 - 2026-10-15: T0 done (1b9edbd). Kept hand-built scaffold (no generators). TypeScript 7.0.2 = native port, no JS API: if a tool needs it, pin `typescript@6` in that package only. Turbo strict env: declare env vars in turbo.json when used.
+
+---
+
+# Build 2 — Phase 6: Live execution (L2)
+
+Planner: claude-opus-5-5 · roles as above · started 2026-10-17
+
+## Destination
+
+SPEC phase 6: real CLOB orders behind per-order approval (web, TUI, ntfy push), order/fill/position tables split from paper, kill switch cancels live orders, 5-min reconciliation halts on mismatch. Gate (advisory, needs live trading): 30 approved trades with slippage within 1¢ of model.
+
+## Build decisions (binding)
+
+1. Legality confirmed by user for jurisdiction + `dub1` (2026-10-17).
+2. Key custody: `PM_PRIVATE_KEY` env var, signed in-process (user). Never logged, never sent to sandboxes/agents, never in API responses. Recommend dedicated low-balance wallet.
+3. SDK: `@polymarket/client@0.13.0` (`createSecureClient`, viem signer). No `clob-client`/`-v2`. Wallet mode via `PM_SIGNATURE_TYPE` (`eoa` | `deposit`, default `deposit` = SDK default).
+4. All exchange access behind one `Exchange` seam in `packages/pm` with `fakeExchange()` for tests/local. Live path unverifiable from this machine (ISP block) → `bun run --cwd packages/pm clob-smoke` for the user to run once from an unblocked network (derive key, tiny GTD order, cancel). Open risk: SDK issue #65 (key derivation HTTP 400).
+5. L2 is enterable only when the exchange is configured (`PM_PRIVATE_KEY` set or fake in tests); L3/L4 still `EXECUTION_DISABLED` (phase 7). Risk limits enforced (reject) for live orders in L2.
+6. Push alerts: ntfy.sh, topic from `NTFY_TOPIC`, two `http` actions (approve/reject) each carrying a single-use token (hashed in DB). Unset → alerts skipped.
+7. Done = `bun install && bunx turbo typecheck test build` green; fake-exchange integration test covers propose → approve → send → fill → reconcile → kill(cancel all); expiry (15 min or >2¢ move) and idempotent retry covered.
+
+## Tasks
+
+| id | task | level / role | deps | status |
+|---|---|---|---|---|
+| R3 | Execution stack research → `docs/research/execution.md` | L0 research haiku@high | — | done |
+| B1 | pnpm → bun (`1882378`) | L1 grunt haiku@max | — | done |
+| P1 | db migration 0002 + core pure logic (proposal expiry, limit-price policy, reconcile diff, paper/live exposure split) | L2 worker sonnet@medium | — | todo |
+| P2 | `packages/pm` Exchange seam: `clobExchange` (@polymarket/client) + `fakeExchange` + `clob-smoke` script | L3 heavy opus@medium (trigger: key handling / signing) | R3 | todo |
+| D2 | DESIGN.md addendum: approvals pane (web + TUI), live order/position states, kill confirm | L2 designer fable@medium | — | todo |
+| P3 | `apps/web/lib/jobs/live.ts`: propose / approve / reject / send (idempotent) / expire + approval routes + ntfy | L3 heavy opus@medium (trigger: money path, idempotency, unauth token route) | P1, P2 | todo |
+| P4 | fill sync + reconciliation cron + kill cancels live + autonomy unlock L2 + crons | L2 worker sonnet@medium | P3 | todo |
+| U3 | Web approvals pane + live states per D2 | L2 ui-impl fable@medium | D2, P3 | todo |
+| U4 | TUI approvals view per D2 | L2 ui-impl fable@medium | D2, P3 | todo |
+| V2 | Verification gate | reviewers | all | todo |
+
+## Decisions so far (build 2)
+
+- 2026-10-17: B1 bun 1.4.3, 228 tests green. R3: unified `@polymarket/client` has trading (placeLimitOrder, cancel*, listOpenOrders, listAccountTrades, fetchBalanceAllowance); no fetch injection → tests use fakeExchange, real path via smoke script.
