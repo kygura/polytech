@@ -66,7 +66,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect(await order(o.id)).toMatchObject({ status: "live" });
     expect(events.filter((e) => e.type === "order.updated").at(-1)!.payload).toMatchObject({ orderId: o.clobOrderId, status: "partial", filledShares: o.size / 2 });
     const book = await read.bookLive({ db: d.db, now: d.now });
-    expect(book.openOrders[0]).toMatchObject({ orderId: o.clobOrderId, side: "BUY", price: o.limitPrice, shares: o.size, filledShares: o.size / 2, status: "partial" });
+    expect(book.openOrders[0]).toMatchObject({ orderId: o.clobOrderId, side: "BUY", price: o.limitPrice, shares: o.size, filledShares: o.size / 2, status: "partial", approval: "user", modeAtSend: "L2", setId: null });
 
     fx.fill(o.clobOrderId!);
     expect(await syncFills(d)).toMatchObject({ fills: 1 });
@@ -82,7 +82,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect(b.openOrders).toEqual([]);
     expect(b.positions[0]).toEqual({ conditionId: o.conditionId, question: expect.any(String), tokenId: o.tokenId, outcome: expect.stringMatching(/^(YES|NO)$/), shares: o.size, avgPrice: expect.any(Number), markPrice: expect.any(Number), unrealizedUsd: expect.any(Number) });
     expect(b.fills).toHaveLength(2);
-    expect(Object.keys(b.fills[0]!).sort()).toEqual(["at", "conditionId", "feeUsd", "price", "question", "shares", "side", "tradeId"]);
+    expect(Object.keys(b.fills[0]!).sort()).toEqual(["approval", "at", "conditionId", "feeUsd", "modeAtSend", "price", "question", "setId", "shares", "side", "tradeId"]);
     expect(b.recon.status).toBe("ok");
   });
 

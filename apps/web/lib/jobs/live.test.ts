@@ -99,7 +99,7 @@ describe("live L2 (fake exchange)", () => {
     expect(events.map((e) => e.payload?.state).filter(Boolean)).toEqual(expect.arrayContaining(["sending", "sent"]));
     expect((await exposureOf(d.db, 1000, d.now(), false)).totalOpen).toBeCloseTo(p.shares * p.limitPrice, 6); // open order counts
     const rows = await read.proposals({ db: d.db, now: d.now });
-    expect(rows.recent[0]).toMatchObject({ id: p.id, state: "sent", orderId: "fake-1", costUsd: p.shares * p.limitPrice });
+    expect(rows.recent[0]).toMatchObject({ id: p.id, state: "sent", orderId: "fake-1", costUsd: p.shares * p.limitPrice, decidedVia: "web", approval: "user", fallbackReason: null, exitReason: null });
     expect(rows.pending.every((x) => x.state === "pending")).toBe(true);
   });
 

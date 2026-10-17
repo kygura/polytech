@@ -264,10 +264,11 @@ export async function bookLive(r: ReadDeps) {
   const openOrders = ords.map(({ o, q }) => ({
     orderId: o.clobOrderId ?? o.id, conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: o.limitPrice, shares: o.size,
     filledShares: filled.get(o.id) ?? 0, status: orderUi(o.status, filled.get(o.id) ?? 0, o.size), expiresAt: o.expiresAt?.getTime() ?? null,
+    approval: o.approval as "auto" | "user" | null, modeAtSend: o.modeAtSend, setId: o.setId,
   }));
   const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId))
     .innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.fills.paper, false)).orderBy(desc(s.fills.ts), desc(s.fills.id)).limit(50);
-  const fills = fl.map(({ f, o, q }) => ({ tradeId: f.tradeId ?? String(f.id), conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: f.price, shares: f.size, feeUsd: f.fee, at: f.ts.getTime() }));
+  const fills = fl.map(({ f, o, q }) => ({ tradeId: f.tradeId ?? String(f.id), conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: f.price, shares: f.size, feeUsd: f.fee, at: f.ts.getTime(), approval: o.approval as "auto" | "user" | null, modeAtSend: o.modeAtSend, setId: o.setId }));
   return { positions, openOrders, fills, recon: await reconStatus(r) };
 }
 
@@ -328,14 +329,15 @@ export async function proposals(r: ReadDeps) {
   const ids = [...new Set([...open, ...recent].map((x) => x.p.conditionId))];
   const snaps = ids.length ? await latestSnaps(db, ids) : new Map<string, never>();
   const ords = [...open, ...recent].flatMap((x) => (x.p.orderId ? [x.p.orderId] : []));
-  const clob = new Map((ords.length ? await db.select({ id: s.orders.id, c: s.orders.clobOrderId }).from(s.orders).where(inArray(s.orders.id, ords)) : []).map((o) => [o.id, o.c]));
+  const clob = new Map((ords.length ? await db.select({ id: s.orders.id, c: s.orders.clobOrderId, a: s.orders.approval }).from(s.orders).where(inArray(s.orders.id, ords)) : []).map((o) => [o.id, o]));
   const row = ({ p, m }: (typeof open)[number]) => {
     const yes = snaps.get(p.conditionId)?.mid ?? null, isYes = p.tokenId === m.yesTokenId, expired = p.status === "expired";
     return {
       id: p.id, conditionId: p.conditionId, question: m.question, thesisId: p.thesisId, side: (isYes ? "YES" : "NO") as Side, orderSide: p.side as "BUY" | "SELL", kind: p.kind,
       shares: p.shares, limitPrice: p.limitPrice, costUsd: p.shares * p.limitPrice, edgeC: p.shares ? (p.expectedProfit / p.shares) * 100 : null, expectedProfitUsd: p.expectedProfit,
       midAtProposal: p.priceAtProposal, midNow: yes == null ? null : isYes ? yes : 1 - yes, createdAt: p.createdAt.getTime(), expiresAt: p.expiresAt.getTime(),
-      state: uiState(p.status), reason: expired ? p.error : null, error: expired ? null : p.error, orderId: p.orderId ? (clob.get(p.orderId) ?? null) : null,
+      state: uiState(p.status), reason: expired ? p.error : null, error: expired ? null : p.error, orderId: p.orderId ? (clob.get(p.orderId)?.c ?? null) : null,
+      decidedVia: p.decidedVia, fallbackReason: p.fallbackReason, exitReason: p.exitReason, approval: (p.orderId ? (clob.get(p.orderId)?.a ?? null) : null) as "auto" | "user" | null,
     };
   };
   return { pending: open.map(row), recent: recent.map(row), sets: await setViews(db) };
@@ -384,7 +386,8 @@ async function setViews(db: Db) {
     return {
       id: p.id, kind: "set" as const, setKind: p.kind as "buy-all" | "sell-all", eventId: p.eventId, state: p.status, shares: p.shares, costUsd: p.totalCost,
       lockedC: p.shares ? (p.edge / p.shares) * 100 : null, expectedProfitUsd: p.edge, createdAt: p.createdAt.getTime(), expiresAt: p.expiresAt.getTime(),
-      decidedVia: p.decidedVia, failedLeg: p.failedLeg, error: p.error, legs, held, suggestedAction,
+      decidedVia: p.decidedVia, fallbackReason: p.fallbackReason, eventTitle: null as string | null, // no event title is stored (markets keep eventId + question only)
+      failedLeg: p.failedLeg, error: p.error, legs, held, suggestedAction,
     };
   };
   return { pending: open.map(view), recent: done.map(view) };
