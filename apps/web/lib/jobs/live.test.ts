@@ -308,11 +308,183 @@ describe("live L2 hardening", () => {
     expect(await downgradeOn(d, { bookStaleMs: 300_001 })).toBeNull(); // already L0
   });
 
-  it("structural (neg-risk) theses are not proposed in L2", async () => {
+  it("single-leg directional theses on neg-risk markets are proposed, not skipped", async () => {
     for (const x of groups) await d.db.update(s.markets).set({ negRiskGroup: x.g }).where(eq(s.markets.conditionId, x.c));
     await reset();
     await setMode(d, "L2", "test");
-    expect(((await propose(d)) as { skipped: Record<string, number> }).skipped.STRUCTURAL_PHASE7).toBeGreaterThan(0);
-    expect((await pending()).every((p) => !groups.some((g) => g.c === p.conditionId))).toBe(true);
+    const r = (await propose(d)) as { skipped: Record<string, number> };
+    expect(Object.keys(r.skipped).filter((k) => k.startsWith("STRUCTURAL"))).toEqual([]);
+    expect((await pending()).some((p) => groups.some((g) => g.c === p.conditionId))).toBe(true);
+  });
+});
+
+describe("live L3/L4 auto (fake exchange)", () => {
+  const reset = async () => {
+    await d.db.delete(s.proposals);
+    await d.db.delete(s.fills).where(eq(s.fills.paper, false));
+    await d.db.delete(s.orders).where(eq(s.orders.paper, false));
+    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    await fx.cancelAll();
+  };
+  const withL3 = (l3: Partial<Deps["settings"]["limits"]["l3"]>) => withLimits({ l3: { ...d.settings.limits.l3, ...l3 } });
+  const open = { perTradeUsd: 1e6, dailyNotional: 1e6 };
+  const liveOrders = async () => d.db.select().from(s.orders).where(eq(s.orders.paper, false));
+  let cats: string[];
+  const dd = () => withL3({ ...open, categoryAllowlist: cats });
+  beforeAll(async () => {
+    cats = (await d.db.selectDistinct({ c: s.markets.category }).from(s.markets)).flatMap((x) => (x.c ? [x.c] : []));
+    await d.db.update(s.markets).set({ negRiskGroup: null });
+  });
+
+  it("L3 inside limits auto-sends: order approval auto, modeAtSend L3, no approval push", async () => {
+    await reset();
+    await setMode(d, "L3", "test");
+    const pushes = pushed.length, before = places;
+    const r = (await propose(dd())) as { proposed: number; sent: number };
+    expect(r.sent).toBeGreaterThan(0);
+    expect(r.sent).toBe(r.proposed);
+    expect(places).toBe(before + r.sent);
+    expect(pushed.slice(pushes).filter((b) => b.actions?.length)).toHaveLength(0);
+    const os = (await liveOrders()).filter((o) => o.side === "BUY");
+    expect(os).toHaveLength(r.sent);
+    expect(os.every((o) => o.approval === "auto" && o.modeAtSend === "L3" && o.proposalId)).toBe(true);
+    const ps = await d.db.select().from(s.proposals).where(eq(s.proposals.kind, "entry"));
+    expect(ps.every((p) => p.status === "sent" && p.decidedVia === "auto" && p.approveTokenHash === "")).toBe(true);
+  });
+
+  it("L3 over the per-trade limit or outside the category allowlist falls back to approval", async () => {
+    await reset();
+    const before = places;
+    let r = (await propose(withL3({ ...open, perTradeUsd: 0.01, categoryAllowlist: cats }))) as { proposed: number; sent: number };
+    expect(r.sent).toBe(0);
+    expect((await pending()).length).toBe(r.proposed);
+    expect((await pending()).every((p) => p.fallbackReason === "PER_TRADE")).toBe(true);
+    expect(pushed.at(-1).actions).toHaveLength(2); // approval push as at L2
+    await reset();
+    r = (await propose(withL3({ ...open, categoryAllowlist: [] }))) as { proposed: number; sent: number };
+    expect(r.sent).toBe(0);
+    expect((await pending()).every((p) => p.fallbackReason === "CATEGORY_NOT_ALLOWED")).toBe(true);
+    expect(places).toBe(before);
+    const p = (await pending())[0]!;
+    expect(await decide(d, p.id, "approve", "web")).toMatchObject({ ok: true, state: "sent" }); // manual approval at L3 is still a user approval
+    expect((await liveOrders())[0]).toMatchObject({ approval: "user", modeAtSend: "L3" });
+  });
+
+  it("L3 daily auto notional caps auto sends; the rest wait for approval", async () => {
+    await reset();
+    const probe = (await propose(withL3({ ...open, categoryAllowlist: [] }))) as { proposed: number };
+    const first = (await pending()).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]!;
+    await reset();
+    const r = (await propose(withL3({ ...open, dailyNotional: first.shares * first.limitPrice * 1.5, categoryAllowlist: cats }))) as { proposed: number; sent: number };
+    expect(probe.proposed).toBeGreaterThan(1);
+    expect(r.sent).toBe(1);
+    expect((await pending()).every((p) => p.fallbackReason === "DAILY_AUTO_NOTIONAL")).toBe(true);
+  });
+
+  it("L4 auto-sends inside global limits without the L3 allowlist", async () => {
+    await reset();
+    await setMode(d, "L4", "test");
+    const r = (await propose(d)) as { sent: number; proposed: number };
+    expect(r.sent).toBeGreaterThan(0);
+    expect((await liveOrders()).every((o) => o.approval === "auto" && o.modeAtSend === "L4")).toBe(true);
+    const tight = await propose(withLimits({ totalOpen: 1 })); // global limits still bind
+    expect(tight).toMatchObject({ sent: 0 });
+  });
+
+  it("recon halt blocks the auto path at propose and at decide", async () => {
+    await reset();
+    await setMode(d, "L3", "test");
+    await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+    const before = places;
+    expect(await propose(dd())).toMatchObject({ proposed: 0, sent: 0, skipped: { RECON_HALTED: 1 } });
+    await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    await propose(withL3({ ...open, categoryAllowlist: [] })); // pending via fallback
+    const p = (await pending())[0]!;
+    await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+    expect(await decide(dd(), p.id, "approve", "auto")).toEqual({ ok: false, error: "orders halted" });
+    await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    expect(places).toBe(before);
+    expect((await proposal(p.id)).status).toBe("pending");
+  });
+
+  it("kill blocks the auto path; auto-downgrade lowers the mode before anything is sent", async () => {
+    await reset();
+    await setMode(d, "L3", "test");
+    await propose(withL3({ ...open, categoryAllowlist: [] }));
+    const p = (await pending())[0]!;
+    await setMode(d, "L0", "test"); // dropped between insert and auto-send (kill itself expires pending rows)
+    const before = places;
+    expect(await decide(dd(), p.id, "approve", "auto")).toEqual({ ok: false, error: "MODE" });
+    await kill(d);
+    expect(places).toBe(before);
+    await reset();
+    await setMode(d, "L3", "test");
+    await d.db.insert(s.positions).values({ conditionId: "0xloss", tokenId: "tok", size: 1, avgCost: 0.5, realizedPnl: -10, openedAt: new Date(t), closedAt: new Date(t), paper: false });
+    const r = await propose(withLimits({ dailyLoss: 5, l3: { ...d.settings.limits.l3, ...open, categoryAllowlist: cats } }));
+    expect(r).toMatchObject({ mode: "L0" });
+    expect(places).toBe(before);
+    await d.db.delete(s.positions).where(eq(s.positions.conditionId, "0xloss"));
+  });
+
+  /** A held live position (matched entry order) whose thesis is killed. */
+  const heldKilled = async () => {
+    await reset();
+    await setMode(d, "L2", "test");
+    await propose(d);
+    const p = (await pending())[0]!;
+    await decide(d, p.id, "approve", "web");
+    const o = (await liveOrders())[0]!;
+    await d.db.update(s.orders).set({ status: "matched" }).where(eq(s.orders.id, o.id));
+    await d.db.insert(s.positions).values({ conditionId: p.conditionId, tokenId: p.tokenId, size: p.shares, avgCost: p.limitPrice, realizedPnl: 0, openedAt: new Date(t), paper: false });
+    const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0]!;
+    await d.db.update(s.theses).set({ detail: { ...(th.detail as object), status: "killed" } }).where(eq(s.theses.id, th.id));
+    await d.db.update(s.proposals).set({ status: "expired" }).where(eq(s.proposals.status, "pending")); // leave only the exit pending
+    return p;
+  };
+  const exits = async () => d.db.select().from(s.proposals).where(eq(s.proposals.kind, "exit"));
+
+  it("exit at L2: killed thesis => pending SELL exit proposal; approve sends a SELL", async () => {
+    const held = await heldKilled();
+    const r = (await propose(d)) as { exits: number };
+    expect(r.exits).toBe(1);
+    const [x] = await exits();
+    expect(x).toMatchObject({ status: "pending", side: "SELL", exitReason: "killed", conditionId: held.conditionId, tokenId: held.tokenId, shares: held.shares });
+    expect(x!.limitPrice).toBeLessThan(held.limitPrice + 1); // floor below best bid
+    expect(await decide(d, x!.id, "approve", "web")).toMatchObject({ ok: true, state: "sent" });
+    expect((await liveOrders()).find((o) => o.side === "SELL")).toMatchObject({ approval: "user", modeAtSend: "L2", proposalId: x!.id });
+    expect((await propose(d)) as { exits: number }).toMatchObject({ exits: 0 }); // one open exit per position
+  });
+
+  it("exit at L3 inside limits is sent automatically", async () => {
+    const held = await heldKilled();
+    await setMode(d, "L3", "test");
+    const r = (await propose(dd())) as { exits: number };
+    expect(r.exits).toBe(1);
+    const [x] = await exits();
+    expect(x).toMatchObject({ status: "sent", decidedVia: "auto", side: "SELL", exitReason: "killed" });
+    expect((await liveOrders()).find((o) => o.side === "SELL")).toMatchObject({ tokenId: held.tokenId, approval: "auto", modeAtSend: "L3" });
+  });
+
+  it("exit at L3 outside the allowlist waits for approval", async () => {
+    await heldKilled();
+    await setMode(d, "L3", "test");
+    await propose(withL3({ ...open, categoryAllowlist: [] }));
+    const [x] = await exits();
+    expect(x).toMatchObject({ status: "pending", fallbackReason: "CATEGORY_NOT_ALLOWED" });
+  });
+
+  it("gate stats feed /autonomy from live orders and fills", async () => {
+    await reset();
+    await setMode(d, "L2", "test");
+    await propose(d);
+    const [a, b] = await pending();
+    await decide(d, a!.id, "approve", "web");
+    await setMode(d, "L3", "test");
+    await decide(dd(), b!.id, "approve", "auto");
+    for (const o of await liveOrders()) await d.db.insert(s.fills).values({ orderId: o.id, price: o.limitPrice, size: o.size, paper: false, tradeId: `t-${o.id}` });
+    const g = (await read.autonomy({ db: d.db, now: d.now })).gates;
+    expect(g[1]).toMatchObject({ gate: "L2->L3", approvedTrades: 1, met: false });
+    expect((g[1] as { avgSlippageC: number }).avgSlippageC).toEqual(expect.any(Number));
+    expect(g[2]).toMatchObject({ gate: "L3->L4", liveTrades: 2, realizedEdge30dC: 0 });
   });
 });

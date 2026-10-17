@@ -72,7 +72,7 @@ const FALLBACK: Record<string, string> = { STRUCTURAL_NOT_AUTO: "STRUCTURAL_AUTO
 /** Notional of auto-sent orders created today (rejected/cancelled excluded). Read under the live-send lock so two auto sends cannot both pass the daily cap. */
 async function autoToday(d: Pick<Deps, "db" | "now">) {
   const [r] = await d.db.select({ n: sql<number>`coalesce(sum(${s.orders.limitPrice} * ${s.orders.size}), 0)::float8` }).from(s.orders)
-    .where(and(eq(s.orders.paper, false), eq(s.orders.approval, "auto"), gte(s.orders.createdAt, new Date(`${today(d.now())}T00:00:00Z`)), notInArray(s.orders.status, ["rejected", "cancelled"])));
+    .where(and(eq(s.orders.paper, false), eq(s.orders.approval, "auto"), eq(s.orders.side, "BUY"), gte(s.orders.createdAt, new Date(`${today(d.now())}T00:00:00Z`)), notInArray(s.orders.status, ["rejected", "cancelled"])));
   return r!.n;
 }
 /** null = may auto-send (L4 always; L3 inside limits.l3), else the DESIGN 9.3 fallback reason (needs approval). Callers only ask at L3/L4. */
@@ -98,7 +98,7 @@ export async function propose(d: Deps) {
     for (const o of await db.select({ c: s.orders.conditionId }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)))) held.add(o.c);
     const done = new Set((await db.select({ t: s.proposals.thesisId }).from(s.proposals).where(and(ne(s.proposals.status, "expired"), eq(s.proposals.kind, "entry")))).map((x) => x.t));
     // a category override lowers the mode per market: one candidate pass per live level up to the global mode
-    const lv = await Promise.all(LIVE_MODES.slice(0, LIVE_MODES.indexOf(mode) + 1).map(async (m) => ({ m, ...(await candidates(d, m, held)) })));
+    const lv = await Promise.all(LIVE_MODES.slice(0, LIVE_MODES.indexOf(mode) + 1).map(async (m) => ({ m, ...(await candidates(d, m, held, mode)) })));
     const mk = lv[0]!.mk;
     const cands = lv.flatMap((x) => x.cands.map((t) => ({ t, m: x.m }))).filter((x) => !done.has(x.t.id)).sort((a, b) => (b.t.rank ?? 0) - (a.t.rank ?? 0));
     res.candidates = cands.length;
@@ -297,7 +297,8 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
   }
 
   const row = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, p.conditionId)))[0]!;
-  if (!d.exchange || (await liveMode(d, row)) !== "L2") return { ok: false, error: "MODE" };
+  const mode = await liveMode(d, row);
+  if (!d.exchange || !isLive(mode) || (via === "auto" && mode === "L2")) return { ok: false, error: "MODE" };
   if (await halted(d)) return { ok: false, error: "orders halted" };
 
   await takeSnapshots(d, [p.conditionId]); // fresh mid for the drift check
@@ -307,13 +308,18 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
   if (reason) return expire(d, p, reason);
 
   // approve-time price policy: recompute pPost on the fresh mid exactly as propose does; fail closed if it cannot be recomputed
-  const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
-  const a = th ? assess(d, th, row, snap, now) : undefined;
-  if (!a?.ok || livelimitPrice({ vwap: p.limitPrice, pPost: a.sz.pPost, tick: TICK }) == null) return expire(d, p, "PRICE_MOVED");
+  const exit = p.kind === "exit"; // a SELL of a held position: the entry thesis is dead by definition, and selling reduces risk
+  if (!exit) {
+    const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
+    const a = th ? assess(d, th, row, snap, now) : undefined;
+    if (!a?.ok || livelimitPrice({ vwap: p.limitPrice, pPost: a.sz.pPost, tick: TICK }) == null) return expire(d, p, "PRICE_MOVED");
+  }
 
   // Risk re-check -> CAS -> order insert -> place under one lock: two approvals cannot both pass the same caps. Held => busy, proposal stays pending.
   const r = await withLock(d, "live-send", 60_000, async (): Promise<Decision> => {
-    const chk = checkOrder({ sizeUsd: p.shares * p.limitPrice, marketId: p.conditionId, eventId: eventOf(row), category: row.category ?? "other" }, await exposureOf(d.db, d.settings.bankroll, now, false), d.settings.limits);
+    // auto at L3: re-check the daily cap under the lock (two auto sends cannot both pass it); over => stays pending for manual approval
+    if (via === "auto" && !exit && (await autoGate(d, mode, { sizeUsd: p.shares * p.limitPrice, category: row.category ?? "other" }))) return { ok: true, state: "pending" };
+    const chk = exit ? { ok: true as const, violations: [] } : checkOrder({ sizeUsd: p.shares * p.limitPrice, marketId: p.conditionId, eventId: eventOf(row), category: row.category ?? "other" }, await exposureOf(d.db, d.settings.bankroll, now, false), d.settings.limits);
     if (!chk.ok) {
       const error = `risk: ${chk.violations.map((v) => v.rule).join(",")}`;
       if (!(await cas(d, p.id, "pending", { status: "failed", error, ...decided(d, via) }))) return { ok: false, error: "ALREADY_DECIDED" };
@@ -322,7 +328,7 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
     }
     if (!(await cas(d, p.id, "pending", { status: "approved", ...decided(d, via) }))) return { ok: false, error: "ALREADY_DECIDED" };
     updated(p, "approved");
-    return send(d, p);
+    return send(d, p, mode, via);
   });
   return "skipped" in r ? { ok: false, error: "busy" } : r;
 }
@@ -339,7 +345,7 @@ async function expire(d: Deps, p: Proposal, reason: "TIMEOUT" | "PRICE_MOVED" | 
  * The order row (unique idempotency key) is written BEFORE place: a crash after it leaves 'sending', never a resend.
  * A throw from place is ambiguous (may have reached the venue) => order 'unknown', no retry; fill sync (P4) resolves it.
  */
-async function send(d: Deps, p: Proposal): Promise<Decision> {
+async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decision> {
   const fail = async (error: string, orderId?: string) => {
     await cas(d, p.id, "approved", { status: "failed", error, ...(orderId ? { orderId } : {}) });
     updated(p, "failed", { error, ...(orderId ? { orderId } : {}) });
@@ -348,7 +354,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   const now = d.now();
   const row = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, p.conditionId)))[0]!;
   const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
-  const expiresAt = gtdExpiry(th?.expiresAt ?? null, new Date(now));
+  const expiresAt = gtdExpiry(p.kind === "exit" ? null : (th?.expiresAt ?? null), new Date(now)); // an exit does not depend on the (dead) thesis lifetime
   if (!th || !expiresAt) return fail("thesis expiring");
 
   // Double-send guard = the pending->approved CAS (one winner) + an order row written before place that is never re-sent while sending/unknown.
@@ -358,7 +364,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   try {
     await d.db.insert(s.orders).values({
       id: orderId, thesisId: p.thesisId, idempotencyKey: `${p.thesisId}:${attempt}`, attempt, paper: false, conditionId: p.conditionId, tokenId: p.tokenId,
-      side: p.side, limitPrice: p.limitPrice, size: p.shares, modeAtSend: "L2", approval: "user", status: "sending", expiresAt, createdAt: new Date(now),
+      side: p.side, limitPrice: p.limitPrice, size: p.shares, modeAtSend: mode, approval: via === "auto" ? "auto" : "user", status: "sending", expiresAt, createdAt: new Date(now), proposalId: p.id,
     });
   } catch {
     return fail("duplicate order key: not sent"); // another send owns (thesis, attempt)
@@ -366,7 +372,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   await d.db.update(s.proposals).set({ orderId }).where(eq(s.proposals.id, p.id));
 
   // kill/halt can land between the CAS and here: re-check right before the only exchange call
-  const blocked = (await liveMode(d, row)) !== "L2" ? "KILLED" : (await halted(d)) ? "orders halted" : null;
+  const blocked = !isLive(await liveMode(d, row)) ? "KILLED" : (await halted(d)) ? "orders halted" : null;
   if (blocked) {
     await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // never sent
     return fail(blocked, orderId);
@@ -380,7 +386,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   }
   await d.db.update(s.orders).set({ status: placed.status, clobOrderId: placed.orderId || null }).where(eq(s.orders.id, orderId));
   if (placed.status === "rejected") return fail(scrub(placed.error ?? "rejected").slice(0, 300), orderId);
-  if ((await liveMode(d, row)) !== "L2") { // killed while place was in flight: pull the order back
+  if (!isLive(await liveMode(d, row))) { // killed while place was in flight: pull the order back
     try {
       await d.exchange!.cancel([placed.orderId]);
       if (placed.status === "live") await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // matched stays for fill sync (may already be filled)

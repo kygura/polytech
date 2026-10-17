@@ -32,16 +32,16 @@ const setRow = async (id: string) => (await d.db.select().from(s.proposalSets).w
 const setOrders = async (id: string) => d.db.select().from(s.orders).where(eq(s.orders.setId, id)).orderBy(s.orders.createdAt);
 let gn = 0;
 /** New neg-risk group with n legs + a fresh structural detection (older detections removed). price = YES ask (buy-all) or YES bid (sell-all). */
-async function group(kind: "buy-all" | "sell-all", sizes: number[], price: number) {
+async function group(kind: "buy-all" | "sell-all", sizes: number[], price: number, dep = d) {
   const g = `g${++gn}`;
   await d.db.delete(s.screens);
   const legs = sizes.map((_, i) => `${g}-c${i}`);
   await d.db.insert(s.markets).values(legs.map((c) => ({ conditionId: c, question: `${g} outcome ${c}?`, category: "politics", negRiskGroup: g, eventId: g, feeRate: 0, yesTokenId: `${c}-Y`, noTokenId: `${c}-N`, status: "active" })));
   sizes.forEach((sz, i) => quote(legs[i]!, kind === "buy-all" ? { ask: price, bid: price - 0.04, askSz: sz, bidSz: 1000 } : { ask: price + 0.04, bid: price, askSz: 1000, bidSz: sz }));
   await d.db.insert(s.screens).values(legs.map((c) => ({ conditionId: c, ts: new Date(t), structuralFlag: true, structuralDetail: { type: "neg-risk-sum", kind, legs, lockedC: 1, sum: 0, sizeUsd: 50 } })));
-  const r = await proposeSets(d);
+  const r = await proposeSets(dep);
   expect(r).toMatchObject({ proposed: 1 });
-  const p = (await d.db.select().from(s.proposalSets).where(and(eq(s.proposalSets.eventId, g), eq(s.proposalSets.status, "pending"))))[0]!;
+  const p = (await d.db.select().from(s.proposalSets).where(eq(s.proposalSets.eventId, g)))[0]!;
   return { g, legs, p };
 }
 const quote = (c: string, q: { ask: number; bid: number; askSz: number; bidSz: number }) =>
@@ -203,5 +203,46 @@ describe("neg-risk sets (fake exchange)", () => {
 
   it("recon ledger stays balanced after filled, unwound and flagged sets", async () => {
     expect(await reconcileJob(d)).toMatchObject({ status: "ok", mismatches: 0 });
+  });
+
+  describe("L3/L4 auto", () => {
+    const withL3 = (l3: Partial<Deps["settings"]["limits"]["l3"]>) => ({ ...d, settings: { ...d.settings, limits: { ...d.settings.limits, l3: { ...d.settings.limits.l3, perTradeUsd: 1e6, dailyNotional: 1e6, categoryAllowlist: ["politics"], ...l3 } } } });
+    const orders = async (id: string) => (await setOrders(id)).filter((o) => o.side === "BUY");
+
+    it("L3 with structuralAuto off falls back to approval, then a user approval sends", async () => {
+      await setMode(d, "L3", "test");
+      const { p } = await group("buy-all", [600, 600, 600], 0.3, withL3({ structuralAuto: false }));
+      expect(p).toMatchObject({ status: "pending", fallbackReason: "STRUCTURAL_AUTO_OFF" });
+      expect(pushed.at(-1).actions).toHaveLength(2);
+      expect(await decideSet(d, p.id, "approve", "web")).toMatchObject({ state: "filled" });
+      expect((await orders(p.id)).every((o) => o.approval === "user" && o.modeAtSend === "L3")).toBe(true);
+    });
+
+    it("L3 with structuralAuto on and inside limits sends automatically", async () => {
+      const n = placed.length;
+      const { p } = await group("buy-all", [600, 600, 600], 0.3, withL3({ structuralAuto: true }));
+      expect(p).toMatchObject({ status: "filled", decidedVia: "auto", fallbackReason: null });
+      expect(placed.length - n).toBe(3);
+      expect((await orders(p.id)).every((o) => o.approval === "auto" && o.modeAtSend === "L3")).toBe(true);
+    });
+
+    it("L3 over the per-trade limit falls back to approval", async () => {
+      const n = placed.length;
+      const { p } = await group("buy-all", [600, 600, 600], 0.3, withL3({ structuralAuto: true, perTradeUsd: 1 }));
+      expect(p).toMatchObject({ status: "pending", fallbackReason: "PER_TRADE" });
+      expect(placed.length).toBe(n);
+    });
+
+    it("L4 sends automatically; a recon halt blocks the auto path", async () => {
+      await setMode(d, "L4", "test");
+      const { p } = await group("sell-all", [400, 400, 400], 0.4);
+      expect(p).toMatchObject({ status: "filled", decidedVia: "auto" });
+      expect((await orders(p.id)).every((o) => o.approval === "auto" && o.modeAtSend === "L4")).toBe(true);
+      await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+      const n = placed.length;
+      expect(await proposeSets(d)).toMatchObject({ proposed: 0, skipped: { HALTED: 1 } });
+      expect(placed.length).toBe(n);
+      await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    });
   });
 });

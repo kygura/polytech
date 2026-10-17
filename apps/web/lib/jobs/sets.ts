@@ -6,7 +6,7 @@ import { safeEqual } from "../auth";
 import { currentMode } from "./autonomy";
 import { feeOf, toMarket, withLock, type Deps } from "./deps";
 import { publish } from "./events";
-import { BURNED, halted, liveMode, newToken, ntfy, sha256, type Action, type Via } from "./live";
+import { BURNED, autoGate, halted, liveMode, newToken, ntfy, sha256, type Action, type Via } from "./live";
 import { addExposure, eventOf, exposureOf } from "./paper";
 import { latestSnaps, type StructDetail } from "./screen";
 import { takeSnapshots } from "./sweep";
@@ -77,7 +77,7 @@ async function sweepSets(d: Deps) {
 // ---------------------------------------------------------------- propose
 /**
  * L2+: latest neg-risk-sum detections (screens, last hour) become one pending set per event: fresh books on every leg, setLegPlan, one checkSet
- * (whole set = one order on the group's event). Approval always (L3/L4 auto is A4). Below L2 only housekeeping runs.
+ * (whole set = one order on the group's event). L2 approval; L3 auto inside limits.l3 (structuralAuto on, else fallback to approval); L4 auto. Below L2 only housekeeping runs.
  */
 export async function proposeSets(d: Deps) {
   return withLock(d, "sets", 5 * MIN, async () => {
@@ -124,7 +124,9 @@ export async function proposeSets(d: Deps) {
       const row0 = rows[0]!, category = row0.category ?? "other";
       const chk = checkSet(plan.legs.map((l) => ({ sizeUsd: l.shares * l.limit, marketId: l.conditionId })), { eventId: c.event, category }, xp, st.limits);
       if (!chk.ok) { chk.violations.forEach((v) => skip(`RISK_${v.rule}`)); continue; }
-      if (!LIVE.includes(await liveMode(d, row0))) { skip("MODE"); continue; }
+      const tmode = await liveMode(d, row0);
+      if (!LIVE.includes(tmode)) { skip("MODE"); continue; }
+      const fallbackReason = tmode === "L3" ? await autoGate(d, tmode, { sizeUsd: plan.totalCost, category, isSet: true }) : null;
 
       const by = new Map(inp.map((g) => [g.conditionId, g]));
       const approve = newToken(), reject = newToken();
@@ -133,7 +135,7 @@ export async function proposeSets(d: Deps) {
         [p] = await db.insert(s.proposalSets).values({
           eventId: c.event, kind: c.kind, shares, totalCost: plan.totalCost, edge: plan.edge,
           legs: plan.legs.map((l) => ({ ...l, price: legPrice(c.kind, by.get(l.conditionId)!) })),
-          createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject),
+          fallbackReason, createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject),
         }).returning();
       } catch {
         skip("DUPLICATE_PENDING"); // partial unique index: one pending set per event
@@ -142,6 +144,11 @@ export async function proposeSets(d: Deps) {
       for (const l of plan.legs) addExposure(xp, mk.get(l.conditionId)!, l.shares * l.limit);
       res.proposed++;
       publish("proposal.created", { id: p!.id, kind: "set", eventId: c.event });
+      if (tmode !== "L2" && !fallbackReason) {
+        const r = await decideSet(d, p!.id, "approve", "auto");
+        if (r.ok && r.state !== "pending") continue;
+        if (!r.ok && r.error !== "busy") continue;
+      }
       await notifySet(p!, row0.question, { approve, reject });
     }
     return res;
@@ -179,7 +186,7 @@ export async function decideSet(d: Deps, id: string, action: Action, via: Via, t
 
   const ids = p.legs.map((l) => l.conditionId), mk = await markets(d, ids), row0 = mk.get(ids[0]!)!;
   const mode = await liveMode(d, row0);
-  if (!d.exchange || !LIVE.includes(mode)) return { ok: false, error: "MODE" };
+  if (!d.exchange || !LIVE.includes(mode) || (via === "auto" && mode === "L2")) return { ok: false, error: "MODE" };
   if (await halted(d)) return { ok: false, error: "orders halted" };
   if (d.now() >= p.expiresAt.getTime()) return expireSet(d, p, "TIMEOUT");
 
@@ -199,9 +206,10 @@ export async function decideSet(d: Deps, id: string, action: Action, via: Via, t
       propEvent(p, "failed", { error });
       return { ok: true, state: "failed", error };
     }
+    if (via === "auto" && mode === "L3" && (await autoGate(d, mode, { sizeUsd: p.totalCost, category: row0.category ?? "other", isSet: true }))) return { ok: true, state: "pending" }; // daily cap re-checked under the lock
     if (!(await casSet(d, p.id, "pending", { status: "sending", ...decided }))) return { ok: false, error: "ALREADY_DECIDED" };
     propEvent(p, "sending");
-    return sendSet(d, p, mode, row0);
+    return sendSet(d, p, mode, row0, via);
   });
   return "skipped" in r ? { ok: false, error: "busy" } : r;
 }
@@ -222,14 +230,14 @@ const errOf = (e: unknown) => scrub(e instanceof Error ? e.message : String(e)).
  * Fills/positions are NOT written here: fill sync books the venue trades by clob id (unique trade id), exactly like single live orders, so the recon ledger
  * sees one cash flow per trade. A BUY can overfill (USD-sized): the extra shares are kept and recorded by sync; unwind sells what actually filled.
  */
-async function sendSet(d: Deps, p: SetRow, mode: Mode, row0: Row): Promise<SetDecision> {
+async function sendSet(d: Deps, p: SetRow, mode: Mode, row0: Row, via: Via): Promise<SetDecision> {
   const ex = d.exchange!;
   const filled: { conditionId: string; token: string; shares: number; fillPrice: number; leg: number }[] = [];
   const order = async (leg: number, key: string, o: { conditionId: string; token: string; side: "BUY" | "SELL"; price: number; shares: number }) => {
     const id = `ord_${crypto.randomUUID().slice(0, 12)}`;
     await d.db.insert(s.orders).values({
       id, thesisId: `set:${p.id}`, idempotencyKey: key, attempt: leg, paper: false, conditionId: o.conditionId, tokenId: o.token, side: o.side,
-      limitPrice: o.price, size: o.shares, modeAtSend: mode, approval: "user", status: "sending", createdAt: new Date(d.now()), setId: p.id,
+      limitPrice: o.price, size: o.shares, modeAtSend: mode, approval: via === "auto" ? "auto" : "user", status: "sending", createdAt: new Date(d.now()), setId: p.id,
     });
     return id;
   };

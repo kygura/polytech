@@ -1,6 +1,6 @@
-import { aggregate, effectiveMode, gateProgress, realizedEdge, reliabilityBins, type Mode, type Side, type Tier, type WatchCore } from "@pm/core";
+import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
@@ -272,6 +272,22 @@ export async function bookLive(r: ReadDeps) {
 }
 
 // ---------------------------------------------------------------- autonomy
+/**
+ * L2->L3 / L3->L4 gate inputs from live single-leg orders that have fills (set legs are excluded: their cap is not a modeled price).
+ * modeled = side mid at proposal; approved = a human sent it. Edge: realized P&L of live positions closed in the last 30 d per share bought in that window, in cents.
+ */
+export async function liveGateStats(db: ReadDeps["db"], now: Date) {
+  const rows = await db.select({ o: s.orders, px: sql<number>`(sum(${s.fills.price} * ${s.fills.size}) / sum(${s.fills.size}))::float8`, last: sql<Date>`max(${s.fills.ts})`, n: sql<number>`sum(${s.fills.size})::float8` })
+    .from(s.orders).innerJoin(s.fills, eq(s.fills.orderId, s.orders.id)).where(and(eq(s.orders.paper, false), isNull(s.orders.setId))).groupBy(s.orders.id);
+  const props = new Map((await db.select({ id: s.proposals.id, p: s.proposals.priceAtProposal }).from(s.proposals).where(isNotNull(s.proposals.orderId))).map((x) => [x.id, x.p]));
+  const trades = rows.map(({ o, px, last }) => ({ approved: o.approval === "user", side: o.side as "BUY" | "SELL", modeledPrice: (o.proposalId && props.get(o.proposalId)) || o.limitPrice, fillPrice: px, at: new Date(last) }));
+  const g = gateStats(trades, now);
+  const since = new Date(now.getTime() - 30 * 86_400_000);
+  const bought = rows.filter((x) => x.o.side === "BUY" && new Date(x.last) >= since).reduce((a, x) => a + x.n, 0);
+  const pnl = (await db.select({ v: sql<number>`coalesce(sum(${s.positions.realizedPnl}), 0)::float8` }).from(s.positions).where(and(eq(s.positions.paper, false), gte(s.positions.closedAt, since))))[0]!.v;
+  return { ...g, avgSlippageC: g.avgSlippage == null ? null : g.avgSlippage * 100, realizedEdge30dC: bought > 0 ? (pnl / bought) * 100 : null, realizedEdge30d: bought > 0 ? pnl / bought : 0 };
+}
+
 export async function autonomy(r: ReadDeps) {
   const { db, now } = r;
   const st = await getSettings(db);
@@ -280,6 +296,7 @@ export async function autonomy(r: ReadDeps) {
   const f = await forecastRows(db);
   const a = aggregate(f, () => "all").all;
   const x = await exposureOf(db, st.bankroll, now());
+  const gs = await liveGateStats(db, new Date(now()));
   const ev = await db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(50);
   const pend = await db.select({ id: s.proposals.id }).from(s.proposals).where(eq(s.proposals.status, "pending"));
   const flaggedSets = (await db.select({ id: s.proposalSets.id }).from(s.proposalSets).where(eq(s.proposalSets.status, "flagged"))).length;
@@ -292,8 +309,8 @@ export async function autonomy(r: ReadDeps) {
     usage: { totalOpen: x.totalOpen, dailyNotional: x.dailyNotional, dailyRealizedLoss: x.dailyRealizedLoss, byCategory: x.byCategory },
     gates: [
       { gate: "L1->L2" as const, ...gateProgress("L1->L2", { resolved: a?.n ?? 0, brier: a?.brier, marketBrier: a?.marketBrier }) },
-      { gate: "L2->L3" as const, ...gateProgress("L2->L3", {}) },
-      { gate: "L3->L4" as const, ...gateProgress("L3->L4", {}) },
+      { gate: "L2->L3" as const, ...gateProgress("L2->L3", gs), approvedTrades: gs.approvedLiveTrades, avgSlippageC: gs.avgSlippageC },
+      { gate: "L3->L4" as const, ...gateProgress("L3->L4", gs), liveTrades: gs.liveTrades, realizedEdge30dC: gs.realizedEdge30dC },
     ],
     events: ev.map((e) => ({ id: e.id, ts: e.ts.getTime(), fromMode: e.fromMode as Mode, toMode: e.toMode as Mode, scope: e.scope, reason: e.reason, actor: e.actor })),
   };

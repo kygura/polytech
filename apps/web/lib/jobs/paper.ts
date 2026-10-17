@@ -45,7 +45,7 @@ export async function exposureOf(db: Deps["db"], bankroll: number, now: number, 
       .where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)));
     for (const { o, m } of ords) addExposure(x, m, o.size * o.limitPrice);
     // "daily max notional sent": approved/sent proposals decided today
-    for (const p of await db.select().from(s.proposals).where(and(inArray(s.proposals.status, ["approved", "sent"]), gte(s.proposals.decidedAt, dayStart))))
+    for (const p of await db.select().from(s.proposals).where(and(inArray(s.proposals.status, ["approved", "sent"]), eq(s.proposals.kind, "entry"), gte(s.proposals.decidedAt, dayStart))))
       x.dailyNotional += p.shares * p.limitPrice;
   }
   for (const p of await db.select().from(s.positions).where(and(eq(s.positions.paper, paper), isNotNull(s.positions.closedAt), gte(s.positions.closedAt, dayStart))))
@@ -54,8 +54,8 @@ export async function exposureOf(db: Deps["db"], bankroll: number, now: number, 
   return x;
 }
 
-/** Newest live thesis per active market whose effective mode is `mode`, minus `held` markets; best rank first. */
-export async function candidates(d: Deps, mode: Mode, held: Set<string>) {
+/** Newest live thesis per active market whose effective mode (under global `top`) is `mode`, minus `held` markets; best rank first. */
+export async function candidates(d: Deps, mode: Mode, held: Set<string>, top = mode) {
   const { db, settings: st } = d, now = d.now();
   const ths = await db.select().from(s.theses).where(and(gt(s.theses.expiresAt, new Date(now)), gt(s.theses.sizeUsd, 0))).orderBy(desc(s.theses.createdAt));
   const mk = new Map((await db.select().from(s.markets)).map((m) => [m.conditionId, m]));
@@ -64,7 +64,7 @@ export async function candidates(d: Deps, mode: Mode, held: Set<string>) {
     const m = mk.get(t.conditionId);
     if (seen.has(t.conditionId)) return false;
     seen.add(t.conditionId);
-    return !!m && m.status === "active" && !held.has(t.conditionId) && effectiveMode(mode, st.overrides[m.category ?? ""]) === mode;
+    return !!m && m.status === "active" && !held.has(t.conditionId) && effectiveMode(top, st.overrides[m.category ?? ""]) === mode;
   }).sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
   return { cands, mk };
 }
