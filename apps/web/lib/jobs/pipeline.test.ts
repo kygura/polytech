@@ -179,7 +179,7 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
   });
 
   it("kill drops to L0 and stops paper fills", async () => {
-    expect(await kill(d)).toMatchObject({ mode: "L0", cancelledOrders: 0 });
+    expect(await kill(d)).toMatchObject({ mode: "L0", cancelled: 0, failed: [] });
     expect(await paperBook(d)).toMatchObject({ mode: "L0", filled: 0 });
   });
 

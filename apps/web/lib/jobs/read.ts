@@ -1,13 +1,14 @@
 import { aggregate, effectiveMode, gateProgress, realizedEdge, reliabilityBins, type Mode, type Side, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
-import { uiState } from "./live";
-import { exposureOf } from "./paper";
+import { liveFilled, orderUi, uiState } from "./live";
+import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
 import { getSettings, putSettings } from "./settings";
+import { reconStatus } from "./sync";
 
 /** Everything the API needs for reads. */
 export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean };
@@ -245,6 +246,31 @@ export async function paperBook(r: ReadDeps) {
   };
 }
 
+// ---------------------------------------------------------------- live book
+/** Live positions, open orders, last 50 fills, recon. orderId is the exchange (clob) id; markPrice falls back to avgPrice (unrealized 0) when the market has no snapshot. */
+export async function bookLive(r: ReadDeps) {
+  const { db } = r;
+  const pos = await db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId))
+    .where(and(eq(s.positions.paper, false), isNull(s.positions.closedAt))).orderBy(desc(s.positions.id));
+  const snaps = pos.length ? await latestSnaps(db, [...new Set(pos.map((x) => x.p.conditionId))]) : new Map<string, never>();
+  const positions = pos.map(({ p, m }) => {
+    const yes = snaps.get(p.conditionId)?.mid ?? null, isYes = p.tokenId === m.yesTokenId;
+    const mark = yes == null ? p.avgCost : isYes ? yes : 1 - yes;
+    return { conditionId: p.conditionId, question: m.question, tokenId: p.tokenId, outcome: (isYes ? "YES" : "NO") as "YES" | "NO", shares: p.size, avgPrice: p.avgCost, markPrice: mark, unrealizedUsd: p.size * (mark - p.avgCost) };
+  });
+  const filled = await liveFilled(db);
+  const ords = await db.select({ o: s.orders, q: s.markets.question }).from(s.orders).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId))
+    .where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN))).orderBy(desc(s.orders.createdAt));
+  const openOrders = ords.map(({ o, q }) => ({
+    orderId: o.clobOrderId ?? o.id, conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: o.limitPrice, shares: o.size,
+    filledShares: filled.get(o.id) ?? 0, status: orderUi(o.status, filled.get(o.id) ?? 0), expiresAt: o.expiresAt?.getTime() ?? null,
+  }));
+  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId))
+    .innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.fills.paper, false)).orderBy(desc(s.fills.ts), desc(s.fills.id)).limit(50);
+  const fills = fl.map(({ f, o, q }) => ({ tradeId: f.tradeId ?? String(f.id), conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: f.price, shares: f.size, feeUsd: f.fee, at: f.ts.getTime() }));
+  return { positions, openOrders, fills, recon: await reconStatus(r) };
+}
+
 // ---------------------------------------------------------------- autonomy
 export async function autonomy(r: ReadDeps) {
   const { db, now } = r;
@@ -256,7 +282,9 @@ export async function autonomy(r: ReadDeps) {
   const x = await exposureOf(db, st.bankroll, now());
   const ev = await db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(50);
   const pend = await db.select({ id: s.proposals.id }).from(s.proposals).where(eq(s.proposals.status, "pending"));
+  const liveOpen = await db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)));
   return {
+    liveOpenOrders: liveOpen.length, recon: await reconStatus(r),
     mode, executionEnabled: !!r.exchangeConfigured, exchangeConfigured: !!r.exchangeConfigured, pendingCount: pend.length, // L2 needs the exchange; L3-L4 refused until phase 7
     categories: cats.map((c) => ({ category: c, override: (st.overrides[c] ?? null) as Mode | null, effective: effectiveMode(mode, st.overrides[c]) })),
     limits: st.limits,

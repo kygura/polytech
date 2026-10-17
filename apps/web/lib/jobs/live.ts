@@ -44,6 +44,14 @@ async function halted(d: Pick<Deps, "db">) {
   return r ? !r.ok : false;
 }
 
+/** orderId -> shares filled so far (live book). */
+export async function liveFilled(db: Deps["db"]) {
+  const rows = await db.select({ o: s.fills.orderId, n: sql<number>`sum(${s.fills.size})::float8` }).from(s.fills).where(eq(s.fills.paper, false)).groupBy(s.fills.orderId);
+  return new Map(rows.map((r) => [r.o, r.n]));
+}
+/** DESIGN 8.7 order state: db 'live' is open (partial once something filled). */
+export const orderUi = (status: string, filled: number) => (status === "live" ? (filled > 0 ? "partial" : "open") : status);
+
 async function liveMode(d: Deps, m: Row): Promise<Mode> {
   return effectiveMode(await currentMode(d.db), d.settings.overrides[m.category ?? ""]);
 }
@@ -206,7 +214,7 @@ async function send(d: Deps, p: Proposal): Promise<Decision> {
   try {
     await d.db.insert(s.orders).values({
       id: orderId, thesisId: p.thesisId, idempotencyKey: `${p.thesisId}:${attempt}`, attempt, paper: false, conditionId: p.conditionId, tokenId: p.tokenId,
-      side: p.side, limitPrice: p.limitPrice, size: p.shares, modeAtSend: "L2", approval: "user", status: "sending", expiresAt,
+      side: p.side, limitPrice: p.limitPrice, size: p.shares, modeAtSend: "L2", approval: "user", status: "sending", expiresAt, createdAt: new Date(now),
     });
   } catch {
     return fail("duplicate order key: not sent"); // another send owns (thesis, attempt)

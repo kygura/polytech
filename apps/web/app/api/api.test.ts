@@ -27,6 +27,7 @@ beforeAll(async () => {
     mode: await import("./autonomy/mode/route"),
     kill: await import("./autonomy/kill/route"),
     autonomy: await import("./autonomy/route"),
+    bookLive: await import("./book/live/route"),
     stream: await import("./stream/route"),
     cron: await import("./cron/[job]/route"),
     close: await import("./paper/[positionId]/close/route"),
@@ -65,7 +66,13 @@ describe("http api", () => {
     expect(l2.allowed).toBe(false);
     expect((await h.mode!.POST(post({ to: "L9" }))).status).toBe(400);
     expect((await (await h.mode!.POST(post({ to: "L1" }))).json()).mode).toBe("L1");
-    expect(await (await h.kill!.POST()).json()).toEqual({ mode: "L0", cancelledOrders: 0 });
+    expect(await (await h.kill!.POST()).json()).toEqual({ mode: "L0", cancelled: 0, failed: [] });
+  });
+
+  it("GET /api/book/live shape (empty book) + autonomy recon fields", async () => {
+    const b = await (await h.bookLive!.GET()).json();
+    expect(b).toEqual({ positions: [], openOrders: [], fills: [], recon: { at: null, status: null, detail: null } });
+    expect(await (await h.autonomy!.GET()).json()).toMatchObject({ liveOpenOrders: 0, recon: { at: null, status: null, detail: null } });
   });
 
   it("flags update and unknown market 404", async () => {

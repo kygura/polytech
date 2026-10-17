@@ -127,6 +127,7 @@ export const orders = pgTable("orders", {
   expiresAt: ts("expires_at"),
   paper: boolean("paper").notNull().default(true),
   attempt: integer("attempt").notNull().default(0), // live key = `${thesisId}:${attempt}`
+  createdAt: ts("created_at").notNull().defaultNow(),
 });
 
 export const fills = pgTable("fills", {
@@ -138,6 +139,7 @@ export const fills = pgTable("fills", {
   fee: dp("fee").notNull().default(0),
   txHash: text("tx_hash"),
   paper: boolean("paper").notNull().default(true),
+  tradeId: text("trade_id").unique(), // live exchange trade id; null for paper (multiple nulls allowed)
 });
 
 export const positions = pgTable("positions", {
