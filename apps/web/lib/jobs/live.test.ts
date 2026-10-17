@@ -211,6 +211,23 @@ describe("live L2 hardening", () => {
     expect(["sending", "unknown", "filled", "cancelled", "expired"].map((x) => orderUi(x, 0, 10))).toEqual(["sending", "unknown", "filled", "cancelled", "expired"]);
   });
 
+  it("send failure emits one proposal.updated failed event", async () => {
+    const p = (await fresh())[0]!;
+    events.length = 0;
+    fx.failNext(new Error("socket hang up"));
+    await decide(d, p.id, "approve", "web");
+    expect(events.filter((e) => e.type === "proposal.updated" && e.payload.id === p.id && e.payload.state === "failed")).toHaveLength(1);
+  });
+
+  it("send failure does not emit failed when sync already moved the proposal on", async () => {
+    const p = (await fresh())[0]!;
+    events.length = 0;
+    const dd = { ...d, exchange: { ...fx, place: async () => { await d.db.update(s.proposals).set({ status: "sent" }).where(eq(s.proposals.id, p.id)); throw new Error("boom"); } } } as Deps;
+    await decide(dd, p.id, "approve", "web");
+    expect((await proposal(p.id)).status).toBe("sent");
+    expect(events.filter((e) => e.type === "proposal.updated" && e.payload.id === p.id && e.payload.state === "failed")).toHaveLength(0);
+  });
+
   it("kill between CAS and place: nothing is sent, order cancelled, proposal failed KILLED", async () => {
     const p = (await fresh())[0]!;
     const before = places;
@@ -277,10 +294,18 @@ describe("live L2 hardening", () => {
     expect((await proposal(b!.id)).status).toBe("approved");
   });
 
+  it("stuck sweep matches by proposal id: another order on the same thesis does not hide it", async () => {
+    const [a] = await fresh();
+    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
+    await d.db.insert(s.orders).values({ id: "ord_other", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:other`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 60_000), proposalId: null });
+    expect(await expireProposals(d)).toMatchObject({ stuck: 1 });
+    expect(await proposal(a!.id)).toMatchObject({ status: "failed", error: "STUCK_APPROVED" });
+  });
+
   it("expireProposals does not fail an approved proposal that already has an order row", async () => {
     const [a] = await fresh();
     await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
-    await d.db.insert(s.orders).values({ id: "ord_hasrow", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:stuckrow`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 2 * 60_000) });
+    await d.db.insert(s.orders).values({ id: "ord_hasrow", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:stuckrow`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 2 * 60_000), proposalId: a!.id });
     expect(await expireProposals(d)).toMatchObject({ stuck: 0 });
     expect((await proposal(a!.id)).status).toBe("approved");
   });

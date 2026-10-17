@@ -1,7 +1,7 @@
 import { applyFill, reconcile } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, count, desc, eq, gt, inArray, isNull, max } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, max, notExists, or, sql } from "drizzle-orm";
 import { downgradeOn } from "./autonomy";
 import { DAY, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -22,7 +22,7 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 async function applyToPosition(d: Pick<Deps, "db">, o: Order, t: Trade) {
   const [pos] = await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), eq(s.positions.tokenId, t.tokenId), isNull(s.positions.closedAt))).limit(1);
   const fill = { side: t.side === "BUY" ? ("buy" as const) : ("sell" as const), shares: t.shares, price: t.price, fee: t.fee };
-  if (!pos && fill.side === "sell") return;
+  if (!pos && fill.side === "sell") return lateSell(d, t);
   try {
     const next = applyFill(pos ? { shares: pos.size, avgCost: pos.avgCost, realizedPnl: pos.realizedPnl } : { shares: 0, avgCost: 0, realizedPnl: 0 }, fill);
     if (!pos) await d.db.insert(s.positions).values({ conditionId: o.conditionId, tokenId: t.tokenId, size: next.shares, avgCost: next.avgCost, realizedPnl: 0, openedAt: t.at, paper: false });
@@ -30,6 +30,20 @@ async function applyToPosition(d: Pick<Deps, "db">, o: Order, t: Trade) {
   } catch {
     /* sell exceeds position */
   }
+}
+
+/**
+ * A SELL booked after the position was already closed by settlement (it filled before resolution, sync saw it late): settlement credited the payout on the full size,
+ * the venue paid the sale price instead, so realized PnL moves by (proceeds - fee - payout). No closed position at/after the fill time => nothing to correct (reconcile flags drift).
+ */
+async function lateSell(d: Pick<Deps, "db">, t: Trade) {
+  const [pos] = await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), eq(s.positions.tokenId, t.tokenId), isNotNull(s.positions.closedAt), gte(s.positions.closedAt, t.at))).orderBy(desc(s.positions.id)).limit(1);
+  if (!pos) return;
+  const [m] = await d.db.select().from(s.markets).where(eq(s.markets.conditionId, pos.conditionId));
+  const [out] = await d.db.select().from(s.outcomes).where(eq(s.outcomes.conditionId, pos.conditionId));
+  if (!m || !out) return; // closed by something other than a resolution
+  const payout = (out.result === "YES") === (t.tokenId === m.yesTokenId) ? t.shares : 0;
+  await d.db.update(s.positions).set({ realizedPnl: pos.realizedPnl + t.price * t.shares - t.fee - payout }).where(eq(s.positions.id, pos.id));
 }
 
 /** 3 newest live orders (since the last mode change) all rejected / unknown / failed => SPEC auto-downgrade. A mode change resets the streak, so re-raising to L2 is not instantly undone by old failures. */
@@ -203,8 +217,10 @@ export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise
     if (busy) return { ok: false as const, error: "live orders are still sending or unknown" };
     const sy = await syncFills(d);
     if ("skipped" in sy || sy.error) return { ok: false as const, error: "fill sync unavailable, retry" };
-    const [still] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, ["sending", "unknown"]))).limit(1);
-    if (still) return { ok: false as const, error: "live orders are still sending or unknown" };
+    // matched with no fill booked yet: the venue says it traded, the trade is not visible; a baseline now would swallow it
+    const [still] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), or(inArray(s.orders.status, ["sending", "unknown"]),
+      and(eq(s.orders.status, "matched"), notExists(d.db.select({ x: sql`1` }).from(s.fills).where(eq(s.fills.orderId, s.orders.id))))))).limit(1);
+    if (still) return { ok: false as const, error: "live orders are still sending or unknown, or matched without fills" };
     const at = new Date(d.now());
     const snap = await snapshot(ex);
     // exchange vs DB open live positions, per token: shows what the new baseline would swallow

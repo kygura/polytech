@@ -193,6 +193,27 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect((await order(o.id)).status).toBe("failed_unknown");
   });
 
+  it("rebaseline refused while an order is matched with zero fills, even with ack", async () => {
+    const id = await mkOrder({ status: "matched", clobOrderId: "fake-m0" });
+    expect(await rebaseline(d, { ack: true })).toEqual({ ok: false, error: expect.stringContaining("matched without fills") });
+    await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, id));
+  });
+
+  it("late SELL fill after settlement corrects realized PnL (sale price replaces payout)", async () => {
+    const m = (await d.db.select().from(s.markets))[0]!, tok = m.yesTokenId!;
+    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    await d.db.insert(s.outcomes).values({ conditionId: m.conditionId, result: "YES", resolvedAt: new Date(t) }).onConflictDoNothing();
+    await d.db.insert(s.positions).values({ conditionId: m.conditionId, tokenId: tok, size: 10, avgCost: 0.5, realizedPnl: 5, openedAt: new Date(t), closedAt: new Date(t + 3_600_000), paper: false }); // settled: 10 x (1 - 0.5)
+    const placed = await fx.place({ tokenId: tok, side: "SELL", price: 0.9, shares: 10, expiresAt: new Date(t + 3_600_000) });
+    await mkOrder({ status: "live", side: "SELL", tokenId: tok, conditionId: m.conditionId, limitPrice: 0.9, clobOrderId: placed.orderId });
+    fx.fill(placed.orderId, 10, 0.9);
+    expect(await syncFills(d)).toMatchObject({ fills: 1 });
+    const [pos] = await d.db.select().from(s.positions).where(eq(s.positions.tokenId, tok));
+    expect(pos!.realizedPnl).toBeCloseTo(5 + (9 - 10), 9); // sold at 0.9 instead of paying out 1.0
+    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    await d.db.delete(s.outcomes).where(eq(s.outcomes.conditionId, m.conditionId));
+  });
+
   it("rebaseline 409s on a lost (failed_unknown) order newer than the baseline, naming count + position diff; ack proceeds", async () => {
     await reraise();
     const r = await rebaseline(d);

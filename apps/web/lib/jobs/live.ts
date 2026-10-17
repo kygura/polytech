@@ -347,8 +347,7 @@ async function expire(d: Deps, p: Proposal, reason: "TIMEOUT" | "PRICE_MOVED" | 
  */
 async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decision> {
   const fail = async (error: string, orderId?: string) => {
-    await cas(d, p.id, "approved", { status: "failed", error, ...(orderId ? { orderId } : {}) });
-    updated(p, "failed", { error, ...(orderId ? { orderId } : {}) });
+    if (await cas(d, p.id, "approved", { status: "failed", error, ...(orderId ? { orderId } : {}) })) updated(p, "failed", { error, ...(orderId ? { orderId } : {}) }); // lost CAS = sync already resolved it
     return { ok: true as const, state: "failed", error };
   };
   const now = d.now();
@@ -404,7 +403,7 @@ async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decisio
 export async function expireProposals(d: Deps) {
   const stuck = await d.db.update(s.proposals).set({ status: "failed", error: "STUCK_APPROVED" })
     .where(and(eq(s.proposals.status, "approved"), isNull(s.proposals.orderId),
-      notExists(d.db.select({ x: sql`1` }).from(s.orders).where(and(eq(s.orders.thesisId, s.proposals.thesisId), eq(s.orders.paper, false), gte(s.orders.createdAt, s.proposals.decidedAt)))), // an order row exists: sync owns it
+      notExists(d.db.select({ x: sql`1` }).from(s.orders).where(and(eq(s.orders.proposalId, s.proposals.id)))), // an order row exists: sync owns it
       lt(s.proposals.decidedAt, new Date(d.now() - 2 * MIN)))).returning({ id: s.proposals.id });
   for (const p of stuck) updated(p, "failed", { error: "STUCK_APPROVED" });
   const pend = await d.db.select().from(s.proposals).where(eq(s.proposals.status, "pending"));
