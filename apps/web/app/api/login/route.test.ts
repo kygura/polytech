@@ -1,4 +1,3 @@
-import { hash } from "@node-rs/argon2";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -12,10 +11,11 @@ const { loadEnvConfig } = require(require.resolve("@next/env", { paths: [require
   loadEnvConfig: (dir: string, dev: boolean, log: object, forceReload: boolean) => { combinedEnv: Record<string, string> };
 };
 // One load (the loader caches process.env between calls); `.env` since NODE_ENV=test skips .env.local.
-let raw = "";
+// Fixed argon2id("hunter2"): dotenv-expand leaves `$` + non-word (`$/`, `$+`) unexpanded, so a random
+// hash whose digest starts with `/` or `+` (~3%) is NOT mangled. This one is, deterministically.
+const raw = "$argon2id$v=19$m=19456,t=2,p=1$FuSmLbmeJcY8vzsBicCiRw$g9Hwh9mPjaXhZjTOrABZMlLLwYZtSaDElayWKjrG6qQ";
 let fromEnv: Record<string, string> = {};
-beforeAll(async () => {
-  raw = await hash("hunter2");
+beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), "pm-env-"));
   writeFileSync(join(dir, ".env"), `T6_RAW=${raw}\nT6_ESC=${raw.replaceAll("$", "\\$")}\n`);
   fromEnv = loadEnvConfig(dir, false, { info() {}, error() {} }, true).combinedEnv;
