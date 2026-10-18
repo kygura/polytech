@@ -32,7 +32,7 @@ export function ThesisPane({ thesis: t, now, public: pub = false }: { thesis: (N
       </dl>
       {t.capped && <p className={`warn ${css.line}`} style={{ paddingTop: "var(--sp-2)" }}>Confidence capped 0.5: agents straddle mid</p>}
       {ageH > 72 && <p className={`warn ${css.line}`}>Thesis {Math.round(ageH)}h old</p>}
-      {t.expiresAt != null && t.expiresAt < now && <p className={`muted ${css.line}`}>Expired {"—"} re-research</p>}
+      {t.expiresAt != null && t.expiresAt < now && <p className={`muted ${css.line}`}>{pub ? "Expired" : <>Expired {"—"} re-research</>}</p>}
       <p className={css.prose}>{t.thesis ?? <span className="muted">No thesis text.</span>}</p>
     </section>
   );

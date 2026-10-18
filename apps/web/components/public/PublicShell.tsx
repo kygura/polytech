@@ -39,14 +39,14 @@ export function PublicShell({ children }: { children: ReactNode }) {
     <RegionContext.Provider value={region}>
       <WalletContext.Provider value={{ ...wallet, clob }}>
         <header className={shell.header}>
-          <Link href="/trade" className={shell.wordmark}>PM-EDGE</Link>
+          <Link href="/trade" className={shell.wordmark} style={{ whiteSpace: "nowrap" }}>PM-EDGE</Link>
           <span className={css.tagline}>{"·"} research</span>
           <nav className={shell.nav} aria-label="main">
             <Link href="/trade" aria-current={path === "/trade" || /^\/trade\/(?!autonomy)/.test(path) ? "page" : undefined}>Watchlist</Link>
             <Link href="/trade/autonomy" aria-current={path.startsWith("/trade/autonomy") ? "page" : undefined}>Autonomy</Link>
           </nav>
           <div className={shell.right}>
-            <RegionStatus />
+            <span className={css.hdrRegion}><RegionStatus /></span>
             <ConnectButton />
             <Link href="/login" className={css.signin}>Sign in</Link>
           </div>

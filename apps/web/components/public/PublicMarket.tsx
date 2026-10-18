@@ -24,7 +24,7 @@ const STALE_MS = 6 * 3_600_000; // same 6 h hint as lib/public.ts STALE_MS (serv
 
 /** `base rate 0.41 · news 0.52 · … → fair 0.47`: roles only, YES probabilities. */
 export function EstimatesStrip({ agents, fair }: { agents: PublicMarketDetail["agents"]; fair: number | null }) {
-  const parts = agents.filter((a) => a.role !== "rules" && a.probability != null).map((a) => `${a.role.replace(/_/g, " ")} ${a.probability!.toFixed(2)}`);
+  const parts = agents.filter((a) => a.role !== "rules" && a.role !== "judge" && a.probability != null).map((a) => `${a.role.replace(/_/g, " ")} ${a.probability!.toFixed(2)}`);
   if (!parts.length) return null;
   return (
     <section className="pane" aria-label="agent estimates">
