@@ -21,7 +21,7 @@ export const rulesHash = (rules: string) => createHash("sha256").update(rules.tr
 
 export type Client = Pick<Anthropic, "messages">;
 
-export async function classifyR(rulesText: string, client: Client, model = modelFor("r_classifier"), backoff?: BackoffOpts): Promise<RResult> {
+export async function classifyR(rulesText: string, client: Client, model = modelFor("r_classifier"), backoff?: BackoffOpts, req?: Anthropic.RequestOptions): Promise<RResult> {
   const msg = await withBackoff(
     () =>
       client.messages.create({
@@ -30,7 +30,7 @@ export async function classifyR(rulesText: string, client: Client, model = model
         system: [{ type: "text", text: R_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: rulesText }],
         output_config: { format: { type: "json_schema", schema: jsonSchema(RResult) } },
-      }),
+      }, req),
     backoff,
   );
   const block = msg.content.find((b) => b.type === "text");
