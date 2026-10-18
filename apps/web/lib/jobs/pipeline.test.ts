@@ -4,7 +4,7 @@ import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 import { calibrateNightly, deps, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
@@ -108,6 +108,18 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect(await sweepUniverse(d)).toEqual({ skipped: true, reason: "LOCKED" });
     await release();
     expect(await sweepUniverse(d)).not.toHaveProperty("skipped");
+  });
+
+  it("snapshots keep the chain alive when oi/trades 403 (books-only, enrichment null)", async () => {
+    const boom = async () => { throw new Error("GET /oi -> 403 <!DOCTYPE html>"); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const before = (await d.db.select().from(s.snapshots)).length;
+    const out = (await snapshotBooks({ ...d, pm: { ...pm, oi: boom, trades: boom } as unknown as typeof pm }, "all")) as { snapshots: number };
+    warn.mockRestore();
+    expect(out.snapshots).toBeGreaterThan(0);
+    const fresh = (await d.db.select().from(s.snapshots)).slice(before);
+    expect(fresh).toHaveLength(out.snapshots);
+    expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.lastTradeTs === null)).toBe(true);
   });
 
   it("settings: merged on defaults, validated", async () => {

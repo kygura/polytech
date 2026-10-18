@@ -111,10 +111,17 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const conds = mkts.map((m) => m.conditionId);
   const now = d.now();
 
+  // OI and trades are enrichment: a failing chunk (e.g. the data API's Cloudflare 403) leaves those markets without oi/flow, books still land.
+  const soft = async <T>(what: string, jobs: Promise<T>[]) => {
+    const rs = await Promise.allSettled(jobs);
+    const bad = rs.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (bad.length) console.warn(`snapshot: ${what} failed for ${bad.length}/${rs.length} chunks: ${String(bad[0]!.reason).slice(0, 120)}`);
+    return rs.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  };
   const [books, oiParts, tradeParts] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
-    Promise.all(chunks(conds, 50).map((c) => d.pm.oi(c))),
-    Promise.all(chunks(conds, 25).map((c) => d.pm.trades({ market: c, limit: 500 }))),
+    soft("oi", chunks(conds, 50).map((c) => d.pm.oi(c))),
+    soft("trades", chunks(conds, 25).map((c) => d.pm.trades({ market: c, limit: 500 }))),
   ]);
   const book = new Map(books.map((b) => [b.token_id, b]));
   const oi: Record<string, number> = Object.assign({}, ...oiParts);
