@@ -148,4 +148,8 @@ describe("fixture client", () => {
   it("rejects oversized batches like the real API", async () => {
     await expect(createPm({ fixtures: true }).raw("clob", "/books", { body: Array.from({ length: 501 }, (_, i) => ({ token_id: String(i) })) })).rejects.toThrow(/500/);
   });
+  it("network failures after retries are marked like HTTP failures", async () => {
+    const pm = createPm({ fixtures: false, fetch: (async () => { throw new TypeError("fetch failed"); }) as never, sleep: async () => {} });
+    await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/oi -> network fetch failed/);
+  });
 });

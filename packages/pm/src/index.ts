@@ -55,11 +55,12 @@ export function createPm(opts: PmOptions = {}) {
           signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
         });
       } catch (e) {
-        if (attempt >= MAX_RETRIES) throw e;
+        // marked like an HTTP failure so callers can tell a venue/network failure from a bug
+        if (attempt >= MAX_RETRIES) throw new Error(`${post ? "POST" : "GET"} ${url.pathname} -> network ${(e as Error)?.message ?? e}`, { cause: e });
         await sleep(backoff);
         continue;
       }
-      if (res.ok) return res.json();
+      if (res.ok) return res.json().catch((e: unknown) => { throw new Error(`${post ? "POST" : "GET"} ${url.pathname} -> network bad body ${(e as Error)?.message ?? e}`, { cause: e }); });
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
         const ra = toNum(res.headers.get("retry-after"));
         await sleep(ra !== undefined ? Math.min(ra * 1000, 30_000) : backoff);

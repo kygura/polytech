@@ -112,11 +112,11 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const now = d.now();
 
   // OI and trades are enrichment: a failing chunk (e.g. the data API's Cloudflare 403) leaves those markets without oi/flow, books still land.
-  // Only HTTP failures ("GET /oi -> 403 ...") are soft; anything else (TypeError, ...) is a bug and rethrows.
+  // Only pm client failures ("GET /oi -> 403 ...", "GET /oi -> network ...") are soft; anything else (TypeError, ...) is a bug and rethrows.
   const soft = async <X, T>(what: string, xs: X[], fn: (x: X) => Promise<T>) => {
     const rs = await Promise.allSettled(xs.map(fn));
     const bad = rs.filter((r): r is PromiseRejectedResult => r.status === "rejected");
-    const bug = bad.find((r) => !/^(GET|POST) \S+ -> \d{3}/.test(String(r.reason?.message ?? r.reason)));
+    const bug = bad.find((r) => !/^(GET|POST) \S+ -> (\d{3}|network )/.test(String(r.reason?.message ?? r.reason)));
     if (bug) throw bug.reason;
     if (bad.length) console.warn(`snapshot: ${what} failed for ${bad.length}/${rs.length} chunks: ${String(bad[0]!.reason).slice(0, 120)}`);
     return { ok: rs.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])), failed: xs.filter((_, i) => rs[i]!.status === "rejected") };
