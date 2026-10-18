@@ -585,3 +585,156 @@ Data added to the autonomy payload: `flaggedSets` (count, for the header), per p
 - The set toggle is a `<button aria-expanded>` labelled "Show 5 legs"; leg rows are plain rows, not in tab order.
 - `FlaggedSetBar` is `role="alert"` once on arrival, then static; `Acknowledge` is a real button.
 - `SET`, `EXIT`, `AUTO L3/L4`, `SET ✗` are words, never color-only marks.
+
+## Public visitor mode (Rev 6)
+
+Scope: the anonymous `/trade` surface from SPEC "Public visitor mode (Rev 6)". Same tokens, type scale, density and states as sections 1–9; no new tokens. The visitor surface reuses the identity colors with the same meaning: `--mode-2` amber is real money (the visitor's own), `--mode-3`/`--mode-4` mark what the visitor's own loop sent without a click. Operator components that read operator state (`Shell`, `ModeBadge`, `ApprovalsBadge`, `KillSwitchButton`, `SseIndicator`, `ActionBar`, `AgentEstimates`, `ApprovalsPane`, `GatePanel`) are not used here. Everything visitor-specific lives under `apps/web/components/public/`; reused components keep their names and paths.
+
+## 10. Public visitor surface (/trade)
+
+### 10.1 Shell `(public)`
+
+Route group `app/(public)/` with its own `layout.tsx` and `PublicShell`. It does not import `Shell`, does not fetch `/api/autonomy`, and opens no EventSource.
+
+```
+┌ header 40px ──────────────────────────────────────────────────────────────────────────┐
+│ PM-EDGE · research   Watchlist  Autonomy      ● region ok   [0x3fa1…9c2e · Polygon]   Sign in │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ RUNNING · L3 bounded auto · runs only while this tab is open          [STOP]  (10.6)   │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ view content, padding 12px                                                             │
+├ footer ────────────────────────────────────────────────────────────────────────────────┤
+│ Research output, not financial advice. Trading can lose all funds sent. Polymarket is  │
+│ not available in some jurisdictions; you are responsible for complying with yours.    │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- Left: wordmark `PM-EDGE` (mono 600) plus `· research` in `--muted`, then two nav links in the §2 style: `Watchlist` (`/trade`) and `Autonomy` (`/trade/autonomy`). No operator nav.
+- Right, in order: `RegionStatus`, `ConnectButton`, then `Sign in` (plain `--muted` link, `--fs-sm`, to `/login`; it is for the operator and stays small).
+- `ConnectButton`: disconnected it reads `Connect wallet` (border `--accent`). With no injected wallet: disabled, visible text `No wallet found`, title `Install a browser wallet such as MetaMask or Rabby`. While the wallet prompt is open: `Connecting…` with the 12px spinner. Connected it becomes `AddressChip`: mono `0x3fa1…9c2e · Polygon`; on another chain `0x3fa1…9c2e · wrong network` in `--warn`. Clicking the chip opens a small `Drawer`-styled menu: full address (copy button), `Switch to Polygon` (when wrong), `Disconnect`. Disconnect forgets the session CLOB credentials; it does not touch the trading key (10.6).
+- `RegionStatus` (text plus dot, never a dot alone): `● checking region` (`--muted`, spinner), `● region ok` (`--pos`), `● trading blocked in your region` (`--neg`), `● region check failed` (`--warn`, title has the error and `Retry` in the menu). Hidden until a wallet is connected or the visitor opens a ticket, because the check is only needed to trade.
+- `PublicFooter`: one `--muted` `--fs-xs` paragraph, the three sentences above, always visible, not dismissible. Same text in both views.
+- No kill switch in the header unless the visitor loop is active; then the `LoopBanner` (10.6) carries `STOP`.
+- Global keys: `g w` watchlist, `g a` autonomy, `/` filter, `?` sheet, `t` theme. The operator `g f/c/p/s` are not registered.
+
+### 10.2 Watchlist `/trade`
+
+Data: `GET /api/public/watchlist`, polled every 60 s (`usePoll(url, 60_000)`; pauses while the tab is hidden, refetches on focus). No SSE.
+
+Top bar: `FilterInput` (`filter question / category`), category `<select>` (`All` + categories present), `side` `<select>` (`Any`/`YES`/`NO`), right side `swept 14:32 · refresh in 42s` in `--muted` and the `StaleBanner` slot. No tabs: the public list is the thesis list only (structural sets need the operator book).
+
+`PublicWatchlistTable` (a `DataTable` instance), columns in order:
+
+| # | Header | Field | Fmt |
+|---|---|---|---|
+| 1 | `Market` | question (truncate 56ch, title full) + category tag | text |
+| 2 | `Side` | side | `YES`/`NO` pos/neg |
+| 3 | `Price` | mid | `0.000` |
+| 4 | `Fair p` | p_post | `0.000` |
+| 5 | `Edge¢` | edge_c | `EdgeBadge` |
+| 6 | `Conf` | confidence | `0.00`, `--warn` with `*` when capped |
+| 7 | `Ends` | end date / days left | `Nov 05 · 18d` |
+| 8 | `Thesis` | thesis age | `3h`, `2d`; `--muted` with title `thesis 80h old` over 72h |
+
+No rank, size, E[P] or r_ann (they come from operator sizing). Default sort `Edge¢` desc; every column sortable, client-side, `aria-sort` as §7. Row click or `Enter` → `/trade/[id]`; `j`/`k` move. `p`, `m`, `r` are not bound.
+
+States:
+- Loading: `Skeleton` 8 rows.
+- Empty, research on: `No theses yet. Markets are scanned daily; the first research run is in progress.`
+- Empty, research disabled (server status `research_disabled`): `Research is paused on this instance. Market data still updates.` No retry button.
+- Error: `ErrorBar` `Could not load the watchlist. Retrying in 60 s.` with `Retry`; last good rows stay.
+- Stale (last sweep > 6 h, or the poll response carries `stale: true`): `StaleBanner` `Data may be out of date · last sweep 09:12 (6 h)`. A refresh started by this read (SPEC: read starts the chain after 30 min) shows `refreshing data…` with the spinner next to the sweep time; the table stays usable.
+
+Mobile (< 720px): the table becomes `WatchlistCardList`, one 2-line row per market (no shadows, 1px `--border` separators): line 1 question (2-line clamp); line 2 mono `YES · 0.412 → 0.470 · +5.8¢ · c 0.62 · 18d`. Filter and selects stack above. Tap opens the detail. Same sort control as a `<select>` (`Sort: Edge`).
+
+### 10.3 Market detail `/trade/[id]`
+
+Data: `GET /api/public/markets/[id]`, polled every 60 s. Layout is §3.3: two columns 60/40, one column under 1100px; on one column the `TradeTicket` moves to directly under `MarketHeader`, so the action is above the fold on a phone.
+
+Left: `← Watchlist` link, `MarketHeader` (with `Open on Polymarket ↗`), `KeyStats`, `PriceHistoryChart`, `DepthChart`, `EvidenceTable` (the sources), `RulesPane`.
+Right: `TradeTicket` (10.4), `ThesisPane` in public form, `KillCriteriaList`, `CatalystList`.
+
+- `ThesisPane` public form: header `Thesis · 14:02 · 3h ago` (no model, no judge label). Numbers grid: `Fair p` (p_post), `Price at thesis`, `Edge¢`, `Conf`, `f*`. No `Size$`, `E[P]$`, `r_ann` (operator sizing). Thesis prose, cap/stale/expired lines as §3.3.
+- `EstimatesStrip` replaces `AgentEstimates`: one line `base rate 0.41 · news 0.52 · source 0.49 · red team 0.38 → fair 0.47`, roles only, no models, costs or durations.
+- `RulesPane`: the market's resolution rules text (ui font, `--fs-sm`, collapsed to 6 lines with `Show full rules`), resolution source link.
+- `ActionBar` is not rendered. Not found: `EmptyState` `This market is not on the public list.` with a link back.
+
+### 10.4 TradeTicket
+
+One pane, title `Trade · your wallet`. Owns the ticket state machine; reads wallet and region state from `useWallet()` and `useRegion()`.
+
+Fields (labels left, mono inputs right, unit suffix in `--muted`):
+- `Side`: two-option segmented control `BUY YES` / `BUY NO`, prefilled with the thesis side.
+- `Limit price`: number, step 0.001, prefilled from `livelimitPrice`; under it `mid 0.412 · best ask 0.420` in `--muted`.
+- `Amount`: USD number, prefilled from `sizeTrade` with the visitor's limits (10.6) or empty when no bankroll is set; under it `Balance $214.40`.
+- Read-only lines: `Est. shares 520`, `Fee $0.31`, `Max loss $214.40` (amount plus fee; for a buy, the most you can lose), `Payout if right $520.00`.
+- Primary button, label by state (below). Above it one line explaining signatures: `Your wallet will ask you to sign this order. Signing sends it to Polymarket; it does not move funds until the order fills.`
+
+States (`ticket.status`; the pane title line shows a short state word as text):
+
+| State | Button | Copy and behavior |
+|---|---|---|
+| `disconnected` | `Connect wallet` (opens connect) | `Connect a wallet on Polygon to trade. Research above stays free to read.` Fields editable for preview. |
+| `wrong_network` | `Switch to Polygon` | `Your wallet is on another network. Polymarket runs on Polygon.` |
+| `geo_checking` | disabled `Checking region…` + spinner | `Checking whether Polymarket accepts orders from your location.` |
+| `geo_blocked` | disabled `Trading unavailable` | `Polymarket does not accept orders from your region. Research stays available. We do not offer a way around this.` `--neg` left border on the pane. |
+| `geo_failed` | disabled `Trading unavailable` + `Retry check` link | `Could not confirm your region, so trading stays off. Retry, or try again later.` `--warn` left border. Fail closed. |
+| `creds_needed` | `Enable trading (1 signature)` | `Polymarket needs a one-time signature to create your API key for this session. It is not a transaction and costs nothing.` |
+| `allowance_needed` | `Approve USDC (1 transaction)` | `Polymarket's exchange needs permission to spend your USDC. This is an on-chain transaction and costs a little POL for gas. One time per wallet.` |
+| `ready` | `Sign and place order` (border `--mode-2`) | fields live; validation errors under fields in `--neg` (`Amount exceeds your balance`, `Price must be between 0.001 and 0.999`, `Above your per-trade max $50`). |
+| `signing` | disabled `Confirm in your wallet…` + spinner | `Check your wallet window. Rejecting there cancels nothing; no order was sent.` |
+| `submitted` | `Cancel order` | `Order open · ord 0x3fa1… · 0/520 filled`. Polls status every 5 s. |
+| `partial` | `Cancel rest` | `Partially filled · 120/520 at 0.418`. |
+| `filled` | `New order` | `Filled · 520 shares at 0.419 · fee $0.31` in `--pos`. |
+| `error` | `Try again` | `Order failed: <exchange message>` in `--neg`, truncated 80ch, title full. Wallet rejection shows `You rejected the signature. Nothing was sent.` in `--muted`, returns to `ready`. |
+
+Transitions: wallet and region states are checked in this order and the first unmet one wins (`disconnected` → `wrong_network` → `geo_*` → `creds_needed` → `allowance_needed` → `ready`). Changing account or chain in the wallet drops back to the right state and discards session credentials. Placing an order: `ready` → `signing` → `submitted` → `partial`/`filled`, or `error` from `signing`/`submitted`. Cancel from `submitted`/`partial` shows `cancelling…` on the button, then `cancelled · 120/520 filled` in `--muted` and `New order`.
+
+The submit button carries the full-sentence `aria-label` "Sign and place order: buy YES 520 shares at 0.420, up to $218.40". There is no extra confirm step: the wallet prompt is the confirm.
+
+### 10.5 Account panel
+
+`AccountPanel` on `/trade/autonomy` (top) and collapsed under the ticket on detail pages (`Your positions in this market`, filtered). Hidden behind `Connect wallet to see positions` when disconnected.
+
+- `BalanceStrip`: `USDC $214.40 · in orders $50.00 · positions value $88.12` (mono), with the source wallet named: `wallet 0x3fa1…` or `trading key 0x9b7e…` (tabs `Wallet` / `Trading key` when both exist).
+- `OpenOrdersTable` (`DataTable`): `ts`, `Market`, `Side`, `Shares`, `Limit`, `Filled` (`120/520`), `Status` (text), `Sent by` (`you` in `--muted`, `AUTO L3`/`AUTO L4` chip), actions `Cancel`. Cancel has no confirm (no money moves); the cell shows `cancelling…` then the row leaves. Header action `Cancel all (3)` asks for a confirm in place, 5 s, like §8.3. Empty: `No open orders.`
+- `PositionsTable` reused with columns `Market`, `Side`, `Shares`, `Avg`, `Mid now`, `Unreal $`. No paper chip, no thesis-capture columns. Positions close by placing a sell order on Polymarket; a `Sell on Polymarket ↗` link per row (selling from the ticket is out of scope).
+- Data comes from the CLOB client in the browser every 30 s while connected. Error: `ErrorBar` `Could not reach Polymarket. Orders and balances may be out of date.`
+
+### 10.6 Visitor autonomy `/trade/autonomy`
+
+Single column, panes in this order. All state lives in this browser (localStorage, validated by the core zod schema); one line under the title says so: `Settings and the trading key are stored only in this browser. Clearing site data deletes them.`
+
+1. `LoopBanner` (shell-level, shown on every `/trade` page while the loop is not Manual and active): full-width strip under the header, `--mode-N` left border 3px, text `RUNNING · L3 bounded auto · runs only while this tab is open · last check 14:32 · next 14:33`, `STOP` button (`--kill`) at the right. When paused by an error: `PAUSED · <reason>` in `--warn`. `aria-live="polite"` on the state word only.
+2. `VisitorModeSelector`: segmented control of four options with `--mode-N` borders, selected filled: `Manual` (`--mode-0`), `L2 Approve each` (`--mode-2`), `L3 Bounded auto` (`--mode-3`), `L4 Full auto` (`--mode-4`). Under the row, the selected mode's plain-language line:
+   - Manual: `Nothing runs on its own. You place every order from a market page with your wallet.`
+   - L2: `The loop finds trades that fit your limits and queues them below. Nothing is sent until you approve each one.`
+   - L3: `The loop sends trades by itself while they stay inside your L3 caps. Anything larger waits for your approval.`
+   - L4: `The loop sends any trade inside your risk limits without asking. Use only with an amount you can afford to lose.`
+   L2–L4 are disabled until a funded trading key exists and the region check is ok; the reason is visible text under the row (`Create and fund a trading key first.` / `Trading is unavailable in your region.`). Switching to L3 or L4 needs one confirm in place: the option shows `Confirm L4 full auto` for 5 s. Manual is always one click and also stops the loop.
+3. `TradingKeyPanel`, states:
+   - none: `Create trading key` button. Copy: `A separate key generated in this browser places orders for the loop, so your main wallet is never exposed. Send it only what you are willing to let the loop trade.`
+   - created, unfunded: address (mono, copy button), and `Fund it: send USDC on Polygon to this address, plus about 1 POL for the one-time approval transaction. Do not send from an exchange that does not support Polygon.` Balance line `USDC $0.00 · POL 0.00` refreshes every 30 s.
+   - funded: `USDC $250.00 · POL 0.98 · ready`.
+   - `Export key`: first click shows a warning line `Anyone with this key can spend its funds. Never share it.` and a `Reveal key` button; reveal shows the hex in a mono box with `Copy` and auto-hides after 60 s or on `Hide`.
+   - `Forget key` (2-step): button `Forget key` → panel turns `--neg` bordered: `This deletes the key from this browser. Funds still on it are lost unless you exported the key or withdrew first.` with a checkbox `I have exported the key or withdrawn the funds` and `Forget permanently` (enabled only when checked). Disabled with visible reason while the loop runs or orders are open.
+   - Withdraw is out of scope; copy points to export.
+4. `VisitorLimitsForm` (`FormGroup` + `Field`, §3.8 style, one `Save limits`): `Bankroll $`, `Kelly fraction` (0.25), `Per-trade max $`, `Daily max $`, `L3 per-trade cap $`, `L3 daily auto $`, `Category allowlist` (checkbox list, empty = none allowed for L3). zod errors under fields. Changes apply on the loop's next tick; a dirty form shows `•` and the loop keeps the saved values.
+5. `VisitorKillSwitch`: full-width `--kill` button `STOP · cancel open orders`, one line below `Stops the loop and cancels this key's open orders. Your positions stay open.` With 0 open orders: one click. With open orders: `CONFIRM · STOP + CANCEL 3 ORDERS` for 5 s, second click fires, `Esc` aborts (§8.3 pattern). Result on the button 3 s: `STOPPED · 3 cancelled` or `STOPPED · 2 cancelled · 1 FAILED` plus an `ErrorBar` naming the order. Mode returns to Manual. The `LoopBanner` `STOP` is the same action.
+6. `VisitorApprovalQueue` (shown at L2, and at L3 for fallbacks; hidden in Manual with the line `Approvals appear in L2 Approve each.`): the §8.1 table and row states (`Approve` → `Send $48.20 live?` `Confirm`/`Cancel`, 10 s revert, `Reject` no confirm, `sending…`), columns `Market`, `Side`, `Shares`, `Limit`, `Cost$`, `Edge¢`, `Drift¢`, `Expires`. L3 fallback reason line as §9.3. Approving signs with the trading key, so there is no wallet prompt; copy above the table: `Approved orders are signed by your trading key in this tab.` Proposals expire after 10 min or a 2¢ move, client-side.
+7. `VisitorActivityLog`: newest first, max 200 rows kept in localStorage: `ts`, `event` (`mode → L3`, `proposed`, `sent`, `filled`, `rejected by limits: DAILY_MAX`, `stopped`, `paused: region check failed`), `market`, `detail`. `Clear log` button, no confirm.
+
+Loop behavior visible in the UI: closing or reloading the tab stops the loop; on return the page shows the last mode with `Stopped (tab was closed) · Resume L3` button instead of resuming silently. A failed region recheck, a lost connection to Polymarket for > 2 min, or stale public data (10.2) pauses the loop with the reason in `LoopBanner`.
+
+### 10.7 States, copy, accessibility
+
+- Every async control has four visible states: idle, working (`…` label plus spinner, control disabled), success (text in `--pos` for 3 s or until next action), error (inline `--neg` text, never only a toast).
+- Copy rules: English, neutral, short, sentence case, no exclamation marks, no promises of profit. Errors say what happened and what still works (`Research stays available.`). Wallet prompts are always announced before they open (`Your wallet will ask you to…`).
+- Loading strings: `Loading watchlist…`, `Loading market…`, `Checking region…`, `Connecting…`, `Confirm in your wallet…`, `Loading positions…`.
+- Focus: §1 ring everywhere. After connect, focus returns to the control that opened it. When the ticket changes state, focus stays on the primary button (its label changes in place). Confirm-in-place buttons take focus and `Esc` cancels them.
+- `aria-live`: one polite region per `TradeTicket` (state line: `Order open`, `Partially filled 120 of 520`, `Filled`, `Order failed: …`), the `LoopBanner` state word, the approval queue count. `RegionStatus` blocked/failed is `role="status"`. Errors that stop trading (`geo_blocked`, kill failures) use `role="alert"` once.
+- Segmented controls are `radiogroup` with arrow-key movement; disabled options keep their reason in visible text.
+- Keyboard: ticket fields in order side → price → amount → submit; `Enter` in the amount field submits only in `ready`.
+- Chips `AUTO L3`, `AUTO L4`, `RUNNING`, `PAUSED`, `wrong network` are words, never color-only.
+
+Component inventory (new, under `apps/web/components/public/`): `PublicShell`, `PublicFooter`, `ConnectButton`, `AddressChip`, `RegionStatus`, `PublicWatchlistTable`, `WatchlistCardList`, `EstimatesStrip`, `RulesPane`, `TradeTicket`, `AccountPanel`, `BalanceStrip`, `OpenOrdersTable`, `LoopBanner`, `VisitorModeSelector`, `TradingKeyPanel`, `VisitorLimitsForm`, `VisitorKillSwitch`, `VisitorApprovalQueue`, `VisitorActivityLog`. Hooks: `useWallet()` (EIP-1193 connection, address, chainId), `useRegion()` (geoblock check, cached per session), `useClob()` (session creds, orders, balances), `useVisitorLoop()` (mode, limits, tick, proposals, log), `usePoll(url, ms)`. Reused as is: `DataTable`, `FilterInput`, `EdgeBadge`, `NumCell`, `MarketHeader`, `KeyStats`, `PriceHistoryChart`, `DepthChart`, `EvidenceTable`, `KillCriteriaList`, `CatalystList`, `StaleBanner`, `Skeleton`, `EmptyState`, `ErrorBar`, `FormGroup`, `Field`, `MeterBar`, `PositionsTable`; `ThesisPane` gains a `public` prop that hides operator fields.
