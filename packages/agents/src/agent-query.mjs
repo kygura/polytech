@@ -4,6 +4,7 @@ import { query, tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod";
 
 const BUILTIN = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "NotebookEdit", "Task"];
+const WEB = ["WebSearch", "WebFetch"]; // fallback when no Exa key
 
 /** input: {system, prompt, schema, model, exaCallCap, exaKey, timeoutMs, maxTurns?} */
 export async function runAgent(input) {
@@ -27,6 +28,7 @@ export async function runAgent(input) {
     exa("/contents", { urls, text: { maxCharacters: 6000 } }));
   const server = createSdkMcpServer({ name: "exa", version: "1.0.0", tools: [search, contents] });
 
+  const useExa = !!(input.exaKey || process.env.EXA_API_KEY);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), input.timeoutMs);
   let last;
@@ -36,10 +38,10 @@ export async function runAgent(input) {
       options: {
         model: input.model,
         systemPrompt: input.system,
-        mcpServers: { exa: server },
-        allowedTools: ["mcp__exa__search", "mcp__exa__contents"],
+        ...(useExa ? { mcpServers: { exa: server } } : {}),
+        allowedTools: useExa ? ["mcp__exa__search", "mcp__exa__contents"] : WEB,
         // base_rate scripts need key isolation + egress allowlist (phase 6)
-        disallowedTools: BUILTIN,
+        disallowedTools: useExa ? BUILTIN : BUILTIN.filter((t) => !WEB.includes(t)),
         maxTurns: input.maxTurns ?? 20,
         outputFormat: { type: "json_schema", schema: input.schema },
         abortController: ac,

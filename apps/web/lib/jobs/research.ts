@@ -1,4 +1,4 @@
-import { AnthropicOutageError, PodFailedError, modelFor, runPod, type AgentResult } from "@pm/agents";
+import { AnthropicOutageError, PodFailedError, disabledRunner, modelFor, runPod, type AgentResult } from "@pm/agents";
 import { canStartPod, crowd, shouldReResearch, sizeTrade } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
@@ -30,6 +30,7 @@ const addSpend = (db: Deps["db"], now: number, usd: number, sandboxS: number) =>
 /** Budget check -> pod -> judge -> sizing against the latest stored book -> `theses` row. */
 export async function researchMarket(d: Deps, conditionId: string, trigger: Trigger = "manual"): Promise<ResearchResult> {
   return withLock(d, `research:${conditionId}`, 30 * 60_000, async (): Promise<ResearchResult> => {
+    if (d.runner === disabledRunner) return { skipped: true, reason: "RESEARCH_DISABLED" }; // prod without ANTHROPIC_API_KEY: no fake results
     const { settings: st, db } = d, now = d.now();
     const mrow = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
     const snap = (await latestSnaps(db, [conditionId])).get(conditionId);

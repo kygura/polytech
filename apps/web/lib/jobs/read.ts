@@ -386,7 +386,7 @@ async function setViews(db: Db) {
     return {
       id: p.id, kind: "set" as const, setKind: p.kind as "buy-all" | "sell-all", eventId: p.eventId, state: p.status, shares: p.shares, costUsd: p.totalCost,
       lockedC: p.shares ? (p.edge / p.shares) * 100 : null, expectedProfitUsd: p.edge, createdAt: p.createdAt.getTime(), expiresAt: p.expiresAt.getTime(),
-      decidedVia: p.decidedVia, fallbackReason: p.fallbackReason, eventTitle: null as string | null, // no event title is stored (markets keep eventId + question only)
+      decidedVia: p.decidedVia, fallbackReason: p.fallbackReason,
       failedLeg: p.failedLeg, error: p.error, legs, held, suggestedAction,
     };
   };

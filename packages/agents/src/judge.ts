@@ -62,3 +62,8 @@ export const anthropicJudge =
       usage: { inputTokens, outputTokens, costUsd: costUsd(model, inputTokens, outputTokens) },
     };
   };
+
+/** Prod without ANTHROPIC_API_KEY: never fabricate a thesis. */
+export const disabledJudge: Judge = async () => {
+  throw new Error("RESEARCH_DISABLED: ANTHROPIC_API_KEY unset in production");
+};

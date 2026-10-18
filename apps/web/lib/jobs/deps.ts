@@ -1,4 +1,4 @@
-import { anthropicJudge, classifyR, fakeJudge, pickRunner, type AgentRunner, type Judge } from "@pm/agents";
+import { anthropicJudge, classifyR, disabledJudge, fakeJudge, isProd, pickRunner, type AgentRunner, type Judge } from "@pm/agents";
 import { feeRateFor, type Market, type Snapshot } from "@pm/core";
 import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
@@ -54,7 +54,7 @@ export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
     now: over.now ?? defaultNow,
     settings: over.settings ?? (await getSettings(db)),
     runner: over.runner ?? (await pickRunner()).runner,
-    judge: over.judge ?? (client ? anthropicJudge(client) : fakeJudge),
+    judge: over.judge ?? (client ? anthropicJudge(client) : process.env.PM_FIXTURES !== "1" && isProd(process.env) ? disabledJudge : fakeJudge),
     rScore: over.rScore ?? (client ? async (rules) => (await classifyR(rules, client)).R : undefined),
     exchange: over.exchange !== undefined ? over.exchange : envExchange(),
   };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@pm/core";
 import { AgentOutput } from "@pm/core";
-import { AnthropicOutageError, isOverloadText, PodFailedError, buildBrief, classifyR, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
+import { AnthropicOutageError, isOverloadText, PodFailedError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
 
 const mk = (q: string): Market => ({
@@ -143,6 +143,10 @@ describe("pickRunner", () => {
   it("env matrix", async () => {
     expect((await pickRunner({})).kind).toBe("fake");
     expect((await pickRunner({ VERCEL_OIDC_TOKEN: "t" })).kind).toBe("fake");
+    expect((await pickRunner({ NODE_ENV: "production" })).kind).toBe("disabled");
+    expect((await pickRunner({ VERCEL_ENV: "production" })).runner).toBe(disabledRunner);
+    expect((await pickRunner({ NODE_ENV: "production", PM_FIXTURES: "1" })).kind).toBe("fake");
+    expect((await pickRunner({ NODE_ENV: "development" })).kind).toBe("fake");
     expect((await pickRunner({ ANTHROPIC_API_KEY: "k" })).kind).toBe("local");
     expect((await pickRunner({ ANTHROPIC_API_KEY: "k", VERCEL_OIDC_TOKEN: "t" })).kind).toBe("sandbox");
     expect((await pickRunner({ ANTHROPIC_API_KEY: "k", VERCEL_TOKEN: "t", VERCEL_TEAM_ID: "x", VERCEL_PROJECT_ID: "p" })).kind).toBe("sandbox");

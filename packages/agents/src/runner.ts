@@ -53,9 +53,16 @@ export const fakeRunner = validated(fakeRaw);
 type Env = Record<string, string | undefined>;
 export const hasSandboxCreds = (e: Env) => !!(e.VERCEL_OIDC_TOKEN || (e.VERCEL_TOKEN && e.VERCEL_TEAM_ID && e.VERCEL_PROJECT_ID));
 
-/** key + Vercel creds -> sandbox; key only -> local; else fake. Lazy imports keep SDKs out of fake/test paths. */
-export async function pickRunner(env: Env = process.env): Promise<{ kind: "sandbox" | "local" | "fake"; runner: AgentRunner }> {
-  if (!env.ANTHROPIC_API_KEY) return { kind: "fake", runner: fakeRunner };
+export const isProd = (e: Env) => e.VERCEL_ENV === "production" || e.NODE_ENV === "production";
+
+/** Sentinel: prod without a key. Callers compare identity and skip research instead of storing fake results. */
+export const disabledRunner: AgentRunner = async () => {
+  throw new Error("research disabled: ANTHROPIC_API_KEY unset in production");
+};
+
+/** key + Vercel creds -> sandbox; key only -> local; no key -> fake only if PM_FIXTURES=1 or not prod, else disabled. Lazy imports keep SDKs out of fake/test paths. */
+export async function pickRunner(env: Env = process.env): Promise<{ kind: "sandbox" | "local" | "fake" | "disabled"; runner: AgentRunner }> {
+  if (!env.ANTHROPIC_API_KEY) return env.PM_FIXTURES === "1" || !isProd(env) ? { kind: "fake", runner: fakeRunner } : { kind: "disabled", runner: disabledRunner };
   if (hasSandboxCreds(env)) return { kind: "sandbox", runner: (await import("./sandbox")).sandboxRunner(env) };
   return { kind: "local", runner: (await import("./local")).localRunner(env) };
 }

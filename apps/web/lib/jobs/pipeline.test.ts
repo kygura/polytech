@@ -1,4 +1,4 @@
-import { AnthropicOutageError, fakeJudge, fakeRunner, type AgentRunner } from "@pm/agents";
+import { AnthropicOutageError, disabledRunner, fakeJudge, fakeRunner, type AgentRunner } from "@pm/agents";
 import { DEFAULT_SETTINGS } from "@pm/core";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
@@ -220,5 +220,14 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
 
   it("publishes bus events", () => {
     for (const e of ["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.done", "thesis.created", "mode.changed", "paper.fill"]) expect(events).toContain(e);
+  });
+});
+
+describe("research disabled (prod without ANTHROPIC_API_KEY)", () => {
+  it("skips and writes no pod, agent-run or thesis rows", async () => {
+    const n = async () => [(await d.db.select().from(s.pods)).length, (await d.db.select().from(s.agentRuns)).length, (await d.db.select().from(s.theses)).length];
+    const before = await n();
+    expect(await researchMarket({ ...d, runner: disabledRunner }, cid("p2"), "manual")).toEqual({ skipped: true, reason: "RESEARCH_DISABLED" });
+    expect(await n()).toEqual(before);
   });
 });
