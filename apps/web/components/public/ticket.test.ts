@@ -82,19 +82,24 @@ describe("placeTicketOrder", () => {
   const order = { tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, expiresAt: new Date(Date.now() + 3_600_000) };
   const no = () => false;
   it("unknown outcome: a throw then the order among open orders ends open with that id", async () => {
-    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [{ orderId: "o9", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, filled: 0 }] };
+    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [{ orderId: "o9", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, filled: 0 }], trades: async () => [] };
     expect(await placeTicketOrder(ex, order, no)).toEqual({ kind: "open", orderId: "o9" });
   });
   it("unknown outcome, not found (or lookup fails): unknown, never resent", async () => {
     let placed = 0;
-    const ex = { place: async () => { placed++; throw new Error("timeout"); }, openOrders: async () => { throw new Error("down"); } };
+    const ex = { place: async () => { placed++; throw new Error("timeout"); }, openOrders: async () => { throw new Error("down"); }, trades: async () => [] };
     expect(await placeTicketOrder(ex, order, no)).toEqual({ kind: "unknown" });
     expect(placed).toBe(1);
   });
+  it("unknown outcome, filled on arrival: no open order, but the trades show the fill", async () => {
+    const trade = { tradeId: "t1", orderId: "o7", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, fee: 0.1, at: new Date() };
+    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => [trade] };
+    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "filled", shares: 10, fee: 0.1 });
+  });
   it("wallet rejection: declined; venue rejection: rejected", async () => {
-    const rej = { place: async () => { throw new Error("User rejected"); }, openOrders: async () => [] };
+    const rej = { place: async () => { throw new Error("User rejected"); }, openOrders: async () => [], trades: async () => [] };
     expect(await placeTicketOrder(rej, order, () => true)).toEqual({ kind: "declined" });
-    const v = { place: async () => ({ orderId: "", status: "rejected" as const, error: "bad" }), openOrders: async () => [] };
+    const v = { place: async () => ({ orderId: "", status: "rejected" as const, error: "bad" }), openOrders: async () => [], trades: async () => [] };
     expect(await placeTicketOrder(v, order, no)).toEqual({ kind: "rejected", error: "bad" });
   });
 });

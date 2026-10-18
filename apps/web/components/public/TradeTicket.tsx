@@ -146,6 +146,7 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     const order: LimitOrder = { tokenId, side: "BUY", price: onTick(pr), shares: q.shares, expiresAt: new Date(since + ORDER_TTL_MS) };
     const res = await placeTicketOrder(ex, order, isRejection);
     if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: q.shares, filled: 0, avg: null, since });
+    else if (res.kind === "filled") setPhase({ s: "filled", shares: res.shares, avg: res.avg, fee: res.fee });
     else if (res.kind === "rejected") setPhase({ s: "error", msg: res.error });
     else if (res.kind === "declined") { setPhase({ s: "idle" }); setNote({ text: "You rejected the signature. Nothing was sent.", tone: "muted" }); }
     else setPhase({ s: "unknown", order, since });
@@ -158,8 +159,10 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     if (phase.s !== "unknown" || !ex) return;
     const p = phase;
     setPhase({ ...p, checking: true });
-    const res = await findPlaced(ex, p.order);
-    setPhase(res.kind === "open" ? { s: "open", orderId: res.orderId, shares: p.order.shares, filled: 0, avg: null, since: p.since } : { ...p, checking: false });
+    const res = await findPlaced(ex, p.order, p.since);
+    if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: p.order.shares, filled: 0, avg: null, since: p.since });
+    else if (res.kind === "filled") setPhase({ s: "filled", shares: res.shares, avg: res.avg, fee: res.fee });
+    else setPhase({ ...p, checking: false });
   };
   // Leaving "unknown" clears the amount: no one-click identical resend.
   const startOver = () => { setPhase({ s: "idle" }); setTouched(true); setAmount(""); };

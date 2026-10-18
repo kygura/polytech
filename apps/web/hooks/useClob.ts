@@ -56,8 +56,13 @@ export function useClob(ex: ClobExchange | null, pollMs = 30_000): Clob {
 
   const checkApproval = useCallback(async () => {
     if (!ex) return;
-    const ok = await ex.approved();
-    set(ex, (p) => ({ ...p, approved: ok }));
+    try {
+      const ok = await ex.approved();
+      set(ex, (p) => ({ ...p, approved: ok }));
+    } catch (e) {
+      set(ex, (p) => ({ ...p, error: CLOB_DOWN })); // shows the ticket's "Retry check" link
+      throw e;
+    }
   }, [ex, set]);
 
   const enable = useCallback(async () => {
@@ -91,8 +96,8 @@ export function useClob(ex: ClobExchange | null, pollMs = 30_000): Clob {
     if (!s.credsReady) return;
     const id = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      void refresh();
-      if (s.approved == null) checkApproval().catch(() => {});
+      // After refresh: its success clears `error`, so a failed allowance check must land last.
+      void refresh().then(() => (s.approved == null ? checkApproval() : undefined)).catch(() => {});
     }, pollMs);
     return () => clearInterval(id);
   }, [s.credsReady, s.approved, refresh, checkApproval, pollMs]);

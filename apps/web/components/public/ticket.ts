@@ -78,27 +78,35 @@ export function ticketGate(s: GateIn): Gate | null {
   return s.approved ? null : "allowance_needed";
 }
 
-type Placer = Pick<ClobExchange, "place" | "openOrders">;
-export type PlaceResult = { kind: "open"; orderId: string } | { kind: "rejected"; error: string } | { kind: "declined" } | { kind: "unknown" };
+type Placer = Pick<ClobExchange, "place" | "openOrders" | "trades">;
+export type PlaceResult = { kind: "open"; orderId: string } | { kind: "filled"; shares: number; avg: number; fee: number } | { kind: "rejected"; error: string } | { kind: "declined" } | { kind: "unknown" };
 
 /**
  * Places once. A throw that is not a wallet rejection is an UNKNOWN outcome (the order may have reached the venue, see Exchange.placeImmediate):
  * look the order up instead of letting the visitor resend it blind.
  */
 export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (e: unknown) => boolean): Promise<PlaceResult> {
+  const since = Date.now();
   try {
     const r = await ex.place(o);
     return r.status === "rejected" ? { kind: "rejected", error: r.error ?? "rejected by Polymarket" } : { kind: "open", orderId: r.orderId };
   } catch (e) {
-    return isRejection(e) ? { kind: "declined" } : findPlaced(ex, o);
+    return isRejection(e) ? { kind: "declined" } : findPlaced(ex, o, since);
   }
 }
 
-/** Same token, side, price and size among the open orders. ponytail: OpenOrder has no timestamp, so an older identical order also matches. */
-export async function findPlaced(ex: Pick<ClobExchange, "openOrders">, o: LimitOrder): Promise<PlaceResult> {
+/**
+ * Same token, side, price and size among the open orders; else a fill of it among the trades since the send started (an order that
+ * filled on arrival is no longer open). ponytail: OpenOrder and trades carry no order match beyond the fields, so an older identical order also matches.
+ */
+export async function findPlaced(ex: Pick<ClobExchange, "openOrders" | "trades">, o: LimitOrder, since: number): Promise<PlaceResult> {
   try {
     const m = (await ex.openOrders()).find((x) => x.tokenId === o.tokenId && x.side === o.side && Math.abs(x.price - o.price) < 1e-9 && Math.abs(x.shares - o.shares) < 1e-6);
-    return m ? { kind: "open", orderId: m.orderId } : { kind: "unknown" };
+    if (m) return { kind: "open", orderId: m.orderId };
+    const fills = (await ex.trades(new Date(since - 60_000))).filter((t) => t.tokenId === o.tokenId && t.side === o.side && Math.abs(t.price - o.price) < 1e-9);
+    const sh = fills.reduce((a, t) => a + t.shares, 0);
+    if (!(sh >= o.shares - 0.005)) return { kind: "unknown" };
+    return { kind: "filled", shares: sh, avg: fills.reduce((a, t) => a + t.shares * t.price, 0) / sh, fee: fills.reduce((a, t) => a + t.fee, 0) };
   } catch {
     return { kind: "unknown" };
   }
