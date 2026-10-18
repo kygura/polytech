@@ -173,3 +173,48 @@ SPEC phase 7: L3 bounded auto (auto-limits, fallback to approval), L4 full auto 
 - 2026-10-17: A4 done (343c24e). Most of the propose-side code was already in from A3. A4 added L3/L4 for decide/send, `modeAtSend`, `approval` (auto or user), an L3 daily-cap re-check under the `live-send` lock, a working exit approve path, and `liveGateStats` in /api/autonomy (gates stays an array, the UI maps it). Fixed a bug in paper.ts: `candidates()` was filtered by L2, so auto-send never fired. No migration, no new cron. web 139. Planner: U5 runs in parallel with the LOW fixes (file sets do not overlap).
 - 2026-10-17: A4 LOWs done (d0582bb). Rebaseline now blocks on matched orders with zero fills; stuck sweep matches by proposalId; lateSell books a SELL fill that arrives after settlement against the closed position; fail() emits only when its status change applies. web 144. Risks accepted for V3 review: an expired exit is re-proposed on the next run; an L3 exit outside limits waits for approval; set legs are left out of the slippage gate; legacy approved rows with no proposalId order count as stuck. Next: read.ts exposes the U5 fields.
 - 2026-10-17: U5 done. Web: set row-groups, FlaggedSetBar plus ack, exit rows, fallback line, AUTO chips, live GatePanel, L2–L4 enabled, disabled-button fix. TUI: set rows and legs, FLAGGED block with A to acknowledge, SET ✗ N in the header. web 148, tui 14. Known gaps (no data in payload): set event title falls back to the first leg's question, set drift shows —, flagged time = proposed time, proposal AUTO chip has no L3/L4 tier, the fallback text has no daily used amount or category. V3 dispatched.
+
+---
+
+# Build 4 — Rev 6: public visitor mode + deploy
+
+Planner: claude-opus-5-5 · roles as build 1 · started 2026-10-18
+
+## Destination
+
+SPEC Rev 6: production URL on Vercel Hobby. Anonymous visitors browse scouted theses and trade with their own browser wallet. Visitor autonomy runs in the browser with a browser-held key. Scouting LLM test runs across at least 8 live markets.
+
+## Build decisions (binding)
+
+1. Custody = browser-held key (planner default; the user did not answer within 10 minutes). The server never sees visitor keys or stores visitor state.
+2. Wallet = injected EIP-1193 through viem `custom(window.ethereum)`. No wagmi, no WalletConnect (add both when multi-wallet support is needed).
+3. Visitor orders go from the browser to the CLOB directly. No server relay for orders: it would bypass Polymarket's jurisdiction checks. If CORS blocks this, it is a blocker, not something to route around.
+4. Geoblock is checked in the browser and fails closed.
+5. One exchange implementation: `clobExchange` takes a signer. The env-key path and the browser path both build through it.
+6. Production never uses the fake runner. No key means research is skipped with an explicit status.
+7. Hobby: daily crons only, trading crons removed, scouting started when a public read finds the last sweep stale, regions pin removed.
+8. Deploy from a clean git worktree of a named commit, never from the shared working tree.
+9. Agents do not commit. The planner commits each task after reviewing it.
+
+## Tasks
+
+| id | task | level / role | deps | status |
+|---|---|---|---|---|
+| S1 | Commit the V3 UI fix (0582235) | planner | — | done |
+| R4 | Research: signing delegation, CORS, geoblock, Vercel limits, wallet libs → docs/research/public-deploy.md | L0 research haiku@high | — | done |
+| M1 | Code map for public mode → docs/research/public-mode-map.md | L0 scout sonnet@medium | — | done |
+| C1 | Server prep: prod fake-runner guard, Exa → built-in web search fallback, move settings schema/limits to core, Hobby vercel.json, drop region pin, remove the read.ts eventTitle leftover | L2 worker sonnet@medium | — | done |
+| C2 | Public surface: proxy allowlist, /api/public/* projections + per-IP rate limit, / → /trade redirect, stale-sweep kick | L3 heavy opus@medium (trigger: auth boundary + traffic-triggered spend) | — | todo |
+| D4 | DESIGN.md §10: public /trade shell, watchlist, detail, trade ticket, wallet/geoblock states, positions, visitor autonomy panel | L2 designer fable@medium | — | todo |
+| P6a | Browser wallet + clobExchange(signer) + geoblock + browser trading-key store | L3 heavy opus@medium (trigger: key handling / signing) | — | todo |
+| P6b | Visitor autonomy loop: pure decide() + hook, tests with fakeExchange | L2 worker sonnet@medium | C1, P6a | todo |
+| U6 | /trade pages per D4 | L2 ui-impl fable@medium | D4, C2, P6a, P6b | todo |
+| DEP1 | Vercel link, Neon + Upstash, env, migrate, deploy --prod (C1+C2 commit), smoke, CORS/geoblock probe from Vercel | L2 worker sonnet@medium | C1, C2 | todo |
+| TR | Scouting test runs, at least 8 markets across at least 4 categories → docs/research/scouting-test-runs.md | L2 worker sonnet@medium | DEP1, ANTHROPIC_API_KEY | blocked (key) |
+| DEP2 | Redeploy with U6, smoke /trade | L1 grunt haiku@max | U6, DEP1 | todo |
+| V4 | Gate: risk opus (C2, P6a, P6b + phase 7 sets/live left over from V3), reliability sonnet, drift haiku, ponytail + spec sonnet, full suite | reviewers | all | todo |
+
+## Decisions so far (build 4)
+
+- 2026-10-18: Hobby plan confirmed, no git remote, suite green (357 tests). The project map found that production silently uses the fake runner when the key is unset. C1 fixes that.
+- 2026-10-18: C1 done (e2a1f95). pickRunner → disabledRunner + disabledJudge in prod without key (PM_FIXTURES=1 still allows fake); researchMarket skips before lock/DB. No EXA key → WebSearch/WebFetch. Core exports AppSettingsSchema/DEFAULT_APP_SETTINGS. Runner is picked once per process, so setting the key needs a redeploy. web 149.

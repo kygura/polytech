@@ -1,6 +1,6 @@
 # Polymarket Edge Engine — Build Spec
 
-Rev 5 · 2026-10-15 · Anthropic-only runtime · trade execution with configurable autonomy modes
+Rev 6 · 2026-10-18 · public visitor mode (browser wallets, browser-held autonomy key) on top of Rev 5
 
 ## Overview
 
@@ -278,3 +278,30 @@ Twelve Postgres tables. Snapshots and events are append-only so every score and 
 - [ ] Key custody: env var vs. KMS/Turnkey remote signer (recommended).
 - [ ] Default risk-limit values and the starting bankroll B.
 - [ ] Exa plan tier and per-pod call cap.
+
+## Public visitor mode (Rev 6, 2026-10-18)
+
+The app is deployed at a public URL. Anonymous visitors see the LLM-scouted watchlist and theses, connect their own wallet, and trade from their browser. The server stays single-tenant: it runs scouting for everyone and holds no visitor keys and no visitor state. Operator pages, settings, the server wallet and the operator autonomy controller stay behind the existing login.
+
+**Custody (planner default, not yet confirmed by the user).** Visitor keys never reach the server. Manual trades are signed by the visitor's connected wallet, one signature per order. Visitor autonomy uses a trading key generated in, and stored only in, the visitor's browser; the visitor funds it with a capped amount, and the loop runs only while the tab is open. Considered and not chosen by default: server-held wallets per visitor (custodial), and autonomy for the operator only (a subset of this design).
+
+### Flows
+
+1. **Browse.** `/` redirects anonymous visitors to `/trade`. The watchlist comes from `GET /api/public/watchlist`, polled every 60 s. Market detail at `/trade/[id]` comes from `GET /api/public/markets/[id]`. Public payloads are projections that leave out operator sizing, pin/mute flags, the paper/live book, agent usage, cost and model, and pod internals. The public API is rate-limited per IP.
+2. **Connect.** The visitor connects an injected EIP-1193 wallet (viem custom transport, Polygon). WalletConnect is deferred. Before any trading control is enabled, the browser checks Polymarket's geoblock for the visitor's own IP. If the visitor is blocked, or the check fails, trading stays disabled (fail closed). Orders go from the browser straight to Polymarket's CLOB, never through our server, so Polymarket's own jurisdiction checks see the visitor.
+3. **Manual trade.** The ticket is prefilled from the thesis: side, limit price from `livelimitPrice`, and size from `sizeTrade` using the visitor's bankroll and Kelly settings. The wallet signs CLOB auth once per session and then signs each order. Positions, open orders (with cancel) and balance are read through the CLOB client.
+4. **Visitor autonomy.** Modes: Manual (default), L2 approve each, L3 bounded auto (inside `limits.l3`), L4 full auto inside the risk limits. Settings live in the visitor's localStorage and are validated with the core zod schema. The loop reuses `packages/core` (`sizeTrade`, `checkOrder`, `autoAllowed`, `livelimitPrice`, fees). The kill switch stops the loop and cancels open orders. There is no local paper book.
+5. **Scouting (server).** The pipeline is unchanged: sweep, snapshot, screen, research pods, judge. Production refuses the fake runner: with no `ANTHROPIC_API_KEY`, research is skipped with an explicit status. With no `EXA_API_KEY`, agents use the Agent SDK's built-in web search. The daily Anthropic spend cap is enforced as before.
+
+### Deployment (Vercel Hobby)
+
+- Project `polytech` with root directory `apps/web`; dependencies install from the repo root with bun. Neon Postgres and Upstash Redis come from the Vercel Marketplace free tiers. Migrations run during the deploy step.
+- Hobby allows only daily crons. The scouting crons run daily, and the trading crons (paper, propose, sets, expire, sync, reconcile) are removed from `vercel.json`. A public watchlist read starts the scouting chain when the last sweep is older than 30 minutes, under a Redis lock so only one chain runs at a time. On Pro, restore the Rev 5 schedule.
+- The `dub1` region pin is removed: Ireland is reported as restricted by Polymarket, and in this mode the server only reads Polymarket data. Operator server-side trading needs a region decision before `PM_PRIVATE_KEY` is set in production.
+
+### Done
+
+- The production URL serves `/trade` with a watchlist built from live Polymarket data. `/api/public/*` returns projected JSON, operator pages redirect to `/login`, and cron routes return 401 without the secret.
+- A visitor with an injected wallet on Polygon, in a non-restricted jurisdiction, can derive CLOB credentials and place and cancel a limit order. This is verified by a person, because the build machine cannot reach Polymarket.
+- `bun install && bunx turbo typecheck test build` is green, including unit tests for the visitor autonomy decision function against a fake exchange.
+- Scouting test runs: research pods run on at least 8 live markets across at least 4 categories on the deployed instance, with results in `docs/research/scouting-test-runs.md`. Blocked until `ANTHROPIC_API_KEY` is provided.
