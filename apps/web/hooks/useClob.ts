@@ -58,7 +58,7 @@ export function useClob(ex: ClobExchange | null, pollMs = 30_000): Clob {
     if (!ex) return;
     try {
       const ok = await ex.approved();
-      set(ex, (p) => ({ ...p, approved: ok }));
+      set(ex, (p) => ({ ...p, approved: ok, error: p.error === CLOB_DOWN ? null : p.error })); // a passed re-check clears the retry state
     } catch (e) {
       set(ex, (p) => ({ ...p, error: CLOB_DOWN })); // shows the ticket's "Retry check" link
       throw e;

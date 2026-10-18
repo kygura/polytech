@@ -96,6 +96,17 @@ describe("placeTicketOrder", () => {
     const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => [trade] };
     expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "filled", shares: 10, fee: 0.1 });
   });
+  it("unknown outcome, filled on arrival at a better price than the limit: still filled, never unknown", async () => {
+    const trade = { tradeId: "t2", orderId: "o8", tokenId: "y", side: "BUY" as const, price: 0.4, shares: 10, fee: 0.1, at: new Date() };
+    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => [trade] };
+    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "filled", shares: 10 });
+  });
+  it("unknown outcome: a fill above a BUY limit or before the send window is not ours", async () => {
+    const worse = { tradeId: "t3", orderId: "o3", tokenId: "y", side: "BUY" as const, price: 0.43, shares: 10, fee: 0.1, at: new Date() };
+    const old = { ...worse, tradeId: "t4", price: 0.42, at: new Date(Date.now() - 60_000) };
+    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async (after?: Date) => [worse, old].filter((t) => !after || t.at >= after) };
+    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "unknown" });
+  });
   it("wallet rejection: declined; venue rejection: rejected", async () => {
     const rej = { place: async () => { throw new Error("User rejected"); }, openOrders: async () => [], trades: async () => [] };
     expect(await placeTicketOrder(rej, order, () => true)).toEqual({ kind: "declined" });

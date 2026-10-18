@@ -99,11 +99,15 @@ export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (
  * Same token, side, price and size among the open orders; else a fill of it among the trades since the send started (an order that
  * filled on arrival is no longer open). ponytail: OpenOrder and trades carry no order match beyond the fields, so an older identical order also matches.
  */
+const SKEW_MS = 5_000; // client vs venue clock margin; wider would match an earlier identical fill
+// a limit fills at the resting maker's price: at or below the limit for BUY, at or above for SELL
+const atOrBetter = (p: number, o: LimitOrder) => (o.side === "BUY" ? p <= o.price + 1e-9 : p >= o.price - 1e-9);
+
 export async function findPlaced(ex: Pick<ClobExchange, "openOrders" | "trades">, o: LimitOrder, since: number): Promise<PlaceResult> {
   try {
     const m = (await ex.openOrders()).find((x) => x.tokenId === o.tokenId && x.side === o.side && Math.abs(x.price - o.price) < 1e-9 && Math.abs(x.shares - o.shares) < 1e-6);
     if (m) return { kind: "open", orderId: m.orderId };
-    const fills = (await ex.trades(new Date(since - 60_000))).filter((t) => t.tokenId === o.tokenId && t.side === o.side && Math.abs(t.price - o.price) < 1e-9);
+    const fills = (await ex.trades(new Date(since - SKEW_MS))).filter((t) => t.tokenId === o.tokenId && t.side === o.side && atOrBetter(t.price, o));
     const sh = fills.reduce((a, t) => a + t.shares, 0);
     if (!(sh >= o.shares - 0.005)) return { kind: "unknown" };
     return { kind: "filled", shares: sh, avg: fills.reduce((a, t) => a + t.shares * t.price, 0) / sh, fee: fills.reduce((a, t) => a + t.fee, 0) };
