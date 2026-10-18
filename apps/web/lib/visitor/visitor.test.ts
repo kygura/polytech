@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkGeoblock } from "./geoblock";
 import { visitorExchange } from "./exchange";
 import { createTradingKey, exportTradingKey, forgetTradingKey, fundingInfo, importTradingKey, loadTradingKey, STORAGE_KEY, tradingKeyAddress, tradingKeySigner, type KeyStore } from "./tradingKey";
+import { isRejection } from "../../hooks/useWallet";
 import { resolveFunder } from "./wallet";
 
 const fakeStore = (): KeyStore & { m: Map<string, string> } => {
@@ -82,5 +83,13 @@ describe("resolveFunder", () => {
     expect(await resolveFunder(eoa, async () => ({ wallet: "0x2222222222222222222222222222222222222222" }))).toEqual({ wallet: "0x2222222222222222222222222222222222222222", mode: "polymarket" });
     expect(await resolveFunder(eoa, async () => null)).toEqual({ wallet: eoa, mode: "eoa" });
     expect(await resolveFunder(eoa, async () => ({ wallet: null }))).toEqual({ wallet: eoa, mode: "eoa" });
+  });
+});
+
+describe("isRejection", () => {
+  it("matches user rejection only, not venue access denied", () => {
+    expect(isRejection({ code: 4001 })).toBe(true);
+    expect(isRejection(new Error("User rejected the request."))).toBe(true);
+    expect(isRejection(new Error("403 Access denied"))).toBe(false);
   });
 });

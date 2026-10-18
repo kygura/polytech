@@ -22,7 +22,7 @@ export type Wallet = {
 
 /** EIP-1193 user rejection (code 4001), also after the exchange scrubbed the error down to a message. */
 export const isRejection = (e: unknown) =>
-  (e as { code?: unknown } | null)?.code === 4001 || /user (rejected|denied)|rejected the request|denied/i.test(e instanceof Error ? e.message : String(e));
+  (e as { code?: unknown } | null)?.code === 4001 || /user (rejected|denied)|rejected the request/i.test(e instanceof Error ? e.message : String(e));
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Conn = { address: `0x${string}`; funder: Funder; exchange: ClobExchange };
@@ -84,11 +84,11 @@ export function useWalletConnection(): Wallet {
     return watchWallet(p, {
       onAccount: (a) => {
         if (!a) return disconnect();
-        if (a !== address) open(a).catch((e) => { disconnect(); setError(`Could not switch account: ${msg(e)}`); });
+        if (a !== address) { setConn(null); setStatus("connecting"); open(a).catch((e) => { disconnect(); setError(`Could not switch account: ${msg(e)}`); }); }
       },
       onChain: (ok) => {
         setChainOk(ok);
-        if (ok) open(address).catch((e) => { disconnect(); setError(`Could not reconnect: ${msg(e)}`); });
+        if (ok) { setConn(null); setStatus("connecting"); open(address).catch((e) => { disconnect(); setError(`Could not reconnect: ${msg(e)}`); }); }
       },
     });
   }, [address, open, disconnect]);
