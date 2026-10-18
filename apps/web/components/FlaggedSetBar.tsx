@@ -11,7 +11,7 @@ export function FlaggedSetBar({ set: s, onAck }: { set: SetView; onAck: (id: str
   // No flaggedAt in the payload: the time shown is when the set was proposed.
   return (
     <div className={`${css.bar} ${css.barErr}`} role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
-      <strong className="neg">Set needs manual action · {s.setKind} · {s.eventTitle ?? s.legs[0]?.question ?? s.eventId} · flagged {hm(s.createdAt)}</strong>
+      <strong className="neg">Set needs manual action · {s.setKind} · {s.legs[0]?.question ?? s.eventId} · flagged {hm(s.createdAt)}</strong>
       {s.held.length > 0 && (
         <table aria-label="legs still held">
           <thead><tr><th scope="col">Market</th><th scope="col">Token</th><th scope="col" className="num">Shares held</th><th scope="col" className="num">Avg fill</th><th scope="col" className="num">Bid now</th></tr></thead>

@@ -70,7 +70,7 @@ const Chip = ({ text, color }: { text: string; color: string }) => <span classNa
 const SET_CHIP = <Chip text="SET" color="var(--border)" />;
 const EXIT_CHIP = <Chip text="EXIT" color="var(--warn)" />;
 const sub = (t: string | null) => t && <div className="muted ui" style={{ fontSize: "var(--fs-xs)" }}>{t}</div>;
-const setTitle = (s: SetView) => truncate(`${s.setKind} · ${s.legs.length} legs · ${s.eventTitle ?? s.legs[0]?.question ?? s.eventId}`, 48);
+const setTitle = (s: SetView) => truncate(`${s.setKind} · ${s.legs.length} legs · ${s.legs[0]?.question ?? s.eventId}`, 48);
 const capSum = (s: SetView) => s.legs.reduce((t, l) => t + l.capPrice, 0);
 const LEG_CLS: Record<string, string> = { filled: "pos", queued: "muted", unwinding: "warn", unwound: "warn", held: "neg", failed: "neg" };
 const LEG_TEXT: Record<string, string> = { sending: "sending…", unwinding: "unwinding…" };

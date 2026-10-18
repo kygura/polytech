@@ -62,7 +62,7 @@ export type Proposal = {
 };
 // Phase 7 neg-risk set (DESIGN 9.5, 9.8). failedLeg is 0-based.
 export type SetView = {
-  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; eventTitle?: string | null; state: string; shares: number; costUsd: number;
+  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; state: string; shares: number; costUsd: number;
   lockedC: N; expectedProfitUsd: number; createdAt: number; expiresAt: number; decidedVia: string | null; failedLeg: N; error: string | null; fallbackReason?: string | null;
   legs: { conditionId: string; question: string; token: Side; capPrice: number; shares: number; costUsd: number; state: string }[];
   held: { conditionId: string; question: string; token: Side; shares: number; avgFill: number; bidNow: N }[]; suggestedAction: string | null;

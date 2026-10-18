@@ -19,7 +19,7 @@ const expires = (at: number, now: number): Cell => {
 // Selectable rows are proposals (single, exit) and sets; legs and fallback reasons are detail lines (DESIGN 9.5).
 type Item = { k: "p"; p: Proposal } | { k: "s"; s: SetView };
 type Row = Item | { k: "leg"; s: SetView; i: number } | { k: "why"; text: string };
-const setTitle = (s: SetView) => s.eventTitle ?? s.legs[0]?.question ?? s.eventId;
+const setTitle = (s: SetView) => s.legs[0]?.question ?? s.eventId;
 /** 9.2 TUI texts for a set's progress or outcome. */
 export function setState(s: SetView): [string, string] {
   const n = s.legs.length;

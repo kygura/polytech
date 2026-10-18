@@ -12,7 +12,7 @@ export type Proposal = {
 // Phase 7 neg-risk set (DESIGN 9.1, 9.2, 9.8). failedLeg is 0-based.
 export type SetLeg = { conditionId: string; question: string; token: "YES" | "NO"; capPrice: number; shares: number; costUsd: number; state: string };
 export type SetView = {
-  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; eventTitle?: string | null; state: string; shares: number; costUsd: number;
+  id: string; kind: "set"; setKind: "buy-all" | "sell-all"; eventId: string; state: string; shares: number; costUsd: number;
   lockedC: number | null; expectedProfitUsd: number; createdAt: number; expiresAt: number; decidedVia: string | null; failedLeg: number | null; error: string | null;
   fallbackReason?: string | null; legs: SetLeg[];
   held: { conditionId: string; question: string; token: "YES" | "NO"; shares: number; avgFill: number; bidNow: number | null }[]; suggestedAction: string | null;
@@ -65,9 +65,9 @@ export function setStateText(s: Pick<SetView, "state" | "legs" | "failedLeg" | "
 
 /** Who sent it (9.3): orders carry approval auto|user + modeAtSend, proposals and sets decidedVia. Plain `AUTO` when the mode is unknown. */
 export function approvalChip(x: { approval?: string | null; modeAtSend?: string | null; decidedVia?: string | null }): { text: string; color: string } {
-  const auto = x.approval === "auto" || x.approval === "auto_l3" || x.approval === "auto_l4" || x.decidedVia === "auto";
+  const auto = x.approval === "auto" || x.decidedVia === "auto";
   if (!auto) return { text: "user", color: "var(--muted)" };
-  const m = x.approval === "auto_l4" || x.modeAtSend === "L4" ? "L4" : x.approval === "auto_l3" || x.modeAtSend === "L3" ? "L3" : null;
+  const m = x.modeAtSend === "L4" || x.modeAtSend === "L3" ? x.modeAtSend : null;
   return m ? { text: `AUTO ${m}`, color: `var(--mode-${m.slice(1)})` } : { text: "AUTO", color: "var(--mode-3)" };
 }
 

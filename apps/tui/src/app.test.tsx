@@ -32,8 +32,8 @@ const legs = [
   { conditionId: "e1", question: "25 bps cut?", token: "NO", capPrice: 0.312, shares: 400, costUsd: 124.8, state: "queued" },
   { conditionId: "e2", question: "No change?", token: "NO", capPrice: 0.402, shares: 400, costUsd: 160.8, state: "queued" },
 ];
-const set = { id: "s1", kind: "set", setKind: "sell-all", eventId: "ev1", eventTitle: "Fed decision", state: "pending", shares: 400, costUsd: 285.6, lockedC: 2.1, expectedProfitUsd: 8.4, createdAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, decidedVia: null, failedLeg: null, error: null, fallbackReason: "STRUCTURAL_AUTO_OFF", legs, held: [], suggestedAction: null };
-const flaggedSet = { ...set, id: "s9", setKind: "buy-all", eventTitle: "Election winner", state: "flagged", fallbackReason: null, held: [{ conditionId: "e3", question: "Candidate A", token: "YES", shares: 820, avgFill: 0.212, bidNow: 0.19 }], suggestedAction: "SELL 820 YES on Polymarket, bid 0.190" };
+const set = { id: "s1", kind: "set", setKind: "sell-all", eventId: "ev1", state: "pending", shares: 400, costUsd: 285.6, lockedC: 2.1, expectedProfitUsd: 8.4, createdAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, decidedVia: null, failedLeg: null, error: null, fallbackReason: "STRUCTURAL_AUTO_OFF", legs, held: [], suggestedAction: null };
+const flaggedSet = { ...set, id: "s9", setKind: "buy-all", legs: [{ ...legs[0]!, question: "Election winner" }], state: "flagged", fallbackReason: null, held: [{ conditionId: "e3", question: "Candidate A", token: "YES", shares: 820, avgFill: 0.212, bidNow: 0.19 }], suggestedAction: "SELL 820 YES on Polymarket, bid 0.190" };
 let sets: { pending: unknown[]; recent: unknown[] } | undefined;
 const book = {
   positions: [{ conditionId: "c1", question: "Will the Fed cut in Dec 2026?", tokenId: "t1", outcome: "YES", shares: 820, avgPrice: 0.447, markPrice: 0.46, unrealizedUsd: 10.66 }],
@@ -174,7 +174,7 @@ it("set row shows legs when selected and a then y sends the whole set", async ()
   sets = { pending: [set], recent: [] };
   const { app, key, until } = await onAutonomy();
   const f = await until("Approvals 2 pending");
-  expect(f).toMatch(/▶.*▾ SET sell-all 2 legs Fed decision/);
+  expect(f).toMatch(/▶.*▾ SET sell-all 2 legs 25 bps cut\?/);
   expect(f).toContain("1/2 NO");
   expect(f).toContain("cap 0.312");
   expect(f).toMatch(/lock 2.1¢ +\+\$8.40/); // E[P]$ column
@@ -193,7 +193,7 @@ it("set row shows legs when selected and a then y sends the whole set", async ()
 });
 
 it("flagged sets show header chip and red blocks; A acknowledges the selected one", async () => {
-  sets = { pending: [], recent: [{ ...flaggedSet, id: "s8", eventTitle: "Other event" }, flaggedSet] };
+  sets = { pending: [], recent: [{ ...flaggedSet, id: "s8", legs: [{ ...legs[0]!, question: "Other event" }] }, flaggedSet] };
   autonomy.flaggedSets = 2;
   const { app, key, until } = await onAutonomy();
   const f = await until("FLAGGED set");
