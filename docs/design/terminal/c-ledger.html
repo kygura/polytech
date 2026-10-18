@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C Axis Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Direction C: Axis Ledger. Monochrome, borderless panes on hairline rules, blue YES / orange NO (colour-blind safe),
+   the price ladder IS the chart's y-axis, and the ticket is a one-line command strip. */
+:root, :root[data-theme="dark"] {
+  --bg: #0f0f10; --raise: #161618; --line: #232326; --line-2: #34343a;
+  --text: #ededee; --dim: #8e8e95; --faint: #55555c;
+  --yes: #5b9dff; --yes-bg: rgb(91 157 255 / .16); --no: #ff9142; --no-bg: rgb(255 145 66 / .15);
+  --up: #ededee; --focus: #ededee; --sel: #1d1d21;
+}
+:root[data-theme="light"] {
+  --bg: #fafaf9; --raise: #ffffff; --line: #e7e6e3; --line-2: #d3d2ce;
+  --text: #121212; --dim: #6c6b67; --faint: #a8a7a2;
+  --yes: #1f64d6; --yes-bg: rgb(31 100 214 / .10); --no: #c25400; --no-bg: rgb(194 84 0 / .10);
+  --focus: #121212; --sel: #f0efec;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 400 13px/18px Geist, system-ui, sans-serif; }
+.m, td { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 12px; }
+.app { display: grid; height: 100vh; grid-template-columns: 272px 1fr 292px; grid-template-rows: 40px 1fr 60px 196px; }
+.pane { overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.ph { display: flex; align-items: baseline; gap: 14px; padding: 12px 16px 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); flex: none; }
+.ph b { color: var(--text); font-weight: 500; } .ph .r { margin-left: auto; text-transform: none; letter-spacing: 0; }
+kbd { font: 500 10px/14px "Geist Mono", monospace; padding: 0 4px; border-radius: 3px; background: var(--line); color: var(--dim); }
+.yes { color: var(--yes); } .no { color: var(--no); } .dim { color: var(--dim); }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 0 16px; height: 22px; white-space: nowrap; text-align: right; }
+th { font: 400 11px Geist, sans-serif; color: var(--dim); }
+td:first-child, th:first-child { text-align: left; }
+/* header */
+.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.logo { font-weight: 600; letter-spacing: -.01em; }
+.top .sp { margin-left: auto; }
+/* list */
+.list { grid-row: 2 / 5; border-right: 1px solid var(--line); }
+.find { margin: 4px 16px 8px; height: 30px; border-bottom: 1px solid var(--line-2); display: flex; align-items: center; gap: 8px; color: var(--dim); }
+.find kbd { margin-left: auto; }
+.mi { display: grid; grid-template-columns: 1fr 56px 46px; align-items: center; gap: 8px; padding: 5px 16px; }
+.mi .q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.mi .p { text-align: right; } .mi svg { display: block; }
+.mi.sel { background: var(--sel); box-shadow: inset 2px 0 var(--focus); }
+.grp { padding: 10px 16px 2px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+/* main: chart + axis ladder */
+.main { grid-column: 2; grid-row: 2; border-right: 1px solid var(--line); }
+.title { padding: 14px 20px 0; }
+.title h1 { margin: 0; font-size: 15px; font-weight: 500; }
+.title .meta { color: var(--dim); font-size: 12px; margin-top: 2px; }
+.nums { display: flex; gap: 36px; align-items: baseline; padding: 10px 20px 4px; }
+.nums .big { font: 500 40px/44px "Geist Mono", monospace; letter-spacing: -.03em; }
+.nums .big small { font-size: 20px; }
+.nums label { display: block; font-size: 11px; color: var(--dim); }
+.nums .s { font: 400 14px "Geist Mono", monospace; }
+.split { flex: none; margin: 6px 20px 0; height: 6px; display: flex; border-radius: 3px; overflow: hidden; }
+.split i { display: block; height: 100%; }
+.stage { flex: 1; position: relative; margin: 10px 0 0; border-top: 1px solid var(--line); }
+/* ticket strip */
+.strip { grid-column: 2 / 4; grid-row: 3; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 0; padding: 0 12px; background: var(--raise); }
+.cell { display: flex; flex-direction: column; justify-content: center; padding: 0 14px; height: 44px; border-right: 1px solid var(--line); }
+.cell label { font-size: 10.5px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
+.cell .v { font: 500 17px/22px "Geist Mono", monospace; }
+.cell.f { box-shadow: inset 0 -2px var(--focus); }
+.cell.f .v::after { content: ""; display: inline-block; width: 2px; height: 17px; background: var(--focus); vertical-align: -2px; margin-left: 2px; }
+.seg2 { display: flex; gap: 2px; } .seg2 span { padding: 0 6px; border-radius: 3px; color: var(--dim); font: 500 15px/22px "Geist Mono", monospace; } .seg2 .on { color: var(--bg); background: var(--text); } .seg2 .on.y { background: var(--yes); color: #fff; }
+.calc { font: 400 12px "Geist Mono", monospace; color: var(--dim); padding: 0 14px; line-height: 17px; }
+.calc b { color: var(--text); font-weight: 500; }
+.send { margin-left: auto; height: 40px; padding: 0 18px; display: flex; align-items: center; gap: 12px; background: var(--yes); color: #fff; border-radius: 6px; font-weight: 600; }
+.send kbd { background: rgb(255 255 255 / .22); color: #fff; }
+/* tape */
+.tape { grid-column: 3; grid-row: 2; }
+.tape td { height: 20px; padding: 0 16px; }
+/* bottom */
+.acct { grid-column: 2 / 4; grid-row: 4; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; }
+.cols > div + div { border-left: 1px solid var(--line); }
+.foot { position: fixed; left: 16px; bottom: 8px; width: 240px; font-size: 10.5px; line-height: 14px; color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <span class="logo">pm-edge</span>
+    <span class="dim">Trade</span><span class="dim">Autonomy</span>
+    <span class="sp m dim">live 14:32:41.2</span>
+    <span class="dim"><span class="yes">●</span> region ok</span>
+    <span class="m">0x3fa1…9c2e</span>
+    <span class="m"><span class="dim">USDC</span> 214.40</span>
+  </div>
+
+  <div class="pane list">
+    <div class="find">Find a market<kbd>/</kbd></div>
+    <div id="mk"></div>
+    <div class="foot">Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions.</div>
+  </div>
+
+  <div class="pane main">
+    <div class="title"><h1>Fed cuts 50+ bps at the December 2026 FOMC meeting?</h1><div class="meta">Finance · resolves Dec 15, 2026 · 58 days · tick 0.1¢ · Polymarket ↗</div></div>
+    <div class="nums">
+      <div><label>YES</label><span class="big yes">41.2<small>¢</small></span></div>
+      <div><label>NO</label><span class="big no">58.8<small>¢</small></span></div>
+      <div><label>24h</label><span class="s">+1.8¢</span></div>
+      <div><label>Spread</label><span class="s">41.1 – 41.3</span></div>
+      <div><label>Volume 24h</label><span class="s">$2.41M</span></div>
+      <div style="margin-left:auto"><label>Window</label><span class="s dim">15m <span style="color:var(--text)">1h</span> 1d 1w all</span></div>
+    </div>
+    <div class="split"><i style="width:41.2%;background:var(--yes)"></i><i style="width:58.8%;background:var(--no)"></i></div>
+    <div class="stage" id="stage"></div>
+  </div>
+
+  <div class="pane tape">
+    <div class="ph"><b>Trades</b><span class="r dim">YES price · shares</span></div>
+    <table><tbody id="tape"></tbody></table>
+  </div>
+
+  <div class="strip">
+    <div class="cell"><label>side <kbd>B</kbd><kbd>S</kbd></label><div class="seg2"><span class="on">BUY</span><span>SELL</span></div></div>
+    <div class="cell"><label>outcome <kbd>Y</kbd><kbd>N</kbd></label><div class="seg2"><span class="on y">YES</span><span>NO</span></div></div>
+    <div class="cell f"><label>limit ¢ <kbd>↑</kbd><kbd>↓</kbd> 0.1</label><span class="v">41.2</span></div>
+    <div class="cell"><label>shares <kbd>Tab</kbd></label><span class="v">500</span></div>
+    <div class="calc">cost <b>$206.00</b> · fee <b>$0.31</b><br>max loss <b class="no">$206.31</b> · pays <b class="yes">$500.00</b> if YES</div>
+    <div class="calc">rests on book<br>0 sh fill now</div>
+    <div class="send">Buy 500 YES @ 41.2¢ <kbd>⏎ sign</kbd></div>
+  </div>
+
+  <div class="pane acct">
+    <div class="cols">
+      <div><div class="ph"><b>Positions</b> 3<span class="r">unrealized <span class="m" style="color:var(--text)">+$12.48</span></span></div><table><thead><tr><th>Market</th><th>Side</th><th>Shares</th><th>Avg → Mark</th><th>PnL</th></tr></thead><tbody id="pos"></tbody></table></div>
+      <div><div class="ph"><b>Open orders</b> 2<span class="r"><kbd>X</kbd> cancel selected</span></div><table><thead><tr><th>Market</th><th>Order</th><th>Price</th><th>Filled</th><th>Age</th></tr></thead><tbody id="ord"></tbody></table></div>
+    </div>
+  </div>
+</div>
+<script src="mock.js"></script>
+<script>
+const M = MOCK, $ = (id) => document.getElementById(id);
+const spark = (p, i) => { const pts = Array.from({ length: 16 }, (_, k) => p + Math.sin(k * 0.9 + i) * 0.02 + (k / 15) * (i % 3 - 1) * 0.02); const lo = Math.min(...pts), hi = Math.max(...pts) + 1e-6; return `<svg width="56" height="16"><polyline fill="none" stroke="var(--dim)" stroke-width="1" points="${pts.map((v, k) => `${k * 3.7},${15 - ((v - lo) / (hi - lo)) * 14}`).join(" ")}"/></svg>`; };
+const groups = {}; M.markets.forEach((m, i) => (groups[m.cat] ||= []).push([m, i]));
+$("mk").innerHTML = Object.entries(groups).slice(0, 4).map(([g, ms]) => `<div class="grp">${g}</div>` + ms.map(([m, i]) => `<div class="mi ${i ? "" : "sel"}"><span class="q" title="${m.q}">${m.q}</span>${spark(m.p, i)}<span class="m p">${fmt.c(m.p)}</span></div>`).join("")).join("");
+$("tape").innerHTML = M.tape.map((t) => `<tr style="${t.sz * t.p > 1000 ? "font-weight:600" : "color:var(--dim)"}"><td>${t.t.slice(0, 8)}</td><td class="${t.side === "BUY" ? "yes" : "no"}">${t.side === "BUY" ? "▲" : "▼"} ${fmt.c(t.p)}</td><td style="color:var(--text)">${fmt.n(t.sz)}</td></tr>`).join("");
+$("pos").innerHTML = M.positions.map((p) => `<tr><td style="font-family:Geist;font-size:12.5px">${p.q}</td><td class="${p.o === "YES" ? "yes" : "no"}">${p.o}</td><td>${fmt.n(p.sh)}</td><td>${fmt.c(p.avg)} → ${fmt.c(p.mark)}</td><td style="color:var(${p.pnl >= 0 ? "--text" : "--no"})">${p.pnl >= 0 ? "+" : ""}${fmt.usd(p.pnl)}</td></tr>`).join("");
+$("ord").innerHTML = M.orders.map((o) => `<tr><td style="font-family:Geist;font-size:12.5px">${o.q}</td><td>${o.side} <span class="${o.o === "YES" ? "yes" : "no"}">${o.o}</span></td><td>${fmt.c(o.p)}</td><td>${o.filled}/${o.sz}</td><td class="dim">${o.age}</td></tr>`).join("");
+
+// stage: chart on the left, the y-axis is a live ladder (one row per tick) on the right
+const draw = () => {
+const st = $("stage"), W = st.clientWidth, H = st.clientHeight - 24, LW = 250, cw = W - LW - 20;
+const lo = 0.3985, hi = 0.4255, lv = Math.round((hi - lo) / M.tick), rh = H / lv;
+const y = (v) => 8 + H - ((v - lo) / (hi - lo)) * H;
+const ser = M.series.slice(-40);
+const line = ser.map((v, i) => `${i ? "L" : "M"}${(20 + (i / 39) * cw).toFixed(1)},${y(v).toFixed(1)}`).join("");
+const levels = [...M.asks, ...M.bids].filter((l) => l.p > lo && l.p < hi);
+const max = Math.max(...levels.map((l) => l.sz));
+let svg = `<svg width="${W}" height="${H + 24}">`;
+for (let v = 0.40; v < hi; v += 0.005) svg += `<line x1="20" x2="${cw + 20}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`;
+svg += `<path d="${line}" fill="none" stroke="var(--text)" stroke-width="1.5"/>`;
+svg += `<line x1="20" x2="${W}" y1="${y(0.405)}" y2="${y(0.405)}" stroke="var(--yes)" stroke-dasharray="3 3"/><text x="24" y="${y(0.405) - 4}" font-size="11" fill="var(--yes)" font-family="Geist Mono">your bid 40.5 × 800</text>`;
+svg += `<line x1="20" x2="${W}" y1="${y(M.mid)}" y2="${y(M.mid)}" stroke="var(--text)" stroke-width=".6" opacity=".6"/>`;
+const x0 = cw + 40;
+svg += `<text x="${x0}" y="2" dy="-0" font-size="10" fill="var(--dim)"></text>`;
+levels.forEach((l) => {
+  const isAsk = l.p > M.mid, yy = y(l.p), bw = (l.sz / max) * 150;
+  svg += `<rect x="${x0 + 54}" y="${yy - rh / 2 + 1}" width="${bw}" height="${rh - 2}" fill="var(${isAsk ? "--no-bg" : "--yes-bg"})"/>`;
+  svg += `<text x="${x0 + 40}" y="${yy + 4}" text-anchor="end" font-size="11" font-family="Geist Mono" fill="var(${isAsk ? "--no" : "--yes"})">${fmt.c(l.p)}</text>`;
+  svg += `<text x="${x0 + 58}" y="${yy + 4}" font-size="11" font-family="Geist Mono" fill="var(--text)">${fmt.n(l.sz)}</text>`;
+});
+svg += `<rect x="${x0 - 4}" y="${y(M.mid) - 10}" width="${LW - 20}" height="20" fill="var(--text)" rx="3"/><text x="${x0 + 40}" y="${y(M.mid) + 4}" text-anchor="end" font-size="11.5" font-weight="600" font-family="Geist Mono" fill="var(--bg)">41.2</text><text x="${x0 + 58}" y="${y(M.mid) + 4}" font-size="11" font-family="Geist Mono" fill="var(--bg)">last · spread 0.2 · click a row = limit</text>`;
+svg += `<line x1="${x0 - 12}" x2="${x0 - 12}" y1="0" y2="${H + 8}" stroke="var(--line-2)"/>`;
+svg += `<text x="20" y="${H + 22}" font-size="10.5" fill="var(--dim)" font-family="Geist Mono">13:52</text><text x="${cw - 10}" y="${H + 22}" font-size="10.5" fill="var(--dim)" font-family="Geist Mono">14:32</text><text x="${x0}" y="${H + 22}" font-size="10.5" fill="var(--dim)" font-family="Geist Mono">ladder = y-axis · 1 row = 1 tick</text></svg>`;
+st.innerHTML = svg;
+};
+addEventListener("load", draw); addEventListener("resize", draw);
+</script>
+</body>
+</html>

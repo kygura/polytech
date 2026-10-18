@@ -592,6 +592,8 @@ Scope: the anonymous `/trade` surface from SPEC "Public visitor mode (Rev 6)". S
 
 ## 10. Public visitor surface (/trade)
 
+> Superseded for `/trade` and `/trade/[id]` by §11 (trading terminal). Still in force: §10.1 shell header/footer copy, `RegionStatus` and `ConnectButton` wording, §10.4 gate copy and button labels, §10.6 visitor autonomy (`/trade/autonomy`), §10.7 a11y rules.
+
 ### 10.1 Shell `(public)`
 
 Route group `app/(public)/` with its own `layout.tsx` and `PublicShell`. It does not import `Shell`, does not fetch `/api/autonomy`, and opens no EventSource.
@@ -738,3 +740,143 @@ Loop behavior visible in the UI: closing or reloading the tab stops the loop; on
 - Chips `AUTO L3`, `AUTO L4`, `RUNNING`, `PAUSED`, `wrong network` are words, never color-only.
 
 Component inventory (new, under `apps/web/components/public/`): `PublicShell`, `PublicFooter`, `ConnectButton`, `AddressChip`, `RegionStatus`, `PublicWatchlistTable`, `WatchlistCardList`, `EstimatesStrip`, `RulesPane`, `TradeTicket`, `AccountPanel`, `BalanceStrip`, `OpenOrdersTable`, `LoopBanner`, `VisitorModeSelector`, `TradingKeyPanel`, `VisitorLimitsForm`, `VisitorKillSwitch`, `VisitorApprovalQueue`, `VisitorActivityLog`. Hooks: `useWallet()` (EIP-1193 connection, address, chainId), `useRegion()` (geoblock check, cached per session), `useClob()` (session creds, orders, balances), `useVisitorLoop()` (mode, limits, tick, proposals, log), `usePoll(url, ms)`. Reused as is: `DataTable`, `FilterInput`, `EdgeBadge`, `NumCell`, `MarketHeader`, `KeyStats`, `PriceHistoryChart`, `DepthChart`, `EvidenceTable`, `KillCriteriaList`, `CatalystList`, `StaleBanner`, `Skeleton`, `EmptyState`, `ErrorBar`, `FormGroup`, `Field`, `MeterBar`, `PositionsTable`; `ThesisPane` gains a `public` prop that hides operator fields.
+
+## 11. Trading terminal (/trade)
+
+Supersedes §10.2–§10.5 for `/trade` and `/trade/[id]` (SPEC "Trading terminal redesign"). Approved direction: B "Graphite Ladder" base, A's permanent key-legend bar, C's blue/orange YES/NO pair. Reference mockup and every state: `docs/design/terminal/final.html` (`final-dark.png`, `final-light.png`, `final-states-dark.png`, `final-states-light.png`; open `final.html?states` for the state board). The mockup's CSS block is the token source; copy it, do not re-derive values from the PNGs. The operator app and `/trade/autonomy` keep the §1 tokens unchanged.
+
+### 11.1 Tokens
+
+Scope: every token lives on the `.term` class (the terminal root element), never on `:root`, so nothing outside `/trade` changes. Dark is the `.term` default; light is `:root[data-theme="light"] .term`. Theme switching reuses the existing `data-theme` attribute, `useTheme()` and the root `THEME_SCRIPT` unchanged (stored choice, else `prefers-color-scheme`, else dark).
+
+Fonts: Inter (UI words) and JetBrains Mono (every number, price, size, time, address, key cap) via `next/font/google`, exposed as CSS variables and referenced only through `--t-font-ui` / `--t-font-num`. Numbers always use `font-variant-numeric: tabular-nums`.
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `--t-bg` | `#0b0d10` | `#eceef2` | page behind panes |
+| `--t-pane` | `#13161b` | `#ffffff` | pane surface |
+| `--t-pane-2` | `#1a1e25` | `#f4f5f8` | price column, segmented track, skeletons, kbd |
+| `--t-line` | `#232830` | `#e1e4ea` | pane borders, row rules |
+| `--t-line-2` | `#2f3540` | `#cfd4dc` | input borders, kbd border |
+| `--t-text` | `#e4e7ec` | `#161a20` | primary text |
+| `--t-dim` | `#8b93a1` | `#5d6573` | labels, secondary |
+| `--t-faint` | `#555d6b` | `#9aa1ad` | disabled values |
+| `--t-yes` / `--t-yes-bg` / `--t-on-yes` | `#5b9dff` / `rgb(91 157 255/.14)` / `#0b0d10` | `#1f64d6` / `rgb(31 100 214/.10)` / `#fff` | YES identity: outcome card, YES toggle, YES tag, buy-YES button, chart line |
+| `--t-no` / `--t-no-bg` / `--t-on-no` | `#ff9142` / `rgb(255 145 66/.14)` / `#0b0d10` | `#c25400` / `rgb(194 84 0/.10)` / `#fff` | NO identity, same places |
+| `--t-up` / `--t-up-bg` | `#4cc38a` / `rgb(76 195 138/.13)` | `#0c8a5a` / `rgb(12 138 90/.10)` | price up, payout, live dot |
+| `--t-down` / `--t-down-bg` | `#f0616d` / `rgb(240 97 109/.13)` | `#d0364a` / `rgb(208 54 74/.09)` | price down, max loss, errors, geo-blocked border |
+| `--t-bid` / `--t-bid-bg` | `= --t-up` / `= --t-up-bg` | same | book bids, BUY prints |
+| `--t-ask` / `--t-ask-bg` | `= --t-down` / `= --t-down-bg` | same | book asks, SELL prints |
+| `--t-focus` / `--t-focus-bg` | `#9d8cff` / `rgb(157 140 255/.14)` | `#5b45e0` / `rgb(91 69 224/.09)` | keyboard focus ring, selected row, ladder cursor, "mine" sizes, own-order chart line |
+| `--t-tint` | `rgb(157 140 255/.24)` | `rgb(91 69 224/.16)` | update highlight start colour (11.7) |
+| `--t-warn` / `--t-warn-bg` | `#f5b544` / `rgb(245 181 68/.12)` | `#a86b00` / `rgb(168 107 0/.10)` | stale badge, geo-failed border |
+| `--t-shadow` | `none` | `0 1px 2px rgb(20 24 32/.06)` | panes |
+
+Rules: YES/NO colours mean outcome identity only; up/down/bid/ask mean direction only. Never colour a number by outcome and direction at once. Every up/down number carries a sign (`+1.8`, `−0.6`), so colour is never the only signal.
+
+Type (`--t-fs-*` / `--t-lh-*`): `xs` 10.5/14 (kbd, disclaimer), `sm` 11.5/16 (labels, helper lines, tape), `md` 12.5/18 (body, tables; table numbers 12px), `lg` 16/22 (ticket inputs), `xl` 22/28 (YES/NO outcome cards). Pane titles 12px/600 Inter.
+
+Spacing `--t-sp-1..6`: 2, 4, 6, 8, 12, 16 px. Pane gap and page padding = `--t-sp-3` (6px). Pane inner padding = `--t-sp-5` (12px).
+
+Radii: `--t-r-sm` 4 (kbd, tags, badges), `--t-r-md` 6 (inputs, buttons, segmented), `--t-r-lg` 8 (panes).
+
+Heights: `--t-top-h` 44, `--t-ph-h` 34 (pane header), `--t-row-h` 24 (tables), `--t-ladder-h` 22, `--t-tape-h` 19, `--t-input-h` 36, `--t-btn-h` 40, `--t-legend-h` 24. Motion: `--t-tint-ms` 600ms.
+
+### 11.2 Formatting
+
+- Prices are shown and typed in cents. Display decimals = `max(0, tickDecimals(tick) − 2)`: tick 0.01 → `41¢`, tick 0.001 → `41.2¢`. Internally the ticket keeps 0–1 prices: `price = cents / 100`, then `onTick`/`quote`/`validate` from `ticket.ts` unchanged.
+- Size is typed in shares. Under the field: `= $206.00` (shares × tick-rounded price). Pass `amount = shares × onTick(price, tick)` into `quote()`; show `q.shares`, never the typed number, in the button and summary (they can differ by the 0.01 share step).
+- Sizes: integers with thousands separators; USD `$1,234.56`; times `HH:MM:SS` local; tape `ts` is epoch seconds.
+
+### 11.3 Grid and responsive rule
+
+```
+┌ TopBar 44 (logo · MarketSearch · FeedBadge · RegionStatus · ConnectButton/AddressChip · balance) ───────────────┐
+├ MarketList 264 ┬ ChartPane minmax(420,1fr) ┬ BookLadder 316 ┬ TicketColumn 312 ─────────────────────────────────┤
+│                │ MarketHero + KeyStats     │ (rows 2–3)     │ TerminalTicket (natural height)                 │
+│  (rows 2–3)    │ PriceChart                │                │ TradeTape (fills the rest)                      │
+│                ├ AccountPane 214 ──────────┤                │                                                 │
+├ KeyLegend 24 (full width) ────────────────────────────────────────────────────────────────────────────────────┤
+```
+
+- Root: `display:grid; height:100dvh; padding:6px; gap:6px; grid-template-columns: 264px minmax(420px,1fr) 316px 312px; grid-template-rows: 44px 1fr 214px 24px`. The page itself never scrolls at ≥ 1360×760; panes scroll internally (list, tape, account tables).
+- 1100–1359 px wide: `MarketList` leaves the grid and becomes an overlay drawer (left, 320px) opened by `/` or the search box; columns become `minmax(400px,1fr) 300px 300px`.
+- < 1100 px wide or < 700 px tall: stacked fallback, one column, page scrolls, in this order: MarketHero, TerminalTicket, BookLadder (10 levels per side), PriceChart (240px), TradeTape (20 rows), AccountPane. `KeyLegend` hidden (touch); keys still work. Minimum supported terminal width is 1100; below it is the fallback, not a squeezed grid.
+- The compliance disclaimer (§10.1 footer text, full, never truncated) sits at the bottom of `MarketList`; in the drawer and fallback layouts it is the last element of the page.
+
+### 11.4 Component tree (new files under `apps/web/components/terminal/`)
+
+```
+TerminalPage({ initialId?: string })                 app/(public)/trade/page.tsx and trade/[id]/page.tsx both render this
+├─ data: usePoll<PublicWatchlist>("/api/public/watchlist", 60_000)   → MarketList rows
+│        usePoll<PublicMarketDetail>(`/api/public/markets/${id}`, 60_000) → hero meta, history, feeRate, token ids, vol24h
+│        useMarketFeed(id) → { data: MarketFeed|null, status, lastAt }   (the ONLY source of book, last, trades, tickSize)
+│        useWallet() (+ .clob), useRegion()
+├─ TopBar({ feedStatus, feedAt })  → reuses RegionStatus, ConnectButton/AddressChip; FeedBadge({ status, at })
+├─ MarketList({ rows, selectedId, onSelect, cursorId, onCursor })  rows: PublicWatchRow; shows question, category, midNow ¢, daysLeft
+├─ ChartPane
+│   ├─ MarketHero({ market, feed })      question, category, end date, tick, Polymarket link; YES/NO outcome cards (YES = feed.mid ?? snapshot.mid, NO = 1 − YES)
+│   ├─ KeyStats({ feed, snapshot })      last, best bid, best ask, spread, min order, vol24h
+│   └─ PriceChart({ history, liveMid, ownOrders })   history from detail; liveMid appended as the last point; dashed line per own open order
+├─ BookLadder({ feed, status, ownOrders, cursor, onPick })  15 levels per side best-first from feed; Mine columns from clob.orders on this tokenId
+├─ TicketColumn
+│   ├─ TerminalTicket({ detail, feed, feedStatus, pickedPrice })   see 11.6
+│   └─ TradeTape({ trades, status })     feed.trades newest first, ≤ 50; side null → --t-dim
+├─ AccountPane({ clob, marks })          tabs Positions / Open orders; marks = feed.mid for selected market, watchlist midNow for others
+└─ KeyLegend()                           static list of 11.5 keys, always visible ≥ 1100px
+```
+
+Props boundaries: only `TerminalPage` calls data hooks; children are presentational except `TerminalTicket` (owns the order phase machine) and `AccountPane` (calls `clob.cancel`). Selecting a market swaps `id` in state and updates the URL with `router.replace("/trade/" + id, { scroll: false })`; the page component must not remount (no route transition, no full reload, no flash of empty panes: keep the previous market's panes dimmed to `--t-dim` text until the new feed's first payload).
+
+Reuse, unchanged: `useWallet`, `useRegion`, `useClob` (positions, orders, balance, cancel), `useMarketFeed`, `usePoll`, `ticket.ts` (`onTick`, `quote`, `validate`, `tickOf`, `tickDecimals`, `ticketGate`, `placeTicketOrder`, `findPlaced`), the TradeTicket signing flow and its copy. Extract TradeTicket's phase machine (place / recheck / cancel / orderStatus, `Phase` type) into a hook (e.g. `useOrderFlow`) without changing its behaviour, so `TerminalTicket` and its tests share it. `PublicWatchlist`, `PublicMarket`, `AccountPanel` and old `TradeTicket` markup are retired from `/trade` once the terminal ships.
+
+### 11.5 Keyboard map
+
+Registered by `TerminalPage` on `window`. Single-letter keys are ignored while an input, select or textarea has focus (`inInput`), except where a row says "in ticket". The existing global keys stay: `t` theme, `?` sheet, `Esc` blur, `g a` autonomy, `g w` → `/trade`.
+
+| Key | Where | Action |
+|---|---|---|
+| `/` | anywhere | focus market search (opens the drawer under 1360px) |
+| `J` / `K` | anywhere, or search | move the market list cursor down / up (cursor ring, not selection) |
+| `⏎` | market list / search | select the cursor market (swaps panes) |
+| `B` / `S` | anywhere | ticket side Buy / Sell, then focus Limit |
+| `Y` / `N` | anywhere | ticket outcome YES / NO (ladder, chart and hero follow the outcome: NO shows the mirrored book, `1 − p`), then focus Limit |
+| `↑` / `↓` | in ticket Limit | ± 1 tick (`feed.tickSize`), clamped to [tick, 1 − tick] |
+| `⇧↑` / `⇧↓` | in ticket Limit | ± 10 ticks |
+| `↑` / `↓` | in ticket Shares | ± `minOrderSize ?? 1` shares; `⇧` ×10 |
+| `Tab` / `⇧Tab` | in ticket | Side → Outcome → Limit → Shares → submit (native order) |
+| `⏎` | in ticket field | arm: focus the submit button in its review state (`Sign: Buy 500 YES at 41.2¢`); never sends |
+| `⏎` / `⌘⏎` (`Ctrl⏎`) | armed submit / any ticket field | sign and place (calls the flow's `place()`); only when gate is null, phase is idle, feed loaded and `validate` is clean |
+| `L` | anywhere | focus BookLadder; `↑↓` move the price cursor one level, `⏎` copies that price to Limit and focuses Shares, `Esc` back |
+| `⇧T` | anywhere | focus the ticket (Limit field). Lowercase `t` stays theme |
+| `P` / `O` | anywhere | AccountPane tab Positions / Open orders |
+| `X` | open-orders row focused, or ticket in phase `open` | cancel that order (ticket: "Cancel rest") |
+| `Esc` | anywhere | disarm submit, close drawer/sheet, then blur (global) |
+| `?` | anywhere | shortcut sheet listing this table |
+
+Mouse equivalents exist for every key (click a ladder price = `L` + `⏎`). `KeyLegend` shows the first-row subset in the mockup order; the `?` sheet shows all.
+
+### 11.6 Ticket states
+
+Order of precedence for the submit button (first match wins):
+
+1. Feed not loaded (`feed == null`, status `loading`, or `error` with no data): Limit shows `—` and is disabled, tick shows `tick —`, Shares stays typable, button `Waiting for live book…` (spinner, disabled). Helper: `Prices and tick come from the live book. You can type shares now.` No book for the token: `No live book for this market.` and the button stays disabled.
+2. `ticketGate(...)` non-null: §10.4 labels and copy unchanged (`Connect wallet` outline in `--t-focus`; `geo_blocked` → pane border `--t-down`, inputs disabled, button `Trading blocked in your region`; `geo_failed` → border `--t-warn`; creds / allowance steps as today).
+3. Phase machine (from TradeTicket, unchanged): `idle` → `Buy 500 YES at 41.2¢` filled with the outcome colour; armed → same label prefixed `Sign:` with a 2px `--t-focus` ring; `signing` → `Confirm in your wallet…`; `checking`; `open`/partial → `Cancel order` / `Cancel rest`; `filled`; `cancelled`; `unknown` → `Check open orders`; `error` → `Try again` with `Order failed: …` in `--t-down`.
+
+Tick rule: once `feed` has loaded, the ticket uses `feed.tickSize` for `onTick`, `validate`, nudges and display decimals (it overrides `market.tickSize`). Before that, submit is disabled. If `feed.tickSize` changes while a price is typed, re-round with `onTick` and show `Rounded to tick 0.1¢` under the field. `minOrderSize` (when non-null) is enforced: `Minimum order is 5 shares`.
+
+Sell: `S` enables a sell of the selected outcome's token, capped at the held shares from `clob.positions[tokenId]`. With no shares the Sell segment is disabled with visible text `No YES shares to sell`. Sell summary: `Proceeds`, `Fee (max)`; no `Max loss`/`Payout`. Sell needs a sell quote next to `quote()` in `ticket.ts` (proceeds = shares × price − taker fee); reuse `placeTicketOrder` with `side: "SELL"`.
+
+The price prefill when a market is selected: best ask for Buy, best bid for Sell, of the chosen outcome, from the feed. Field values survive feed polls; only a market switch or `New order` resets them.
+
+### 11.7 Live updates, stale, error
+
+- `FeedBadge` in the top bar: `loading` → spinner + `connecting feed…` (`--t-dim`); `live` → dot + `live · HH:MM:SS` of `feed.at` (`--t-up`); `stale` → `stale · 14s old` on `--t-warn-bg`; `error` → `feed error · retrying` on `--t-down-bg` (keeps the last good data if any).
+- Book, tape, hero and KeyStats keep the last good feed while stale or erroring; nothing is cleared or recoloured. BookLadder header repeats the stale badge. Loading (no data yet) shows 5 skeleton rows per pane.
+- Update highlight: when a book level's size changes at the same price, or a new tape row arrives, only that cell gets `animation: tint var(--t-tint-ms) ease-out` from `--t-tint` to transparent. No text colour change, no arrows, no blinking, no row reordering animation. Under `prefers-reduced-motion: reduce` there is no animation at all. Diff by price key between consecutive feed payloads; the first payload after a market switch highlights nothing.
+- Prices never flash red/green on change; the hero YES/NO numbers just update.
+
+### 11.8 Accessibility
+
+§7 and §10.7 rules apply, with these changes: the ticket submits only through the arm-then-sign path in 11.5 (replaces §10.7's "Enter in the amount field submits"); the ladder is a `grid` with `aria-label="Order book, YES, in cents"` and roving tabindex; FeedBadge is `role="status"` with the text, never a dot alone; key caps are `<kbd>` inside the visible label, and every keyboard action has a button or click target with the same name.

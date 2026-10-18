@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Phosphor Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Direction A: Phosphor Console. All-mono, amber labels on black, hairline grid, zero radius, command line first. */
+:root, :root[data-theme="dark"] {
+  --bg: #000; --pane: #070604; --row-alt: #0d0b07; --line: #2b2516; --line-2: #3d3420;
+  --text: #ece5d2; --dim: #8a8068; --faint: #4a4333;
+  --amber: #ffb000; --amber-bg: #2a1d00;
+  --yes: #46c98a; --yes-bg: #0b2a1b; --no: #ff5b4f; --no-bg: #2e0e0b;
+  --focus: #ffb000;
+}
+:root[data-theme="light"] {
+  --bg: #e9e4d8; --pane: #f7f3ea; --row-alt: #efeadf; --line: #d3cbb8; --line-2: #bfb59d;
+  --text: #1a170f; --dim: #6b624d; --faint: #a59b82;
+  --amber: #9a5d00; --amber-bg: #f6e4bf;
+  --yes: #0f7a46; --yes-bg: #d6efe1; --no: #b8322a; --no-bg: #f6dcd8;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 400 12px/16px "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 250px 290px; grid-template-rows: 30px 1fr 1fr 196px 22px; gap: 1px; background: var(--line); }
+.pane { background: var(--pane); overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.ph { display: flex; gap: 10px; align-items: center; height: 22px; padding: 0 8px; border-bottom: 1px solid var(--line); color: var(--amber); text-transform: uppercase; font-weight: 600; font-size: 11px; letter-spacing: .04em; flex: none; }
+.ph .r { margin-left: auto; color: var(--dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.ph .tab { color: var(--dim); font-weight: 500; } .ph .tab.on { color: var(--amber); box-shadow: inset 0 -2px var(--amber); height: 100%; display: flex; align-items: center; }
+.k { display: inline-block; min-width: 14px; padding: 0 3px; border: 1px solid var(--line-2); color: var(--dim); font-size: 10px; line-height: 13px; text-align: center; }
+.yes { color: var(--yes); } .no { color: var(--no); } .dim { color: var(--dim); } .amb { color: var(--amber); }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 0 8px; height: 18px; white-space: nowrap; text-align: right; font-weight: 400; }
+th { color: var(--dim); font-size: 10px; text-transform: uppercase; height: 18px; border-bottom: 1px solid var(--line); }
+td:first-child, th:first-child { text-align: left; }
+/* top command bar */
+.top { grid-column: 1 / -1; background: var(--pane); display: flex; align-items: center; gap: 14px; padding: 0 8px; }
+.logo { color: var(--bg); background: var(--amber); padding: 0 6px; font-weight: 600; }
+.cmd { flex: 0 0 420px; height: 20px; border: 1px solid var(--line-2); display: flex; align-items: center; padding: 0 6px; gap: 6px; color: var(--dim); }
+.cmd b { color: var(--text); font-weight: 500; } .caret { width: 7px; height: 13px; background: var(--amber); }
+.top .sp { margin-left: auto; }
+.top .w { border: 1px solid var(--line-2); padding: 0 6px; }
+/* market list */
+.list { grid-row: 2 / 5; }
+.list tr.sel td { background: var(--amber-bg); color: var(--text); }
+.list tr.sel td:first-child { box-shadow: inset 2px 0 var(--amber); }
+.list td:first-child { max-width: 138px; overflow: hidden; text-overflow: ellipsis; }
+.list tbody tr:nth-child(even) td { background: var(--row-alt); }
+.list tbody tr.sel td { background: var(--amber-bg); }
+.filter { display: flex; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 11px; }
+.filter span.on { color: var(--amber); }
+/* quote header */
+.quote { grid-column: 2; grid-row: 2; }
+.qh { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 8px 4px; border-bottom: 1px solid var(--line); }
+.qh .q { width: 100%; font-size: 13px; font-weight: 600; }
+.qh .big { font-size: 22px; line-height: 26px; font-weight: 600; }
+.qh label { display: block; color: var(--dim); font-size: 10px; text-transform: uppercase; }
+.chart { flex: 1; position: relative; padding: 4px 48px 16px 8px; }
+.chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ylab { position: absolute; right: 4px; color: var(--dim); font-size: 10px; }
+/* ladder */
+.ladder { grid-column: 3; grid-row: 2 / 4; }
+.ladder td { position: relative; height: 17px; }
+.ladder td.px { text-align: center; color: var(--text); width: 64px; }
+.ladder .bar { position: absolute; top: 2px; bottom: 2px; opacity: .55; }
+.ladder td.b .bar { right: 0; background: var(--yes-bg); } .ladder td.a .bar { left: 0; background: var(--no-bg); }
+.ladder td.b span, .ladder td.a span { position: relative; }
+.ladder td.a { text-align: left; }
+.ladder tr.mid td { border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); height: 22px; color: var(--amber); }
+.ladder tr.cur td.px { outline: 1px solid var(--amber); outline-offset: -1px; color: var(--amber); }
+.ladder tr.mine td.px::before { content: "◂"; position: absolute; left: 2px; color: var(--amber); }
+.chg { box-shadow: inset 0 -1px var(--amber); }
+/* tape */
+.tape { grid-column: 2; grid-row: 3; }
+.tape .rows { columns: 2; column-gap: 1px; column-rule: 1px solid var(--line); }
+.tape .rows div { display: grid; grid-template-columns: 70px 40px 1fr 1fr; padding: 0 8px; height: 17px; align-items: center; }
+.tape .rows div span:nth-child(n+3) { text-align: right; }
+.tape .big td { font-weight: 600; }
+/* ticket */
+.ticket { grid-column: 4; grid-row: 2 / 4; }
+.tk { padding: 8px; display: grid; gap: 7px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line-2); }
+.seg div { text-align: center; height: 24px; line-height: 22px; color: var(--dim); position: relative; }
+.seg div .k { position: absolute; right: 4px; top: 5px; }
+.seg .on.y { background: var(--yes-bg); color: var(--yes); box-shadow: inset 0 0 0 1px var(--yes); }
+.seg .on.n { background: var(--no-bg); color: var(--no); box-shadow: inset 0 0 0 1px var(--no); }
+.seg .on.m { background: var(--amber-bg); color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+.fld { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 6px; }
+.fld > span { color: var(--dim); font-size: 11px; text-transform: uppercase; }
+.inp { height: 26px; border: 1px solid var(--line-2); display: flex; align-items: center; padding: 0 6px; gap: 6px; font-size: 14px; }
+.inp.f { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.inp .u { margin-left: auto; color: var(--dim); font-size: 11px; }
+.hint { color: var(--dim); font-size: 10px; padding-left: 80px; margin-top: -4px; }
+.sum { border-top: 1px dashed var(--line-2); padding-top: 6px; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+.sum span:nth-child(odd) { color: var(--dim); }
+.go { height: 30px; background: var(--yes); color: var(--bg); font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; letter-spacing: .04em; }
+.go .k { border-color: var(--bg); color: var(--bg); }
+.note { color: var(--dim); font-size: 10px; line-height: 13px; }
+/* bottom */
+.acct { grid-column: 2 / 5; grid-row: 4; }
+.keys { grid-column: 1 / -1; background: var(--pane); display: flex; gap: 14px; align-items: center; padding: 0 8px; color: var(--dim); font-size: 11px; }
+.keys b { color: var(--bg); background: var(--amber); font-weight: 500; padding: 0 4px; margin-right: 3px; }
+.keys .r { margin-left: auto; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--yes); margin-right: 4px; vertical-align: 1px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <span class="logo">PM-EDGE</span>
+    <div class="cmd"><span class="amb">&gt;</span><b>FED 50</b><span class="caret"></span><span style="margin-left:auto">market · <span class="k">⏎</span> GO</span></div>
+    <span class="dim">FINANCE › Fed cuts 50+ bps at Dec FOMC?</span>
+    <span class="sp dim"><span class="dot"></span>LIVE 14:32:41</span>
+    <span class="yes">● region ok</span>
+    <span class="w">0x3fa1…9c2e · Polygon</span>
+    <span class="dim">USDC 214.40</span>
+  </div>
+
+  <div class="pane list">
+    <div class="ph">Markets <span class="r"><span class="k">/</span> search</span></div>
+    <div class="filter"><span class="on">ALL</span><span>FIN</span><span>POL</span><span>CRY</span><span>TECH</span><span>SPT</span><span style="margin-left:auto">sort VOL ▾</span></div>
+    <table><thead><tr><th>Market</th><th>Yes¢</th><th>24h</th><th>Vol</th></tr></thead><tbody id="mk"></tbody></table>
+  </div>
+
+  <div class="pane quote">
+    <div class="qh">
+      <div class="q">Fed cuts 50+ bps at the December 2026 FOMC meeting? <span class="dim" style="font-weight:400">· ends Dec 15 · 58d</span></div>
+      <div><label>Yes last</label><span class="big yes">41.2¢</span></div>
+      <div><label>No</label><span class="big no">58.8¢</span></div>
+      <div><label>Chg 24h</label><span class="big yes">+1.8</span></div>
+      <div><label>Bid / Ask</label><span class="big">41.1 / 41.3</span></div>
+      <div><label>Spread</label><span class="big">0.2</span></div>
+      <div><label>Vol 24h</label><span class="big">$2.4M</span></div>
+      <div><label>Tick</label><span class="big amb">0.1¢</span></div>
+    </div>
+    <div class="ph" style="border-top:0"><span class="tab">1H</span><span class="tab on">1D</span><span class="tab">1W</span><span class="tab">ALL</span><span class="r">yes price · cents</span></div>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="pane tape">
+    <div class="ph">Tape <span class="r">last 26 · ≥$1k bold</span></div>
+    <div class="rows" id="tape"></div>
+  </div>
+
+  <div class="pane ladder">
+    <div class="ph">Ladder · YES <span class="r"><span class="k">L</span> focus</span></div>
+    <table><thead><tr><th style="text-align:right">Bid</th><th style="text-align:center">¢</th><th style="text-align:left">Ask</th></tr></thead><tbody id="ld"></tbody></table>
+  </div>
+
+  <div class="pane ticket">
+    <div class="ph">Order <span class="r"><span class="k">T</span> focus</span></div>
+    <div class="tk">
+      <div class="seg"><div class="on m">BUY <span class="k">B</span></div><div>SELL <span class="k">S</span></div></div>
+      <div class="seg"><div class="on y">YES <span class="k">Y</span></div><div>NO <span class="k">N</span></div></div>
+      <div class="fld"><span>Limit</span><div class="inp f">41.2<span class="caret" style="height:15px"></span><span class="u">¢ · <span class="k">↑</span><span class="k">↓</span> tick</span></div></div>
+      <div class="hint">bid 41.1 · ask 41.3 · tick 0.1¢ · ⇧↑ = 10 ticks</div>
+      <div class="fld"><span>Size</span><div class="inp">500<span class="u">sh · <span class="k">Tab</span></span></div></div>
+      <div class="hint">= $206.00 · <span class="k">⇧$</span> enter USD instead</div>
+      <div class="sum">
+        <span>Cost</span><span>$206.00</span>
+        <span>Fee</span><span>$0.31</span>
+        <span>Max loss</span><span class="no">$206.31</span>
+        <span>Payout if YES</span><span class="yes">$500.00</span>
+        <span>Fills now</span><span>0 sh · rests</span>
+      </div>
+      <div class="go">BUY 500 YES @ 41.2¢ <span class="k">⏎</span></div>
+      <div class="note">Your wallet asks you to sign. Signing sends the order to Polymarket; funds move only when it fills.</div>
+    </div>
+  </div>
+
+  <div class="pane acct">
+    <div class="ph"><span class="tab on">Positions 3</span><span class="tab">Orders 2</span><span class="tab">Fills</span><span class="r">PnL <span class="yes">+$12.48</span> · <span class="k">P</span> <span class="k">O</span></span></div>
+    <table><thead><tr><th>Market</th><th>Out</th><th>Shares</th><th>Avg¢</th><th>Mark¢</th><th>Value</th><th>PnL</th><th></th></tr></thead><tbody id="pos"></tbody></table>
+    <div class="ph" style="border-top:1px solid var(--line)">Open orders</div>
+    <table><tbody id="ord"></tbody></table>
+  </div>
+
+  <div class="keys">
+    <span><b>/</b>search</span><span><b>J K</b>market</span><span><b>B S</b>side</span><span><b>Y N</b>outcome</span><span><b>↑↓</b>price</span><span><b>Tab</b>size</span><span><b>⏎</b>review</span><span><b>⌘⏎</b>sign</span><span><b>X</b>cancel</span><span><b>?</b>all keys</span>
+    <span class="r">book 14:32:41.2 · ws ok · Research output, not financial advice.</span>
+  </div>
+</div>
+<script src="mock.js"></script>
+<script>
+const M = MOCK, $ = (id) => document.getElementById(id);
+$("mk").innerHTML = M.markets.map((m, i) => `<tr class="${i ? "" : "sel"}"><td title="${m.q}">${m.q}</td><td>${fmt.c(m.p)}</td><td class="${m.ch > 0 ? "yes" : m.ch < 0 ? "no" : "dim"}">${m.ch > 0 ? "+" : ""}${m.ch.toFixed(1)}</td><td class="dim">${m.vol}</td></tr>`).join("");
+const max = Math.max(...M.asks.slice(0, 12).map((x) => x.sz), ...M.bids.slice(0, 12).map((x) => x.sz));
+const row = (p, b, a, cls = "") => `<tr class="${cls}"><td class="b">${b ? `<i class="bar" style="width:${(b / max) * 100}%"></i><span>${fmt.n(b)}</span>` : ""}</td><td class="px">${fmt.c(p)}</td><td class="a">${a ? `<i class="bar" style="width:${(a / max) * 100}%"></i><span class="${a === 18400 ? "chg" : ""}">${fmt.n(a)}</span>` : ""}</td></tr>`;
+$("ld").innerHTML = M.asks.slice(0, 12).reverse().map((a) => row(a.p, 0, a.sz)).join("") +
+  `<tr class="mid cur"><td class="b">last</td><td class="px">${fmt.c(M.mid)}</td><td class="a">sprd 0.2</td></tr>` +
+  M.bids.slice(0, 12).map((b) => row(b.p, b.sz, 0, b.p === 0.405 ? "mine" : "")).join("");
+$("tape").innerHTML = M.tape.map((t) => `<div style="${t.sz * t.p > 1000 ? "font-weight:600" : ""}"><span class="dim">${t.t}</span><span class="${t.side === "BUY" ? "yes" : "no"}">${t.side === "BUY" ? "B" : "S"}</span><span>${fmt.c(t.p)}</span><span>${fmt.n(t.sz)}</span></div>`).join("");
+$("pos").innerHTML = M.positions.map((p) => `<tr><td>${p.q}</td><td class="${p.o === "YES" ? "yes" : "no"}">${p.o}</td><td>${fmt.n(p.sh)}</td><td>${fmt.c(p.avg)}</td><td>${fmt.c(p.mark)}</td><td>${fmt.usd(p.sh * p.mark)}</td><td class="${p.pnl >= 0 ? "yes" : "no"}">${p.pnl >= 0 ? "+" : ""}${fmt.usd(p.pnl)}</td><td class="dim">close <span class="k">C</span></td></tr>`).join("");
+$("ord").innerHTML = M.orders.map((o) => `<tr><td>${o.q}</td><td class="${o.side === "BUY" ? "yes" : "no"}">${o.side} ${o.o}</td><td>${fmt.c(o.p)}¢</td><td>${o.filled}/${o.sz}</td><td class="dim">${o.age}</td><td class="dim">cancel <span class="k">X</span></td></tr>`).join("");
+// chart
+const draw = () => {
+const el = $("chart"), w = el.clientWidth - 56, h = el.clientHeight - 20, lo = 0.30, hi = 0.50;
+const grid = [0.32, 0.36, 0.40, 0.44, 0.48].map((v) => { const y = h - ((v - lo) / (hi - lo)) * h; return `<line x1="0" x2="${w}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${w + 8}" y="${y + 3}" fill="var(--dim)" font-size="10">${fmt.c(v, 0)}</text>`; }).join("");
+const ly = h - ((M.mid - lo) / (hi - lo)) * h;
+el.innerHTML = `<svg width="${w}" height="${h}">${grid}<path d="${pathOf(M.series, w, h, lo, hi)}" fill="none" stroke="var(--amber)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><line x1="0" x2="${w}" y1="${ly}" y2="${ly}" stroke="var(--amber)" stroke-width="1" vector-effect="non-scaling-stroke" opacity=".5"/><rect x="${w + 2}" y="${ly - 8}" width="40" height="16" fill="var(--amber)"/><text x="${w + 6}" y="${ly + 4}" fill="var(--bg)" font-size="11" font-weight="600">41.2</text><text x="0" y="${h + 14}" fill="var(--dim)" font-size="10">Oct 17 14:00</text><text x="${w - 70}" y="${h + 14}" fill="var(--dim)" font-size="10">Oct 18 14:32</text></svg>`;
+};
+addEventListener("load", draw); addEventListener("resize", draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal Final</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Approved blend: B Graphite base + A key-legend bar + C blue/orange YES/NO. Token names = DESIGN.md §11.1 (scoped under .term). */
+.term {
+  --t-bg: #0b0d10; --t-pane: #13161b; --t-pane-2: #1a1e25; --t-line: #232830; --t-line-2: #2f3540;
+  --t-text: #e4e7ec; --t-dim: #8b93a1; --t-faint: #555d6b;
+  --t-yes: #5b9dff; --t-yes-bg: rgb(91 157 255 / .14); --t-on-yes: #0b0d10;
+  --t-no: #ff9142; --t-no-bg: rgb(255 145 66 / .14); --t-on-no: #0b0d10;
+  --t-up: #4cc38a; --t-up-bg: rgb(76 195 138 / .13); --t-down: #f0616d; --t-down-bg: rgb(240 97 109 / .13);
+  --t-bid: var(--t-up); --t-bid-bg: var(--t-up-bg); --t-ask: var(--t-down); --t-ask-bg: var(--t-down-bg);
+  --t-focus: #9d8cff; --t-focus-bg: rgb(157 140 255 / .14); --t-tint: rgb(157 140 255 / .24);
+  --t-warn: #f5b544; --t-warn-bg: rgb(245 181 68 / .12);
+  --t-shadow: none;
+  --t-font-ui: Inter, system-ui, sans-serif; --t-font-num: "JetBrains Mono", ui-monospace, monospace;
+  --t-fs-xs: 10.5px; --t-lh-xs: 14px; --t-fs-sm: 11.5px; --t-lh-sm: 16px; --t-fs-md: 12.5px; --t-lh-md: 18px;
+  --t-fs-lg: 16px; --t-lh-lg: 22px; --t-fs-xl: 22px; --t-lh-xl: 28px;
+  --t-sp-1: 2px; --t-sp-2: 4px; --t-sp-3: 6px; --t-sp-4: 8px; --t-sp-5: 12px; --t-sp-6: 16px;
+  --t-r-sm: 4px; --t-r-md: 6px; --t-r-lg: 8px;
+  --t-top-h: 44px; --t-ph-h: 34px; --t-row-h: 24px; --t-ladder-h: 22px; --t-tape-h: 19px; --t-input-h: 36px; --t-btn-h: 40px; --t-legend-h: 24px;
+  --t-tint-ms: 600ms;
+}
+:root[data-theme="light"] .term {
+  --t-bg: #eceef2; --t-pane: #ffffff; --t-pane-2: #f4f5f8; --t-line: #e1e4ea; --t-line-2: #cfd4dc;
+  --t-text: #161a20; --t-dim: #5d6573; --t-faint: #9aa1ad;
+  --t-yes: #1f64d6; --t-yes-bg: rgb(31 100 214 / .10); --t-on-yes: #ffffff;
+  --t-no: #c25400; --t-no-bg: rgb(194 84 0 / .10); --t-on-no: #ffffff;
+  --t-up: #0c8a5a; --t-up-bg: rgb(12 138 90 / .10); --t-down: #d0364a; --t-down-bg: rgb(208 54 74 / .09);
+  --t-focus: #5b45e0; --t-focus-bg: rgb(91 69 224 / .09); --t-tint: rgb(91 69 224 / .16);
+  --t-warn: #a86b00; --t-warn-bg: rgb(168 107 0 / .10);
+  --t-shadow: 0 1px 2px rgb(20 24 32 / .06);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+.term { background: var(--t-bg); color: var(--t-text); font: 400 var(--t-fs-md)/var(--t-lh-md) var(--t-font-ui); min-height: 100vh; }
+.n, td { font-family: var(--t-font-num); font-variant-numeric: tabular-nums; font-size: 12px; }
+.grid { display: grid; height: 100vh; padding: var(--t-sp-3); gap: var(--t-sp-3); grid-template-columns: 264px minmax(420px, 1fr) 316px 312px; grid-template-rows: var(--t-top-h) 1fr 214px var(--t-legend-h); }
+.pane { background: var(--t-pane); border: 1px solid var(--t-line); border-radius: var(--t-r-lg); overflow: hidden; display: flex; flex-direction: column; min-height: 0; box-shadow: var(--t-shadow); }
+.ph { display: flex; align-items: center; gap: var(--t-sp-5); height: var(--t-ph-h); padding: 0 var(--t-sp-5); border-bottom: 1px solid var(--t-line); font-weight: 600; font-size: 12px; flex: none; }
+.ph .r { margin-left: auto; color: var(--t-dim); font-weight: 400; display: flex; gap: var(--t-sp-3); align-items: center; }
+.ph .t { color: var(--t-dim); font-weight: 500; height: 100%; display: flex; align-items: center; gap: 4px; } .ph .t.on { color: var(--t-text); box-shadow: inset 0 -2px var(--t-focus); }
+kbd { font: 500 10px/14px var(--t-font-num); padding: 0 4px; border: 1px solid var(--t-line-2); border-bottom-width: 2px; border-radius: var(--t-r-sm); color: var(--t-dim); background: var(--t-pane-2); }
+.yes { color: var(--t-yes); } .no { color: var(--t-no); } .up { color: var(--t-up); } .down { color: var(--t-down); } .dim { color: var(--t-dim); } .warn { color: var(--t-warn); }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 0 10px; height: var(--t-row-h); white-space: nowrap; text-align: right; }
+th { font: 500 11px var(--t-font-ui); color: var(--t-dim); height: 26px; }
+td:first-child, th:first-child { text-align: left; }
+.tint { animation: tint var(--t-tint-ms) ease-out; }
+@keyframes tint { from { background: var(--t-tint); } to { background: transparent; } }
+.tint-still { background: var(--t-tint); border-radius: 3px; } /* frozen frame of .tint for the static mockup */
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--t-r-sm); font: 500 11px var(--t-font-num); }
+.badge i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.badge.live { color: var(--t-up); } .badge.stale { color: var(--t-warn); background: var(--t-warn-bg); } .badge.error { color: var(--t-down); background: var(--t-down-bg); } .badge.loading { color: var(--t-dim); }
+.spin { width: 10px; height: 10px; border: 1.5px solid var(--t-line-2); border-top-color: var(--t-dim); border-radius: 50%; display: inline-block; }
+.sk { height: 10px; border-radius: 3px; background: var(--t-pane-2); }
+/* top */
+.top { grid-column: 1 / -1; flex-direction: row; display: flex; align-items: center; gap: var(--t-sp-6); padding: 0 var(--t-sp-5); }
+.logo { font: 600 13px var(--t-font-num); } .logo i { font-style: normal; color: var(--t-focus); }
+.search { width: 340px; height: 30px; border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--t-dim); background: var(--t-pane-2); }
+.search kbd { margin-left: auto; }
+.top .sp { margin-left: auto; }
+.pill { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--t-up); }
+/* list */
+.list { grid-row: 2 / 4; }
+.cats { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--t-line); flex-wrap: wrap; }
+.cats span { padding: 1px 8px; border-radius: 10px; color: var(--t-dim); font-size: 12px; border: 1px solid var(--t-line); } .cats .on { color: var(--t-text); border-color: var(--t-line-2); background: var(--t-pane-2); }
+.mrow { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 6px 12px; border-bottom: 1px solid var(--t-line); }
+.mrow .q { font-size: 12.5px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow .sub { color: var(--t-dim); font-size: 11px; } .mrow .px { text-align: right; font-weight: 500; }
+.mrow.sel { background: var(--t-focus-bg); box-shadow: inset 2px 0 var(--t-focus); }
+.mrow.cur { box-shadow: inset 0 0 0 1px var(--t-line-2); }
+.disc { flex: none; margin: 0; padding: 8px 12px; border-top: 1px solid var(--t-line); color: var(--t-dim); font-size: var(--t-fs-xs); line-height: var(--t-lh-xs); }
+/* chart */
+.chartp { grid-column: 2; grid-row: 2; }
+.hero { display: flex; align-items: flex-end; gap: 28px; padding: 12px 16px 10px; border-bottom: 1px solid var(--t-line); flex: none; }
+.hero h1 { font-size: 16px; line-height: 21px; margin: 0 0 6px; font-weight: 600; }
+.hero .meta { color: var(--t-dim); font-size: 12px; }
+.out { display: flex; gap: 6px; margin-left: auto; }
+.out div { border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); padding: 4px 12px; min-width: 104px; }
+.out div.on.y { border-color: var(--t-yes); background: var(--t-yes-bg); }
+.out label { display: flex; justify-content: space-between; font-size: 11px; color: var(--t-dim); }
+.out .big { font: 600 var(--t-fs-xl)/var(--t-lh-xl) var(--t-font-num); }
+.stats { display: flex; gap: 22px; padding: 8px 16px; border-bottom: 1px solid var(--t-line); flex: none; }
+.stats label { display: block; color: var(--t-dim); font-size: 11px; } .stats .n { font-size: 13px; font-weight: 500; }
+.chart { flex: 1; position: relative; min-height: 0; }
+/* ladder */
+.ladder { grid-column: 3; grid-row: 2 / 4; }
+.ladder td { position: relative; height: var(--t-ladder-h); padding: 0 8px; cursor: pointer; }
+.ladder td.px { text-align: center; font-weight: 500; background: var(--t-pane-2); width: 76px; }
+.ladder td.bs, .ladder td.as { width: 96px; } .ladder td.as { text-align: left; }
+.ladder .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 2px; }
+.ladder td.bs .bar { right: 0; background: var(--t-bid-bg); } .ladder td.as .bar { left: 0; background: var(--t-ask-bg); }
+.ladder td span { position: relative; }
+.ladder td.my { width: 52px; color: var(--t-focus); font-size: 11px; }
+.ladder tr.ask td.px { color: var(--t-ask); } .ladder tr.bid td.px { color: var(--t-bid); }
+.ladder tr.spr td { height: 30px; background: var(--t-pane-2); font-family: var(--t-font-ui); color: var(--t-dim); font-size: 12px; text-align: center; border-top: 1px solid var(--t-line); border-bottom: 1px solid var(--t-line); }
+.ladder tr.spr b { font: 600 15px var(--t-font-num); color: var(--t-text); }
+.ladder tr.cur td { box-shadow: inset 0 1px var(--t-focus), inset 0 -1px var(--t-focus); } .ladder tr.cur td.px { background: var(--t-focus-bg); color: var(--t-focus); }
+.lfoot { margin-top: auto; padding: 8px 12px; border-top: 1px solid var(--t-line); color: var(--t-dim); font-size: 11.5px; display: flex; gap: 10px; }
+/* ticket */
+.col4 { grid-column: 4; grid-row: 2 / 4; display: flex; flex-direction: column; gap: var(--t-sp-3); min-height: 0; }
+.ticket { flex: none; } .ticket.blocked { border-color: var(--t-down); } .ticket.warnb { border-color: var(--t-warn); }
+.tk { padding: 12px; display: grid; gap: 10px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--t-pane-2); border-radius: var(--t-r-md); padding: 3px; gap: 3px; }
+.seg div { height: 28px; border-radius: var(--t-r-sm); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--t-dim); }
+.seg .on.w { background: var(--t-pane); color: var(--t-text); box-shadow: 0 0 0 1px var(--t-line-2); }
+.seg .on.y { background: var(--t-yes); color: var(--t-on-yes); } .seg .on.y kbd, .seg .on.no2 kbd { color: var(--t-text); }
+.seg .on.no2 { background: var(--t-no); color: var(--t-on-no); }
+.seg .off { opacity: .45; }
+.fld label { display: flex; justify-content: space-between; color: var(--t-dim); font-size: 11.5px; margin-bottom: 4px; }
+.inp { height: var(--t-input-h); border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); display: flex; align-items: center; padding: 0 6px 0 12px; gap: 8px; font: 500 var(--t-fs-lg) var(--t-font-num); }
+.inp.f { border-color: var(--t-focus); box-shadow: 0 0 0 3px var(--t-focus-bg); }
+.inp.err { border-color: var(--t-down); } .inp.dis { color: var(--t-faint); background: var(--t-pane-2); }
+.inp .u { margin-left: auto; color: var(--t-dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
+.ferr { color: var(--t-down); font-size: 11.5px; margin-top: 3px; }
+.sum { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12px; }
+.sum span:nth-child(odd) { color: var(--t-dim); } .sum span:nth-child(even) { font-family: var(--t-font-num); text-align: right; }
+.go { height: var(--t-btn-h); border-radius: var(--t-r-md); font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 10px; border: 0; }
+.go.yes { background: var(--t-yes); color: var(--t-on-yes); } .go.no { background: var(--t-no); color: var(--t-on-no); }
+.go kbd { background: transparent; color: inherit; border-color: currentColor; }
+.go.armed { box-shadow: 0 0 0 2px var(--t-pane), 0 0 0 4px var(--t-focus); }
+.go.off { background: var(--t-pane-2); color: var(--t-dim); border: 1px solid var(--t-line-2); }
+.go.connect { background: transparent; color: var(--t-focus); border: 1px solid var(--t-focus); }
+.line { font-size: 11.5px; line-height: 16px; color: var(--t-dim); }
+.line.neg { color: var(--t-down); }
+/* tape + acct */
+.tape { flex: 1; } .tape td { height: var(--t-tape-h); font-size: 11.5px; }
+.acct { grid-column: 2; grid-row: 3; } .acct td { height: 26px; } .acct td.q { font: 400 12.5px var(--t-font-ui); }
+.tag { font: 600 10.5px var(--t-font-num); padding: 1px 6px; border-radius: var(--t-r-sm); } .tag.yes { background: var(--t-yes-bg); } .tag.no { background: var(--t-no-bg); }
+/* legend (from A) */
+.legend { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 6px; color: var(--t-dim); font-size: 11.5px; }
+.legend > span { white-space: nowrap; } .legend kbd { margin-right: 4px; } .legend .r { margin-left: auto; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--t-faint); font-size: 11px; }
+/* states board */
+.board { display: none; padding: 20px; gap: 16px; grid-template-columns: repeat(4, 1fr); align-content: start; }
+.board h2 { grid-column: 1 / -1; margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--t-dim); text-transform: uppercase; letter-spacing: .06em; }
+.board .cap { font: 500 11px var(--t-font-num); color: var(--t-focus); padding: 8px 12px 0; }
+.show-states .grid { display: none; } .show-states .board { display: grid; }
+</style>
+</head>
+<body>
+<div class="term" id="term">
+<div class="grid">
+  <div class="pane top">
+    <span class="logo">PM<i>/</i>EDGE <span class="dim" style="font-weight:400">terminal</span></span>
+    <div class="search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>Search markets<kbd>/</kbd></div>
+    <span class="sp badge live"><i></i>live · 14:32:41</span>
+    <span class="pill"><span class="dot"></span>Region ok</span>
+    <span class="pill n">0x3fa1…9c2e <span class="dim">Polygon</span></span>
+    <span class="pill n"><span class="dim">USDC</span> 214.40</span>
+  </div>
+
+  <div class="pane list">
+    <div class="ph">Markets <span class="r"><kbd>J</kbd><kbd>K</kbd><kbd>⏎</kbd></span></div>
+    <div class="cats"><span class="on">All</span><span>Finance</span><span>Politics</span><span>Crypto</span><span>Tech</span><span>Sports</span></div>
+    <div id="mk" style="overflow:hidden;flex:1;min-height:0"></div>
+    <p class="disc">Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions; you are responsible for complying with yours.</p>
+  </div>
+
+  <div class="pane chartp">
+    <div class="hero">
+      <div><h1>Fed cuts 50+ bps at the December 2026 FOMC meeting?</h1><div class="meta">Finance · ends Dec 15, 2026 · 58 days · <span class="n">tick 0.1¢</span> · Polymarket ↗</div></div>
+      <div class="out">
+        <div class="on y"><label><span>YES</span><kbd>Y</kbd></label><span class="big yes">41.2¢</span></div>
+        <div><label><span>NO</span><kbd>N</kbd></label><span class="big no">58.8¢</span></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div><label>Last</label><span class="n">41.2¢</span></div>
+      <div><label>Best bid</label><span class="n up">41.1¢</span></div>
+      <div><label>Best ask</label><span class="n down">41.3¢</span></div>
+      <div><label>Spread</label><span class="n">0.2¢</span></div>
+      <div><label>Min order</label><span class="n">5 sh</span></div>
+      <div><label>Vol 24h</label><span class="n">$2.41M</span></div>
+    </div>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="pane ladder">
+    <div class="ph">Order book · YES <span class="r">click a price or <kbd>L</kbd></span></div>
+    <table><thead><tr><th style="text-align:left">Mine</th><th>Bid</th><th style="text-align:center">Price ¢</th><th style="text-align:left">Ask</th><th>Mine</th></tr></thead><tbody id="ld"></tbody></table>
+    <div class="lfoot"><span>15 levels per side</span><span style="margin-left:auto">book 14:32:41</span></div>
+  </div>
+
+  <div class="col4">
+    <div class="pane ticket">
+      <div class="ph">Order · limit <span class="r"><kbd>⇧T</kbd> focus</span></div>
+      <div class="tk">
+        <div class="seg"><div class="on w">Buy <kbd>B</kbd></div><div>Sell <kbd>S</kbd></div></div>
+        <div class="seg"><div class="on y">YES <kbd>Y</kbd></div><div>NO <kbd>N</kbd></div></div>
+        <div class="fld"><label><span>Limit · ¢</span><span><kbd>↑</kbd><kbd>↓</kbd> 0.1 · <kbd>⇧</kbd> ×10</span></label><div class="inp f">41.2<span class="u">¢</span></div></div>
+        <div class="fld"><label><span>Shares</span><span>= <span class="n" style="color:var(--t-text)">$206.00</span></span></label><div class="inp">500<span class="u">sh <kbd>Tab</kbd></span></div></div>
+        <div class="sum"><span>Fee (max)</span><span>$0.31</span><span>Max loss</span><span class="down">$206.31</span><span>Payout if YES</span><span class="up">$500.00</span></div>
+        <div class="go yes">Buy 500 YES at 41.2¢ <kbd>⏎</kbd></div>
+        <div class="line">Your wallet asks you to sign. Signing sends the order to Polymarket; funds move only when it fills.</div>
+      </div>
+    </div>
+    <div class="pane tape">
+      <div class="ph">Trades <span class="r">≥ $1k bold</span></div>
+      <table><tbody id="tape"></tbody></table>
+    </div>
+  </div>
+
+  <div class="pane acct">
+    <div class="ph"><span class="t on">Positions <span class="dim">3</span></span><span class="t">Open orders <span class="dim">2</span></span><span class="r"><kbd>P</kbd><kbd>O</kbd> tabs · <kbd>X</kbd> cancel row</span></div>
+    <table><thead><tr><th>Market</th><th>Outcome</th><th>Shares</th><th>Mark</th><th>Value</th></tr></thead><tbody id="pos"></tbody></table>
+  </div>
+
+  <div class="legend">
+    <span><kbd>/</kbd>search</span><span><kbd>J</kbd><kbd>K</kbd>market</span><span><kbd>B</kbd><kbd>S</kbd>buy/sell</span><span><kbd>Y</kbd><kbd>N</kbd>outcome</span><span><kbd>↑</kbd><kbd>↓</kbd>tick</span><span><kbd>⇧↑↓</kbd>10 ticks</span><span><kbd>Tab</kbd>next field</span><span><kbd>⏎</kbd>review</span><span><kbd>⌘⏎</kbd>sign</span><span><kbd>L</kbd>ladder</span><span><kbd>X</kbd>cancel</span><span><kbd>Esc</kbd>back</span><span><kbd>?</kbd>all keys</span>
+    <span class="r">feed 3 s · book 15 levels</span>
+  </div>
+</div>
+
+<div class="board" id="board">
+  <h2>Feed badge (top bar) · FeedStatus</h2>
+  <div class="pane"><div class="cap">loading · no data yet</div><div style="padding:12px"><span class="badge loading"><span class="spin"></span>connecting feed…</span></div></div>
+  <div class="pane"><div class="cap">live · age ≤ FEED_STALE_MS</div><div style="padding:12px"><span class="badge live"><i></i>live · 14:32:41</span></div></div>
+  <div class="pane"><div class="cap">stale · last good data kept</div><div style="padding:12px"><span class="badge stale"><i></i>stale · 14s old</span></div></div>
+  <div class="pane"><div class="cap">error · retrying every 3 s</div><div style="padding:12px"><span class="badge error"><i></i>feed error · retrying</span></div></div>
+
+  <h2>Book pane · loading / no book / stale</h2>
+  <div class="pane"><div class="ph">Order book · YES <span class="r"><span class="spin"></span></span></div><div style="padding:12px;display:grid;gap:9px"><div class="sk" style="width:70%"></div><div class="sk" style="width:55%"></div><div class="sk" style="width:80%"></div><div class="sk" style="width:60%"></div><div class="sk" style="width:75%"></div></div></div>
+  <div class="pane"><div class="ph">Order book · YES</div><div style="padding:16px 12px" class="line">No live book for this market. Polymarket returned no orders. Ticket stays disabled.</div></div>
+  <div class="pane"><div class="ph">Order book · YES <span class="r"><span class="badge stale"><i></i>stale 14s</span></span></div><div style="padding:16px 12px" class="line">Rows keep the last good book; nothing is cleared or recoloured while stale.</div></div>
+  <div class="pane"><div class="ph">Update tint</div><div style="padding:12px" class="n">size 2,376 → <span class="tint-still" style="padding:0 3px">2,412</span><div class="line" style="margin-top:6px">changed cell only · 600 ms fade · no colour flip · off under prefers-reduced-motion</div></div></div>
+
+  <h2>Ticket gates and phases</h2>
+  <div class="pane ticket"><div class="cap">feed loading → submit disabled</div><div class="tk">
+    <div class="fld"><label><span>Limit · ¢</span><span>tick —</span></label><div class="inp dis">—<span class="u">¢</span></div></div>
+    <div class="fld"><label><span>Shares</span></label><div class="inp dis">500<span class="u">sh</span></div></div>
+    <div class="go off"><span class="spin"></span>Waiting for live book…</div>
+    <div class="line">Prices and tick come from the live book. You can type shares now.</div></div></div>
+  <div class="pane ticket"><div class="cap">gate: disconnected</div><div class="tk">
+    <div class="fld"><label><span>Limit · ¢</span><span>bid 41.1 · ask 41.3</span></label><div class="inp">41.2<span class="u">¢</span></div></div>
+    <div class="fld"><label><span>Shares</span><span>Balance —</span></label><div class="inp">500<span class="u">sh</span></div></div>
+    <div class="go connect">Connect wallet</div>
+    <div class="line">Connect a wallet on Polygon to trade. The book and chart stay free to read.</div></div></div>
+  <div class="pane ticket blocked"><div class="cap">gate: geo_blocked</div><div class="tk">
+    <div class="fld"><label><span>Limit · ¢</span></label><div class="inp dis">41.2<span class="u">¢</span></div></div>
+    <div class="fld"><label><span>Shares</span></label><div class="inp dis">500<span class="u">sh</span></div></div>
+    <div class="go off">Trading blocked in your region</div>
+    <div class="line neg">Polymarket does not accept orders from your region. Nothing can be sent from here.</div></div></div>
+  <div class="pane ticket"><div class="cap">phase: signing</div><div class="tk">
+    <div class="sum"><span>Order</span><span>BUY 500 YES @ 41.2¢</span><span>Max loss</span><span class="down">$206.31</span></div>
+    <div class="go off"><span class="spin"></span>Confirm in your wallet…</div>
+    <div class="line">Check your wallet window. Rejecting there cancels nothing; no order was sent.</div></div></div>
+
+  <div class="pane ticket"><div class="cap">armed (⏎ pressed, review)</div><div class="tk">
+    <div class="sum"><span>Order</span><span>BUY 500 YES @ 41.2¢</span><span>Max loss</span><span class="down">$206.31</span></div>
+    <div class="go yes armed">Sign: Buy 500 YES at 41.2¢ <kbd>⏎</kbd><kbd>⌘⏎</kbd></div>
+    <div class="line">⏎ again or ⌘⏎ signs. Esc returns to the fields.</div></div></div>
+  <div class="pane ticket"><div class="cap">phase: error (rejected by venue)</div><div class="tk">
+    <div class="sum"><span>Order</span><span>BUY 500 YES @ 41.2¢</span></div>
+    <div class="go off" style="color:var(--t-text)">Try again</div>
+    <div class="line neg">Order failed: not enough balance / allowance</div></div></div>
+  <div class="pane ticket"><div class="cap">phase: open / partial</div><div class="tk">
+    <div class="sum"><span>Order</span><span>BUY 500 YES @ 41.2¢</span><span>Filled</span><span>120 / 500</span></div>
+    <div class="go off" style="color:var(--t-text)">Cancel rest <kbd>X</kbd></div>
+    <div class="line">Partially filled · 120/500 at 41.2¢</div></div></div>
+  <div class="pane ticket"><div class="cap">field error (validate)</div><div class="tk">
+    <div class="fld"><label><span>Limit · ¢</span></label><div class="inp err">41.25<span class="u">¢</span></div><div class="ferr">Not on tick 0.1¢ — rounds down to 41.2</div></div>
+    <div class="fld"><label><span>Shares</span></label><div class="inp err">2<span class="u">sh</span></div><div class="ferr">Minimum order is 5 shares</div></div>
+    <div class="go off">Sign and place order</div></div></div>
+</div>
+</div>
+<script src="mock.js"></script>
+<script>
+const M = MOCK, $ = (id) => document.getElementById(id);
+if (/states/.test(location.search)) $("term").classList.add("show-states");
+$("mk").innerHTML = M.markets.map((m, i) => `<div class="mrow ${i ? (i === 3 ? "cur" : "") : "sel"}"><span class="q" title="${m.q}">${m.q}</span><span class="n px">${fmt.c(m.p, m.tick < 0.01 ? 1 : 0)}¢</span><span class="sub">${m.cat}</span><span class="n sub" style="text-align:right">${20 + (i * 13) % 100}d</span></div>`).join("");
+const N = 14, max = Math.max(...M.asks.slice(0, N).map((x) => x.sz), ...M.bids.slice(0, N).map((x) => x.sz));
+const bar = (v) => `<i class="bar" style="width:${(v / max) * 100}%"></i>`;
+$("ld").innerHTML =
+  M.asks.slice(0, N).reverse().map((a) => `<tr class="ask"><td class="my"></td><td class="bs"></td><td class="px">${fmt.c(a.p)}</td><td class="as">${bar(a.sz)}<span class="${a.p === 0.416 ? "tint-still" : ""}">${fmt.n(a.sz)}</span></td><td class="my"></td></tr>`).join("") +
+  `<tr class="spr"><td colspan="5">last <b>41.2</b> &nbsp;·&nbsp; spread 0.2¢ &nbsp;·&nbsp; mid 41.2</td></tr>` +
+  M.bids.slice(0, N).map((b) => `<tr class="bid ${b.p === 0.409 ? "cur" : ""}"><td class="my">${b.p === 0.405 ? "+800" : ""}</td><td class="bs">${bar(b.sz)}<span>${fmt.n(b.sz)}</span></td><td class="px">${fmt.c(b.p)}</td><td class="as"></td><td class="my"></td></tr>`).join("");
+$("tape").innerHTML = M.tape.slice(0, 16).map((t, i) => `<tr class="${i === 0 ? "tint-still" : ""}" style="${t.sz * t.p > 1000 ? "font-weight:600" : ""}"><td class="dim">${t.t}</td><td class="${t.side === "BUY" ? "up" : "down"}">${fmt.c(t.p)}</td><td>${fmt.n(t.sz)}</td></tr>`).join("");
+$("pos").innerHTML = M.positions.map((p) => `<tr><td class="q">${p.q}</td><td><span class="tag ${p.o === "YES" ? "yes" : "no"}">${p.o}</span></td><td>${fmt.n(p.sh)}</td><td>${fmt.c(p.mark)}¢</td><td>${fmt.usd(p.sh * p.mark)}</td></tr>`).join("");
+const draw = () => {
+  const el = $("chart"); if (!el.clientWidth) return;
+  const w = el.clientWidth - 64, h = el.clientHeight - 56, lo = 0.30, hi = 0.50, y = (v) => 16 + h - ((v - lo) / (hi - lo)) * h;
+  const line = M.series.map((v, i) => `${i ? "L" : "M"}${((i / 239) * w).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const grid = [0.32, 0.36, 0.40, 0.44, 0.48].map((v) => `<line x1="0" x2="${w}" y1="${y(v)}" y2="${y(v)}" stroke="var(--t-line)"/><text x="${w + 10}" y="${y(v) + 4}" fill="var(--t-dim)" font-size="11" font-family="JetBrains Mono">${fmt.c(v, 0)}¢</text>`).join("");
+  el.innerHTML = `<svg width="${w + 60}" height="${h + 44}" style="margin-top:8px"><defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--t-yes)" stop-opacity=".22"/><stop offset="1" stop-color="var(--t-yes)" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${line}L${w},${h + 16}L0,${h + 16}Z" fill="url(#g)"/><path d="${line}" fill="none" stroke="var(--t-yes)" stroke-width="1.6"/><line x1="0" x2="${w}" y1="${y(0.405)}" y2="${y(0.405)}" stroke="var(--t-focus)" stroke-dasharray="4 4"/><text x="8" y="${y(0.405) - 5}" fill="var(--t-focus)" font-size="11" font-family="JetBrains Mono">your bid 40.5¢ · 800</text><rect x="${w + 4}" y="${y(M.mid) - 10}" width="50" height="20" rx="4" fill="var(--t-yes)"/><text x="${w + 9}" y="${y(M.mid) + 4}" fill="var(--t-on-yes)" font-size="11.5" font-weight="600" font-family="JetBrains Mono">41.2¢</text><text x="0" y="${h + 38}" fill="var(--t-dim)" font-size="10.5" font-family="JetBrains Mono">price history from snapshots · live tail from feed</text></svg>`;
+};
+addEventListener("load", draw); addEventListener("resize", draw);
+</script>
+</body>
+</html>
