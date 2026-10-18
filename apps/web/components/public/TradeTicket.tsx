@@ -1,7 +1,7 @@
 "use client";
 // TradeTicket (DESIGN 10.4). Orders are signed by the visitor's wallet and sent browser -> clob.polymarket.com (no server relay).
-import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useOrderFlow } from "../../hooks/useOrderFlow";
 import { useRegion } from "../../hooks/useRegion";
 import { isRejection, useWallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail } from "../../lib/public";
@@ -9,27 +9,15 @@ import { loadVisitorSettings } from "../../lib/visitor/settings";
 import { fmt, truncate } from "../fmt";
 import ui from "../ui.module.css";
 import { short } from "./PublicShell";
-import { bestAsk, findPlaced, onTick, placeTicketOrder, prefill, quote, ticketGate, TICK, validate, type Gate } from "./ticket";
+import { bestAsk, onTick, prefill, quote, ticketGate, tickDecimals, tickOf, validate, type Gate } from "./ticket";
 import css from "./public.module.css";
 
-const ORDER_TTL_MS = 24 * 3_600_000; // ponytail: GTD 24 h, not in the brief; a resting order should not outlive the visitor's attention by much
-const STATUS_MS = 5_000;
 const usd = (v: number) => `$${v.toFixed(2)}`;
 const num = (s: string) => (s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s));
 const shares = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Side = "YES" | "NO";
-type Phase =
-  | { s: "idle" }
-  | { s: "signing" }
-  | { s: "checking" }
-  | { s: "open"; orderId: string; shares: number; filled: number; avg: number | null; since: number; cancelling?: boolean }
-  | { s: "filled"; shares: number; avg: number; fee: number }
-  | { s: "cancelled"; shares: number; filled: number }
-  | { s: "error"; msg: string }
-  | { s: "unknown"; order: LimitOrder; since: number; checking?: boolean };
-
 const GATE: Record<Gate, { button: string; copy: string; spin?: boolean; off?: boolean }> = {
   disconnected: { button: "Connect wallet", copy: "Connect a wallet on Polygon to trade. Research above stays free to read." },
   wrong_network: { button: "Switch to Polygon", copy: "Your wallet is on another network. Polymarket runs on Polygon." },
@@ -41,18 +29,6 @@ const GATE: Record<Gate, { button: string; copy: string; spin?: boolean; off?: b
   allowance_needed: { button: "Approve USDC (1 transaction)", copy: "Polymarket's exchange needs permission to spend your USDC. This is an on-chain transaction and costs a little POL for gas. One time per wallet." },
 };
 
-/** Fill state of one order: still open (from openOrders), else from its trades. */
-async function orderStatus(ex: ClobExchange, p: Extract<Phase, { s: "open" }>): Promise<Phase | null> {
-  const [open, trades] = await Promise.all([ex.openOrders(), ex.trades(new Date(p.since - 60_000))]);
-  const fills = trades.filter((t) => t.orderId === p.orderId);
-  const sh = fills.reduce((a, t) => a + t.shares, 0), cost = fills.reduce((a, t) => a + t.shares * t.price, 0), fee = fills.reduce((a, t) => a + t.fee, 0);
-  const o = open.find((x) => x.orderId === p.orderId);
-  if (o) return { ...p, filled: o.filled, avg: sh > 0 ? cost / sh : p.avg };
-  if (sh >= p.shares - 0.005) return { s: "filled", shares: sh, avg: cost / sh, fee };
-  if (!sh && Date.now() - p.since < 15_000) return null; // just matched or just placed: openOrders/trades may lag a few seconds
-  return { s: "cancelled", shares: p.shares, filled: sh };
-}
-
 export function TradeTicket({ d }: { d: PublicMarketDetail }) {
   const w = useWallet(), r = useRegion(), c = w.clob;
   const btn = useRef<HTMLButtonElement>(null);
@@ -60,9 +36,9 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
   const [price, setPrice] = useState("");
   const [amount, setAmount] = useState("");
   const [touched, setTouched] = useState(false);
-  const [phase, setPhase] = useState<Phase>({ s: "idle" });
-  const [note, setNote] = useState<{ text: string; tone: "muted" | "neg" } | null>(null);
   const [busy, setBusy] = useState(false);
+  const flow = useOrderFlow(w.exchange, c.refresh);
+  const { phase, note, setNote } = flow;
   const [perTradeMax] = useState(() => loadVisitorSettings().limits.perTradeUsd);
 
   // The ticket counts as opened: run the region check now so the state is known before the visitor connects.
@@ -71,42 +47,20 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
 
   // Prefill until the visitor edits a field: thesis side, livelimitPrice limit, sizeTrade amount once the balance is known.
   const id = d.market.conditionId, balance = c.balance;
+  const tk = tickOf(d);
   useEffect(() => {
     if (touched) return;
     const p = prefill(d, balance);
     setSide(p.side);
-    setPrice(p.price == null ? "" : p.price.toFixed(3));
+    setPrice(p.price == null ? "" : p.price.toFixed(tickDecimals(tk)));
     setAmount(p.amount == null ? "" : p.amount.toFixed(2));
     // Deps on purpose: re-prefill on market or balance change, not on every 60 s poll of `d`.
   }, [id, balance, touched]);
 
-  // A new account or chain means new credentials: drop the order view with them.
-  useEffect(() => setPhase({ s: "idle" }), [w.exchange]);
-
-  const openId = phase.s === "open" ? phase.orderId : null;
-  const cur = useRef(phase);
-  cur.current = phase;
-  useEffect(() => {
-    const ex = w.exchange;
-    if (!openId || !ex) return;
-    const live = (p: Phase) => p.s === "open" && p.orderId === openId && !p.cancelling;
-    let inflight = false; // a slow CLOB must not stack status calls every 5 s
-    const tick = () => {
-      const p = cur.current;
-      if (inflight || p.s !== "open" || !live(p)) return;
-      inflight = true;
-      // CLOB down: keep polling; AccountPanel shows the error.
-      orderStatus(ex, p).then((n) => n && setPhase((x) => (live(x) ? n : x))).catch(() => {}).finally(() => { inflight = false; });
-    };
-    tick();
-    const t = setInterval(tick, STATUS_MS);
-    return () => clearInterval(t);
-  }, [openId, w.exchange]);
-
   const gate = ticketGate({ wallet: w.status, chainOk: w.chainOk, region: r.status, credsReady: c.credsReady, approved: c.approved });
   const pr = num(price), amt = num(amount);
-  const q = pr == null || amt == null ? null : quote(pr, amt, d.market.feeRate);
-  const errs = validate(pr, amt, balance, q);
+  const q = pr == null || amt == null ? null : quote(pr, amt, d.market.feeRate, tk);
+  const errs = validate(pr, amt, balance, q, tk);
   if (!errs.amount && q && q.maxLoss > perTradeMax) errs.amount = `Above your per-trade max $${perTradeMax}`;
   const valid = !errs.price && !errs.amount && q != null;
   const mid = d.snapshot?.mid == null ? null : side === "YES" ? d.snapshot.mid : 1 - d.snapshot.mid;
@@ -120,7 +74,7 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     setSide(s);
     const p = prefill(d, balance);
     const lim = s === p.side ? p.price : bestAsk(d, s);
-    setPrice(lim == null ? "" : lim.toFixed(3));
+    setPrice(lim == null ? "" : lim.toFixed(tickDecimals(tk)));
   });
   const sideKeys = (e: KeyboardEvent) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
@@ -139,51 +93,13 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
   };
 
   const place = async () => {
-    const ex = w.exchange;
-    if (!ex || !q || !valid || !tokenId || pr == null) return;
-    setNote(null);
-    setPhase({ s: "signing" });
-    const since = Date.now();
-    const order: LimitOrder = { tokenId, side: "BUY", price: onTick(pr), shares: q.shares, expiresAt: new Date(since + ORDER_TTL_MS) };
-    // the send didn't confirm: say so while the outcome is looked up (the wait runs only between re-checks)
-    const res = await placeTicketOrder(ex, order, isRejection, (ms) => { setPhase({ s: "checking" }); return new Promise((r) => setTimeout(r, ms)); });
-    if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: q.shares, filled: 0, avg: null, since });
-    else if (res.kind === "filled") setPhase({ s: "filled", shares: res.shares, avg: res.avg, fee: res.fee });
-    else if (res.kind === "rejected") setPhase({ s: "error", msg: res.error });
-    else if (res.kind === "declined") { setPhase({ s: "idle" }); setNote({ text: "You rejected the signature. Nothing was sent.", tone: "muted" }); }
-    else setPhase({ s: "unknown", order, since });
-    void c.refresh();
+    if (!q || !valid || !tokenId || pr == null) return;
+    await flow.place({ side: "BUY", tokenId, price: pr, shares: q.shares, tick: tk });
     btn.current?.focus();
   };
 
-  const recheck = async () => {
-    const ex = w.exchange;
-    if (phase.s !== "unknown" || !ex) return;
-    const p = phase;
-    setPhase({ ...p, checking: true });
-    const res = await findPlaced(ex, p.order, p.since);
-    if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: p.order.shares, filled: 0, avg: null, since: p.since });
-    else if (res.kind === "filled") setPhase({ s: "filled", shares: res.shares, avg: res.avg, fee: res.fee });
-    else setPhase({ ...p, checking: false });
-  };
   // Leaving "unknown" clears the amount: no one-click identical resend.
-  const startOver = () => { setPhase({ s: "idle" }); setTouched(true); setAmount(""); };
-
-  const cancel = async () => {
-    const ex = w.exchange;
-    if (phase.s !== "open" || !ex) return;
-    const p = phase;
-    setPhase({ ...p, cancelling: true });
-    try {
-      await ex.cancel([p.orderId]);
-      const n = await orderStatus(ex, { ...p, since: 0 }); // since 0: never wait on lag after an explicit cancel
-      setPhase(n ?? { s: "cancelled", shares: p.shares, filled: p.filled });
-      void c.refresh();
-    } catch (e) {
-      setPhase({ ...p, cancelling: false });
-      setNote({ text: `Cancel failed: ${truncate(msg(e), 80)}`, tone: "neg" });
-    }
-  };
+  const startOver = () => { flow.reset(); setTouched(true); setAmount(""); };
 
   // Button + state line, by state. The same <button> element in every state keeps focus on it (DESIGN 10.7).
   let label: string, onClick: (() => void) | undefined, spin = false, off = false, stateWord: string, line: React.ReactNode = null, aria: string | undefined;
@@ -205,7 +121,7 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     switch (phase.s) {
       case "idle":
         label = "Sign and place order"; stateWord = "ready"; off = !valid; onClick = () => void place();
-        if (q) aria = `Sign and place order: buy ${side} ${shares(q.shares)} shares at ${onTick(pr!).toFixed(3)}, up to ${usd(q.maxLoss)}`;
+        if (q) aria = `Sign and place order: buy ${side} ${shares(q.shares)} shares at ${onTick(pr!, tk).toFixed(tickDecimals(tk))}, up to ${usd(q.maxLoss)}`;
         break;
       case "checking":
         label = "Checking if your order went through…"; spin = off = true; stateWord = "checking";
@@ -216,26 +132,26 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
         line = "Check your wallet window. Rejecting there cancels nothing; no order was sent.";
         break;
       case "open":
-        label = phase.cancelling ? "cancelling…" : phase.filled > 0 ? "Cancel rest" : "Cancel order"; off = !!phase.cancelling; onClick = () => void cancel();
+        label = phase.cancelling ? "cancelling…" : phase.filled > 0 ? "Cancel rest" : "Cancel order"; off = !!phase.cancelling; onClick = () => void flow.cancel();
         stateWord = phase.filled > 0 ? "partial" : "submitted";
         line = phase.filled > 0
           ? `Partially filled · ${shares(phase.filled)}/${shares(phase.shares)}${phase.avg != null ? ` at ${phase.avg.toFixed(3)}` : ""}`
           : `Order open · ord ${short(phase.orderId)} · ${shares(phase.filled)}/${shares(phase.shares)} filled`;
         break;
       case "filled":
-        label = "New order"; stateWord = "filled"; onClick = () => setPhase({ s: "idle" });
+        label = "New order"; stateWord = "filled"; onClick = flow.reset;
         line = <span className="pos">Filled {"·"} {shares(phase.shares)} shares at {phase.avg.toFixed(3)} {"·"} fee {usd(phase.fee)}</span>;
         break;
       case "cancelled":
-        label = "New order"; stateWord = "cancelled"; onClick = () => setPhase({ s: "idle" });
+        label = "New order"; stateWord = "cancelled"; onClick = flow.reset;
         line = <span className="muted">cancelled {"·"} {shares(phase.filled)}/{shares(phase.shares)} filled</span>;
         break;
       case "unknown":
-        label = phase.checking ? "Checking open orders…" : "Check open orders"; spin = off = !!phase.checking; stateWord = "unknown"; onClick = () => void recheck();
+        label = phase.checking ? "Checking open orders…" : "Check open orders"; spin = off = !!phase.checking; stateWord = "unknown"; onClick = () => void flow.recheck();
         line = <span className="neg">Outcome unknown {"—"} check open orders before retrying. <button type="button" className={css.linkBtn} onClick={startOver}>Start over</button></span>;
         break;
       case "error":
-        label = "Try again"; stateWord = "error"; onClick = () => setPhase({ s: "idle" });
+        label = "Try again"; stateWord = "error"; onClick = flow.reset;
         line = <span className="neg" title={phase.msg}>Order failed: {truncate(phase.msg, 80)}</span>;
         break;
     }
@@ -254,9 +170,9 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
         </div>
 
         <label htmlFor="tk-price">Limit price</label>
-        <input id="tk-price" type="number" inputMode="decimal" step={TICK} min={TICK} max={1 - TICK} value={price} disabled={!editable}
+        <input id="tk-price" type="number" inputMode="decimal" step={tk} min={tk} max={1 - tk} value={price} disabled={!editable}
           aria-invalid={fields && !!errs.price} aria-describedby="tk-price-hint" onChange={(e) => edit(() => setPrice(e.target.value))} />
-        <span className={css.hint} id="tk-price-hint">mid {fmt(mid, "p")} {"·"} best ask {fmt(ask, "p")}{pr != null && onTick(pr) !== pr && ` · sends ${onTick(pr).toFixed(3)} (tick ${TICK})`}</span>
+        <span className={css.hint} id="tk-price-hint">mid {fmt(mid, "p")} {"·"} best ask {fmt(ask, "p")}{pr != null && onTick(pr, tk) !== pr && ` · sends ${onTick(pr, tk).toFixed(tickDecimals(tk))} (tick ${tk})`}</span>
         {fields && errs.price && price !== "" && <span className={css.fieldErr}>{errs.price}</span>}
 
         <label htmlFor="tk-amount">Amount <span className="muted">USD</span></label>

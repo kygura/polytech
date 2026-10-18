@@ -50,6 +50,13 @@
       "when": 1792239359045,
       "tag": "0006_stale_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792330349570,
+      "tag": "0007_woozy_black_tom",
+      "breakpoints": true
     }
   ]
 }

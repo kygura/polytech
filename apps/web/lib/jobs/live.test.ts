@@ -2,7 +2,7 @@ import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Exchange } from "@pm/pm";
 import { desc, eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { decide, deps, downgradeOn, expireProposals, exposureOf, kill, orderUi, paperBook, propose, read, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
 process.env.PGLITE_DIR = "memory://";
@@ -511,5 +511,50 @@ describe("live L3/L4 auto (fake exchange)", () => {
     expect(g[1]).toMatchObject({ gate: "L2->L3", approvedTrades: 1, met: false });
     expect((g[1] as { avgSlippageC: number }).avgSlippageC).toEqual(expect.any(Number));
     expect(g[2]).toMatchObject({ gate: "L3->L4", liveTrades: 2, realizedEdge30dC: 0 });
+  });
+
+  describe("per-market tick", () => {
+    const grid = (x: number, tick: number) => Math.abs(x / tick - Math.round(x / tick)) <= 1e-6;
+    const setTick = (tick: number | null) => d.db.update(s.markets).set({ tickSize: tick });
+    afterAll(async () => void (await setTick(null)));
+
+    it("sweep upsert keeps the stored tick_size when the new one is null, overwrites when set", async () => {
+      await setTick(0.001);
+      const known = new Set((await d.db.select({ c: s.markets.conditionId }).from(s.markets)).map((r) => r.c));
+      const listed = (await d.pm.listMarkets()).filter((m) => known.has(m.condition_id));
+      const sweep = (f: (i: number) => number | undefined) => sweepUniverse({ ...d, pm: { ...d.pm, listMarkets: async () => listed.map((m, i) => ({ ...m, tick_size: f(i) })) } });
+      await sweep(() => undefined);
+      expect((await d.db.select({ x: s.markets.tickSize }).from(s.markets)).every((r) => r.x === 0.001)).toBe(true);
+      await sweep((i) => (i === 0 ? 0.05 : undefined));
+      const rows = await d.db.select({ c: s.markets.conditionId, x: s.markets.tickSize }).from(s.markets);
+      expect(rows.find((r) => r.c === listed[0]!.condition_id)!.x).toBe(0.05);
+      expect(rows.filter((r) => r.x === 0.001).length).toBe(rows.length - 1);
+    });
+
+    for (const tick of [0.01, 0.001]) {
+      it(`propose and exit limits sit on a ${tick} tick`, async () => {
+        await setTick(tick);
+        const held = await heldKilled(); // proposes (entry) at this tick
+        await d.db.update(s.proposals).set({ status: "expired" }).where(eq(s.proposals.kind, "entry"));
+        await propose(d);
+        const entries = (await d.db.select().from(s.proposals).where(eq(s.proposals.kind, "entry"))).filter((x) => x.status === "pending");
+        expect(entries.length + (await exits()).length).toBeGreaterThan(0);
+        for (const x of [...entries, ...(await exits())]) expect(grid(x.limitPrice, tick), `${x.kind} ${x.limitPrice}`).toBe(true);
+        expect((await exits())[0]!.tokenId).toBe(held.tokenId);
+      });
+
+      it(`approve-time recheck: an off-${tick}-tick limit expires PRICE_MOVED, an on-tick one sends`, async () => {
+        await setTick(tick);
+        await reset();
+        await setMode(d, "L2", "test");
+        await propose(d);
+        const [a, b] = await pending();
+        const before = places;
+        await d.db.update(s.proposals).set({ limitPrice: a!.limitPrice - tick / 2 }).where(eq(s.proposals.id, a!.id));
+        expect(await decide(d, a!.id, "approve", "web")).toEqual({ ok: true, state: "expired", reason: "PRICE_MOVED" });
+        expect(places).toBe(before);
+        expect(await decide(d, b!.id, "approve", "web")).toMatchObject({ ok: true, state: "sent" });
+      });
+    }
   });
 });
