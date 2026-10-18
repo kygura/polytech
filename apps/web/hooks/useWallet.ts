@@ -1,6 +1,7 @@
 "use client";
 import type { ClobExchange } from "@pm/pm/exchange";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { getAddress } from "viem";
 import { visitorExchange } from "../lib/visitor/exchange";
 import { connectWallet, ensurePolygon, injected, resolveFunder, signerFor, watchWallet, type Funder } from "../lib/visitor/wallet";
 import type { Clob } from "./useClob";
@@ -46,6 +47,9 @@ export function useWalletConnection(): Wallet {
     if (n !== seq.current) return;
     setConn({ address, funder, exchange: visitorExchange(signer, address, funder) });
     setStatus("connected");
+    // The account may have switched while resolving the funder: follow the wallet's current one.
+    const cur = ((await p.request({ method: "eth_accounts" }).catch(() => [])) as string[])[0];
+    if (cur && getAddress(cur) !== address && n === seq.current) await open(getAddress(cur));
   }, []);
 
   const disconnect = useCallback(() => {
