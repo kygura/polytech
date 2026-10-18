@@ -1,4 +1,4 @@
-import type { SecureClient } from "@polymarket/client";
+import type { SecureClient, Signer } from "@polymarket/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { bucket } from "./bucket";
@@ -68,23 +68,60 @@ const side = (s: string): Side => (s.toUpperCase() === "SELL" ? "SELL" : "BUY");
 // ponytail: fee = bps/1e4 * min(p, 1-p) * shares (legacy CLOB formula); unverified for V2, reconcile vs balance if it drifts
 const fee = (bps: unknown, p: number, n: number) => ((num(bps) || 0) / 1e4) * Math.min(p, 1 - p) * n;
 
-/** Real CLOB exchange. The key lives only in this closure; nothing it throws contains key or API secrets. */
-export function clobExchange(env: Record<string, string | undefined> = process.env): Exchange & { wallet(): Promise<string> } {
+/**
+ * What clobExchange signs with. `wallet` picks the account/funder and, through the SDK, the signature type:
+ * the signer address = EOA (0); a Poly Proxy / Safe derived from the signer = 1 / 2; undefined = the signer's Deposit Wallet (3).
+ */
+export type ClobSigner = {
+  signer: Signer | (() => Promise<Signer>);
+  /** Signer EOA address (what `address()` returns). */
+  address: string;
+  wallet?: string;
+  /** Extra strings scrubbed from every error (e.g. the raw key). API secrets are added automatically. */
+  secrets?: string[];
+};
+export type ClobExchange = Exchange & {
+  wallet(): Promise<string>;
+  /** True when the account wallet holds every trading allowance the venue needs. */
+  approved(): Promise<boolean>;
+  /** Grants the missing allowances. EOA: one on-chain tx each, paid in POL by the signer. Other wallets: relayer (needs a relayer/builder key). */
+  setupApprovals(): Promise<void>;
+};
+
+const isSigner = (x: ClobSigner | Record<string, string | undefined>): x is ClobSigner => typeof x.signer === "object" || typeof x.signer === "function";
+
+/** Env (PM_PRIVATE_KEY, PM_SIGNATURE_TYPE) -> ClobSigner. Throws zod messages only, never the input. */
+function envSigner(env: Record<string, string | undefined>): ClobSigner {
   const parsed = Env.safeParse({ PM_PRIVATE_KEY: env.PM_PRIVATE_KEY || undefined, PM_SIGNATURE_TYPE: env.PM_SIGNATURE_TYPE || undefined });
-  if (!parsed.success) throw new Error(parsed.error.issues.map((i) => i.message).join("; ")); // zod messages only, never the input
+  if (!parsed.success) throw new Error(parsed.error.issues.map((i) => i.message).join("; "));
   const bare = parsed.data.PM_PRIVATE_KEY.replace(/^0x/, "");
   const pk = `0x${bare}` as const;
-  const mode = parsed.data.PM_SIGNATURE_TYPE;
-  const signerAddress = privateKeyToAccount(pk).address;
-  const secrets: (string | undefined)[] = [bare];
+  const address = privateKeyToAccount(pk).address;
+  return {
+    signer: async () => (await import("@polymarket/client/viem")).privateKey(pk),
+    address,
+    wallet: parsed.data.PM_SIGNATURE_TYPE === "eoa" ? address : undefined,
+    secrets: [bare],
+  };
+}
+
+/**
+ * Real CLOB exchange, from env (operator key) or from any SDK signer (browser wallet, browser trading key).
+ * The signer lives only in this closure; nothing it throws contains key or API secrets.
+ */
+export function clobExchange(src: ClobSigner | Record<string, string | undefined> = process.env): ClobExchange {
+  const acct = isSigner(src) ? src : envSigner(src);
+  const signerAddress = acct.address;
+  const secrets: (string | undefined)[] = [...(acct.secrets ?? [])];
   const take = bucket(500, 10_000); // ponytail: one bucket for all authed calls, well under POST /order 3500/10s
   let client: Promise<SecureClient> | undefined;
 
   // Credentials derived lazily, once per instance; a failed derivation is retried on the next call.
   const c = (): Promise<SecureClient> =>
     (client ??= (async () => {
-      const [{ createSecureClient }, { privateKey }] = await Promise.all([import("@polymarket/client"), import("@polymarket/client/viem")]);
-      const cl = await createSecureClient({ signer: privateKey(pk), wallet: mode === "eoa" ? signerAddress : undefined });
+      const { createSecureClient } = await import("@polymarket/client");
+      const signer = typeof acct.signer === "function" ? await acct.signer() : acct.signer;
+      const cl = await createSecureClient({ signer, wallet: acct.wallet });
       secrets.push(cl.credentials.secret, cl.credentials.passphrase, cl.credentials.key);
       return cl;
     })().catch((e) => {
@@ -111,6 +148,8 @@ export function clobExchange(env: Record<string, string | undefined> = process.e
   return {
     address: () => signerAddress,
     wallet: () => call(async (cl) => cl.account.wallet as string),
+    approved: () => call(async (cl) => (await cl.fetchTradingApprovalsState()).isFullyApproved),
+    setupApprovals: () => call((cl) => cl.setupTradingApprovals()),
     async place(o) {
       validateOrder(o);
       const { OrderSide } = await import("@polymarket/client");

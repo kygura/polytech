@@ -117,6 +117,16 @@ describe("key safety", () => {
     expect(`${JSON.stringify(ex)} ${String(ex)} ${Object.values(ex).join(" ")}`).not.toMatch(/ab12ab12/);
   });
 
+  it("clobExchange(signer): address from the signer, signer untouched until a call, bad order refused before the SDK", async () => {
+    let touched = 0;
+    const ex = clobExchange({ signer: async () => { touched++; throw new Error("no network in tests"); }, address: "0x1111111111111111111111111111111111111111" });
+    expect(ex.address()).toBe("0x1111111111111111111111111111111111111111");
+    await expect(ex.place(order({ price: 2 }))).rejects.toThrow(/price/);
+    expect(touched).toBe(0);
+    await expect(ex.cancelAll()).rejects.toThrow(/no network in tests/);
+    expect(touched).toBe(1);
+  });
+
   it("exchangeFromEnv: null without key or in fixtures mode", () => {
     expect(exchangeFromEnv({})).toBeNull();
     expect(exchangeFromEnv({ PM_PRIVATE_KEY: "" })).toBeNull();
