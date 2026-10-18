@@ -1,0 +1,71 @@
+/* Visitor surface (DESIGN 10). Shell layout comes from Shell.module.css; only the visitor-specific bits live here. */
+
+.tagline { color: var(--muted); font-family: var(--font-mono); margin-left: calc(-1 * var(--sp-3)); }
+.signin { color: var(--muted); font-size: var(--fs-sm); font-family: var(--font-ui); }
+.footer { padding: var(--sp-2) var(--sp-3) var(--sp-4); color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs); font-family: var(--font-ui); margin: 0; }
+
+.connect { border-color: var(--accent); }
+.chip { font-family: var(--font-mono); white-space: nowrap; }
+.menu { display: grid; gap: var(--sp-3); font-family: var(--font-ui); }
+.menu code { font-family: var(--font-mono); word-break: break-all; }
+.row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.headErr { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+
+/* watchlist */
+.bar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); flex-wrap: wrap; }
+.barRight { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.sortSel { display: none; }
+.cards { display: none; list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.cards li + li { border-top: 1px solid var(--border); }
+.cards a { display: grid; gap: 2px; padding: var(--sp-2) var(--sp-3); color: var(--text); }
+.cards a:hover { text-decoration: none; background: var(--surface-2); }
+.clamp { font-family: var(--font-ui); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 719px) {
+  .tagline { display: none; }
+  .bar { flex-direction: column; align-items: stretch; }
+  .barRight { margin-left: 0; }
+  .sortSel { display: block; }
+  .tableWrap { display: none; }
+  .cards { display: block; }
+}
+
+/* detail: two columns; one column puts the ticket right under the market header */
+.back { display: inline-block; margin-bottom: var(--sp-2); font-family: var(--font-ui); }
+.grid { display: grid; grid-template-columns: 3fr 2fr; gap: var(--sp-3); align-items: start; }
+.col { display: grid; gap: var(--sp-3); min-width: 0; }
+@media (max-width: 1100px) {
+  .grid { display: flex; flex-direction: column; }
+  .col { display: contents; }
+  .grid > * > * { order: 3; }
+  .grid .first { order: 1; }
+  .grid .second { order: 2; }
+}
+.strip { padding: var(--sp-2) var(--sp-3); font-family: var(--font-mono); }
+.rules { font-family: var(--font-ui); font-size: var(--fs-sm); line-height: var(--lh-sm); padding: var(--sp-3); margin: 0; white-space: pre-wrap; }
+.rulesClamp { display: -webkit-box; -webkit-line-clamp: 6; line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.linkBtn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-family: var(--font-ui); }
+.linkBtn:hover:not(:disabled) { background: none; text-decoration: underline; }
+
+/* ticket */
+.ticketNeg { border-left: 3px solid var(--neg); }
+.ticketWarn { border-left: 3px solid var(--warn); }
+.form { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-3); align-items: center; padding: var(--sp-3); }
+.form > label, .form > .lbl { color: var(--muted); font-family: var(--font-ui); }
+.form input { width: 100%; max-width: 160px; }
+.hint { grid-column: 2; color: var(--muted); font-size: var(--fs-sm); margin-top: calc(-1 * var(--sp-1)); }
+.fieldErr { grid-column: 2; color: var(--neg); font-size: var(--fs-sm); margin-top: calc(-1 * var(--sp-1)); }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
+.seg button[aria-checked="true"] { background: var(--border); font-weight: 600; }
+.foot { display: grid; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-3); font-family: var(--font-ui); }
+.foot p { margin: 0; }
+.primary { height: 32px; font-family: var(--font-mono); display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.live { border-color: var(--mode-2); }
+
+/* account */
+.acct { padding: var(--sp-3); display: grid; gap: var(--sp-3); }
+.acct > p { margin: 0; font-family: var(--font-ui); }
+.summary { cursor: pointer; padding: var(--sp-2) var(--sp-3); font-weight: 600; }
+.sub { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
