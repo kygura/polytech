@@ -17,10 +17,13 @@ const statusOf = (m: PmMarket) => (!m.open ? "closed" : m.in_dispute ? "disputed
 export async function sweepUniverse(d: Deps) {
   return withLock(d, "sweep", 10 * 60_000, async () => {
     // markets only: each carries its event id and neg-risk group; the events walk is ~1.7 GB of nested markets (OOM on Vercel)
-    const byCond = new Map<string, PmMarket>((await d.pm.listMarkets()).map((m) => [m.condition_id, m]));
+    // and only the screenable slice: ~250k markets are open, ~26k have liquidity >= minLiquidityUsd and resolve within minDays..maxDays (server-side filters)
+    const { minDays, maxDays } = d.settings.filters, liquidityMin = d.settings.universe.minLiquidityUsd, now = d.now();
+    const endMin = now + minDays * 864e5, endMax = now + maxDays * 864e5;
+    const byCond = new Map<string, PmMarket>((await d.pm.listMarkets({ liquidityMin, endDateMin: new Date(endMin).toISOString(), endDateMax: new Date(endMax).toISOString() })).map((m) => [m.condition_id, m]));
     if (!byCond.size) return { markets: 0, newMarkets: 0, feesFetched: 0, closed: 0 };
 
-    const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status }).from(s.markets)).map((r) => [r.id, r]));
+    const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status, end: s.markets.endDate }).from(s.markets)).map((r) => [r.id, r]));
     const rows = [...byCond.values()].map((m): typeof s.markets.$inferInsert => ({
       conditionId: m.condition_id,
       eventId: m.event_id ?? null,
@@ -62,16 +65,23 @@ export async function sweepUniverse(d: Deps) {
 
     // open in db but gone from the open universe => closed (calibrateNightly decides if it resolved)
     // a truncated listing would mass-close live markets: skip when far fewer came back than we know are open
-    const knownOpen = [...known].filter(([, r]) => OPEN.includes(r.status));
+    // the listing is filtered: a missing market is closed only if its end date passed, or it sits inside the queried range (endMin..endMax) and could have been returned.
+    // Ending soon (now..endMin), later, or undated fall out by the filter, not by closing, so they stay open. ponytail: a liquidity drop below the floor closes early; the upsert reopens it when it returns.
+    const knownOpen = [...known].filter(([, r]) => {
+      const end = r.end?.getTime();
+      return OPEN.includes(r.status) && end != null && (end < now || (end >= endMin && end <= endMax));
+    });
     // truncated listing = drops >10% vs the previous sweep's listing (not vs db open count, which a real mass resolution would lock out).
     // A shrink is honoured (close + new baseline) only after 3 consecutive shrunken sweeps; a normal sweep resets the counter.
-    const prev = await d.kv.get<number>("sweep:listing");
+    // baselines are keyed by the filter: a changed filter returns a different universe size and must start fresh, not look truncated
+    const q = `${liquidityMin}:${minDays}:${maxDays}`, listingKey = `sweep:listing:${q}`, shrinkKey = `sweep:shrink:${q}`;
+    const prev = await d.kv.get<number>(listingKey);
     const shrunk = prev != null && byCond.size < 0.9 * prev;
-    const streak = shrunk ? ((await d.kv.get<number>("sweep:shrink")) ?? 0) + 1 : 0;
+    const streak = shrunk ? ((await d.kv.get<number>(shrinkKey)) ?? 0) + 1 : 0;
     const truncated = shrunk && streak < 3;
     if (truncated) console.warn(`sweep: listing truncated (${byCond.size} vs previous ${prev}, ${streak}/3), skipping close`);
-    await d.kv.set("sweep:shrink", truncated ? streak : 0);
-    if (!truncated) await d.kv.set("sweep:listing", byCond.size);
+    await d.kv.set(shrinkKey, truncated ? streak : 0);
+    if (!truncated) await d.kv.set(listingKey, byCond.size);
     const gone = truncated ? [] : knownOpen.filter(([id]) => !byCond.has(id)).map(([id]) => id);
     for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
 

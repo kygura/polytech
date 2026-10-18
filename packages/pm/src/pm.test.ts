@@ -63,6 +63,12 @@ describe("pagination", () => {
     expect(f).toHaveBeenCalledTimes(3);
     expect(String(f.mock.calls[0]![0])).toContain("closed=false");
   });
+  it("sends the server-side universe filters", async () => {
+    const f = vi.fn(async () => json({ markets: [] }));
+    await createPm({ fixtures: false, fetch: f as never }).listMarkets({ liquidityMin: 1000, endDateMin: "2026-01-03T00:00:00.000Z", endDateMax: "2026-05-01T00:00:00.000Z" });
+    const q = new URL(String((f.mock.calls[0] as unknown[])[0])).searchParams;
+    expect([q.get("closed"), q.get("liquidity_num_min"), q.get("end_date_min"), q.get("end_date_max")]).toEqual(["false", "1000", "2026-01-03T00:00:00.000Z", "2026-05-01T00:00:00.000Z"]);
+  });
   it("stops on a repeated cursor (API quirk)", async () => {
     const f = vi.fn(async () => json({ markets: [{ id: "1", conditionId: "0x1", question: "q" }], next_cursor: "same" }));
     expect(await createPm({ fixtures: false, fetch: f as never }).listMarkets()).toHaveLength(2);

@@ -7,6 +7,7 @@ import { schema as s, type Db } from "@pm/db";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { chunks, feeOf, groupBy, toMarket, toSnap, withLock, type Deps } from "./deps";
 import { publish } from "./events";
+import type { AppSettings } from "./settings";
 
 const OPEN = ["active", "disputed", "not_accepting"];
 
@@ -104,6 +105,9 @@ export function detectStructural(
   return out;
 }
 
+export const smallCapTooBusy = (tier: Tier, vol24h: number, structural: boolean, st: Pick<AppSettings, "universe">) =>
+  tier === "small-cap" && !structural && vol24h > st.universe.smallCapMaxVol24hUsd;
+
 export async function screenAll(d: Deps) {
   return withLock(d, "screen", 10 * 60_000, async () => {
     const now = d.now(), st = d.settings;
@@ -137,17 +141,18 @@ export async function screenAll(d: Deps) {
     for (const f of fresh)
       await d.db.insert(s.rrCache).values(f).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: f.r, detail: f.detail } });
 
-    const out = todo.map(({ m, snap }) => {
+    const out = todo.flatMap(({ m, snap }) => {
       const sc = screen({
         market: m, snap: toSnap(snap), R: R.get(m.conditionId)!, structural: structural.has(m.conditionId), settings: st, now,
         crowd: { top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }, // ponytail: comment skew not wired
       });
       const d1 = structural.get(m.conditionId);
-      return {
+      if (smallCapTooBusy(sc.tier, snap.vol24h ?? 0, !!d1, st)) return []; // busy small-cap markets are already efficient; size tier and structural legs exempt
+      return [{
         conditionId: m.conditionId, ts: new Date(now), r: sc.R, i: sc.I, l: sc.L, t: sc.T, c: sc.C,
         priority: alive.has(m.conditionId) ? sc.priority : 0, // structural-only legs fail pass 1: never shortlisted for research
         tier: sc.tier, structuralFlag: sc.structural, structuralDetail: d1 ?? null,
-      } satisfies typeof s.screens.$inferInsert;
+      } satisfies typeof s.screens.$inferInsert];
     });
     for (const c of chunks(out, 200)) await d.db.insert(s.screens).values(c);
 

@@ -10,6 +10,7 @@ export const AppSettingsSchema = z.strictObject({
   filters: z.strictObject({
     minDays: nonneg, maxDays: nonneg, minDepthUsd: nonneg, depthCents: nonneg, excludedCategories: z.array(z.string()),
   }),
+  universe: z.strictObject({ minLiquidityUsd: nonneg, smallCapMaxVol24hUsd: nonneg }), // minLiquidityUsd: server-side sweep filter; small-cap rows above the vol24h ceiling are not screened
   sizeTargets: z.strictObject({ smallCap: nonneg, size: nonneg }),
   slippageCents: nonneg,
   cCoef: nonneg,
@@ -37,6 +38,7 @@ export type AppSettings = Settings & z.infer<typeof AppSettingsSchema>;
 // Placeholder limit values (SPEC leaves defaults open): derived from B=1000 and capFrac 0.05.
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   ...DEFAULT_SETTINGS,
+  universe: { minLiquidityUsd: 1000, smallCapMaxVol24hUsd: 50_000 },
   budget: { maxPodsPerDay: 40, maxConcurrentSandboxes: 5, sandboxTimeoutMin: 10, exaCallsPerPod: 10, dailySpendCapUsd: 50 },
   models: {},
   limits: {

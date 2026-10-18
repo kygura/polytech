@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectStructural } from "./screen";
+import { detectStructural, smallCapTooBusy } from "./screen";
 
 type Rows = Parameters<typeof detectStructural>[0];
 const row = (id: string, o: { q?: string; end?: number; group?: string; bid: number; ask: number }) => ({
@@ -28,5 +28,15 @@ describe("detectStructural", () => {
     ];
     expect(detectStructural(mk(Date.parse("2027-01-01")), 50).get("m1")).toMatchObject({ type: "mirror" });
     expect(detectStructural(mk(Date.parse("2028-01-01")), 50).size).toBe(0);
+  });
+});
+
+describe("smallCapTooBusy", () => {
+  const st = { universe: { minLiquidityUsd: 1000, smallCapMaxVol24hUsd: 50_000 } };
+  it("drops busy small-caps; size tier, structural legs and quiet markets stay", () => {
+    expect(smallCapTooBusy("small-cap", 60_000, false, st)).toBe(true);
+    expect(smallCapTooBusy("small-cap", 50_000, false, st)).toBe(false);
+    expect(smallCapTooBusy("size", 60_000, false, st)).toBe(false);
+    expect(smallCapTooBusy("small-cap", 60_000, true, st)).toBe(false);
   });
 });

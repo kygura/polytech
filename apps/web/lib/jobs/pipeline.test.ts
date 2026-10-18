@@ -207,6 +207,19 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect((await sweepUniverse(d3) as { closed: number }).closed).toBeGreaterThan(0); // 3rd consecutive: honoured
   });
 
+  it("missing from the filtered listing: closed only if past or inside the queried end window", async () => {
+    const [base] = await d.db.select().from(s.markets).limit(1);
+    const { minDays, maxDays } = d.settings.filters, day = 864e5, now = t;
+    const mk = (k: string, end: number) => ({ ...base!, conditionId: cid("gone-" + k), pmId: "gone-" + k, endDate: new Date(end), status: "active" as const });
+    const rows = [mk("soon", now + (minDays / 2) * day), mk("window", now + ((minDays + maxDays) / 2) * day), mk("past", now - day)];
+    await d.db.insert(s.markets).values(rows);
+    await sweepUniverse(d);
+    const status = async (k: string) => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, cid("gone-" + k))))[0]!.status;
+    expect(await status("soon")).toBe("active");
+    expect(await status("window")).toBe("closed");
+    expect(await status("past")).toBe("closed");
+  });
+
   it("no candidates: 10 min old snapshots keep L1, 20 min downgrade", async () => {
     await setMode(d, "L1", "test");
     const cats = (await d.db.select({ c: s.markets.category }).from(s.markets)).map((x) => x.c ?? "");

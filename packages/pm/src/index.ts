@@ -97,8 +97,8 @@ export function createPm(opts: PmOptions = {}) {
   return {
     raw,
     // Gamma
-    listMarkets: (o: { closed?: boolean; limit?: number } = {}): Promise<Market[]> =>
-      keyset("/markets/keyset", "markets", { closed: o.closed ?? false, limit: o.limit }, (x) => normMarket(x)),
+    listMarkets: (o: { closed?: boolean; limit?: number; liquidityMin?: number; endDateMin?: string; endDateMax?: string } = {}): Promise<Market[]> =>
+      keyset("/markets/keyset", "markets", { closed: o.closed ?? false, limit: o.limit, liquidity_num_min: o.liquidityMin, end_date_min: o.endDateMin, end_date_max: o.endDateMax }, (x) => normMarket(x)),
     listEvents: (o: { closed?: boolean; limit?: number } = {}): Promise<PmEvent[]> =>
       keyset("/events/keyset", "events", { closed: o.closed ?? false, limit: o.limit }, normEvent),
     market: async (id: string): Promise<Market | undefined> => normMarket(await raw("gamma", `/markets/${encodeURIComponent(id)}`)),
