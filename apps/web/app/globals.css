@@ -111,3 +111,47 @@ tbody tr:hover { background: var(--surface-2); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Trading terminal tokens (DESIGN 11.1). Scoped to .term only: nothing outside /trade changes. Dark is the default. */
+.term {
+  --t-bg: #0b0d10; --t-pane: #13161b; --t-pane-2: #1a1e25; --t-line: #232830; --t-line-2: #2f3540;
+  --t-text: #e4e7ec; --t-dim: #8b93a1; --t-faint: #555d6b;
+  --t-yes: #5b9dff; --t-yes-bg: rgb(91 157 255 / .14); --t-on-yes: #0b0d10;
+  --t-no: #ff9142; --t-no-bg: rgb(255 145 66 / .14); --t-on-no: #0b0d10;
+  --t-up: #4cc38a; --t-up-bg: rgb(76 195 138 / .13); --t-down: #f0616d; --t-down-bg: rgb(240 97 109 / .13);
+  --t-bid: var(--t-up); --t-bid-bg: var(--t-up-bg); --t-ask: var(--t-down); --t-ask-bg: var(--t-down-bg);
+  --t-focus: #9d8cff; --t-focus-bg: rgb(157 140 255 / .14); --t-tint: rgb(157 140 255 / .24);
+  --t-warn: #f5b544; --t-warn-bg: rgb(245 181 68 / .12);
+  --t-shadow: none;
+  --t-font-ui: var(--font-inter), Inter, system-ui, sans-serif; --t-font-num: var(--font-jbm), "JetBrains Mono", ui-monospace, monospace;
+  --t-fs-xs: 10.5px; --t-lh-xs: 14px; --t-fs-sm: 11.5px; --t-lh-sm: 16px; --t-fs-md: 12.5px; --t-lh-md: 18px;
+  --t-fs-lg: 16px; --t-lh-lg: 22px; --t-fs-xl: 22px; --t-lh-xl: 28px;
+  --t-sp-1: 2px; --t-sp-2: 4px; --t-sp-3: 6px; --t-sp-4: 8px; --t-sp-5: 12px; --t-sp-6: 16px;
+  --t-r-sm: 4px; --t-r-md: 6px; --t-r-lg: 8px;
+  --t-top-h: 44px; --t-ph-h: 34px; --t-row-h: 24px; --t-ladder-h: 22px; --t-tape-h: 19px; --t-input-h: 36px; --t-btn-h: 40px; --t-legend-h: 24px;
+  --t-tint-ms: 600ms;
+  color-scheme: dark;
+}
+:root[data-theme="light"] .term {
+  --t-bg: #eceef2; --t-pane: #ffffff; --t-pane-2: #f4f5f8; --t-line: #e1e4ea; --t-line-2: #cfd4dc;
+  --t-text: #161a20; --t-dim: #5d6573; --t-faint: #9aa1ad;
+  --t-yes: #1f64d6; --t-yes-bg: rgb(31 100 214 / .10); --t-on-yes: #ffffff;
+  --t-no: #c25400; --t-no-bg: rgb(194 84 0 / .10); --t-on-no: #ffffff;
+  --t-up: #0c8a5a; --t-up-bg: rgb(12 138 90 / .10); --t-down: #d0364a; --t-down-bg: rgb(208 54 74 / .09);
+  --t-focus: #5b45e0; --t-focus-bg: rgb(91 69 224 / .09); --t-tint: rgb(91 69 224 / .16);
+  --t-warn: #a86b00; --t-warn-bg: rgb(168 107 0 / .10);
+  --t-shadow: 0 1px 2px rgb(20 24 32 / .06);
+  color-scheme: light;
+}
+/* Shared pieces rendered inside the terminal (RegionStatus, ConnectButton) and the base elements, re-pointed at the terminal tokens. */
+.term { background: var(--t-bg); color: var(--t-text); font: 400 var(--t-fs-md) / var(--t-lh-md) var(--t-font-ui); }
+.term .pos { color: var(--t-up); } .term .neg { color: var(--t-down); } .term .warn { color: var(--t-warn); } .term .muted { color: var(--t-dim); }
+.term a { color: var(--t-focus); }
+.term :focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
+.term button { background: var(--t-pane-2); border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); color: var(--t-text); }
+.term button:hover:not(:disabled) { background: var(--t-line); }
+.term button:disabled { color: var(--t-faint); }
+.term input { background: transparent; border: 0; height: auto; padding: 0; }
+.term th { background: none; position: static; }
+.term tbody tr { border-top: 0; }
+.term tbody tr:hover { background: none; }

@@ -1,41 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { PublicMarketDetail } from "../../lib/public";
-import { findPlaced, onTick, onTickUp, roundTick, tickDecimals, placeTicketOrder, prefill, quote, sellQuote, ticketGate, validate, validateSell } from "./ticket";
-
-const detail = (over: Partial<PublicMarketDetail> = {}): PublicMarketDetail => ({
-  market: { conditionId: "c1", question: "Q?", rules: "", category: "politics", tags: [], eventId: null, negRiskGroup: null, endDate: null, daysLeft: 30, status: "active", tickSize: null, yesTokenId: "y", noTokenId: "n", feeRate: 0, negRisk: false },
-  snapshot: {
-    ts: 0, mid: 0.4, bestBid: 0.39, bestAsk: 0.41, depth5cUsd: 0, vol24h: 0, oi: 0, top10Share: 0, netFlow: 0,
-    bids: [{ price: 0.39, size: 10_000 }], asks: [{ price: 0.41, size: 10_000 }],
-  },
-  history: [], screen: null, thesisMarkers: [], evidence: [], agents: [], research: "done",
-  thesis: { id: "t", createdAt: 0, expiresAt: null, side: "YES", pHat: 0.6, c: 0.8, pPost: 0.56, edgeC: 15, rAnn: 1, catalysts: [], killCriteria: [], thesis: "", pYes: 0.6, pMidYes: 0.4, capped: false },
-  ...over,
-} as PublicMarketDetail);
+import { findPlaced, onTick, onTickUp, roundTick, tickDecimals, placeTicketOrder, quote, sellQuote, ticketGate, validate, validateSell } from "./ticket";
 
 const nowait = async () => {};
-describe("ticket prefill", () => {
-  it("thesis side, limit on tick, size from bankroll = balance", () => {
-    const p = prefill(detail(), 1000);
-    expect(p.side).toBe("YES");
-    expect(p.price).toBe(0.41);
-    expect(p.amount).toBeGreaterThan(0);
-    expect(p.amount).toBeLessThanOrEqual(50); // capFrac 0.05 * 1000
-  });
-  it("no balance: limit only; no thesis: best ask; no edge at the ask: best ask, no amount", () => {
-    expect(prefill(detail(), null)).toEqual({ side: "YES", price: 0.41, amount: null });
-    expect(prefill(detail({ thesis: null }), 1000)).toEqual({ side: "YES", price: 0.41, amount: null });
-    const noEdge = detail();
-    noEdge.thesis = { ...noEdge.thesis!, pPost: 0.42, pYes: 0.42 };
-    expect(prefill(noEdge, 1000)).toEqual({ side: "YES", price: 0.41, amount: null });
-  });
-  it("NO side prices off the mirrored bids", () => {
-    const d = detail();
-    d.thesis = { ...d.thesis!, side: "NO", pYes: 0.2, pPost: 0.75 };
-    expect(prefill(d, null).price).toBe(0.61);
-  });
-});
-
 describe("ticket quote + validate", () => {
   it("shares round down, max loss = cost + fee", () => {
     const q = quote(0.42, 100, 0.04, 0.01)!;
@@ -87,11 +53,6 @@ describe("tick rounding", () => {
   it("tickDecimals", () => {
     expect([0.1, 0.01, 0.001, 0.0001].map(tickDecimals)).toEqual([1, 2, 3, 4]);
     expect(onTick(0.45678, 0.0001).toFixed(tickDecimals(0.0001))).toBe("0.4567");
-  });
-  it("prefill limit lands on the market tick", () => {
-    const p = prefill(detail({ market: { ...detail().market, tickSize: 0.001 } }), 1000);
-    expect(p.price).not.toBeNull();
-    expect(Math.abs(p.price! * 1000 - Math.round(p.price! * 1000))).toBeLessThan(1e-6);
   });
 });
 

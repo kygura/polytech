@@ -747,7 +747,7 @@ Supersedes §10.2–§10.5 for `/trade` and `/trade/[id]` (SPEC "Trading termina
 
 ### 11.1 Tokens
 
-Scope: every token lives on the `.term` class (the terminal root element), never on `:root`, so nothing outside `/trade` changes. Dark is the `.term` default; light is `:root[data-theme="light"] .term`. Theme switching reuses the existing `data-theme` attribute, `useTheme()` and the root `THEME_SCRIPT` unchanged (stored choice, else `prefers-color-scheme`, else dark).
+Scope: every token lives on the `.term` class (the terminal root element), never on `:root`, so nothing outside `/trade` changes. Dark is the `.term` default; light is `:root[data-theme="light"] .term`. Theme switching reuses the existing `data-theme` attribute and `useTheme()`. The root `THEME_SCRIPT` resolves as before (stored choice, else `prefers-color-scheme`, else dark) except on terminal paths (`/trade`, `/trade/[id]`; one shared regex, `lib/terminalPath.ts`), where no stored choice means dark (planner decision). Leaving the terminal restores the normal resolution.
 
 Fonts: Inter (UI words) and JetBrains Mono (every number, price, size, time, address, key cap) via `next/font/google`, exposed as CSS variables and referenced only through `--t-font-ui` / `--t-font-num`. Numbers always use `font-variant-numeric: tabular-nums`.
 
@@ -861,14 +861,14 @@ Mouse equivalents exist for every key (click a ladder price = `L` + `⏎`). `Key
 Order of precedence for the submit button (first match wins):
 
 1. Feed not loaded (`feed == null`, status `loading`, or `error` with no data): Limit shows `—` and is disabled, tick shows `tick —`, Shares stays typable, button `Waiting for live book…` (spinner, disabled). Helper: `Prices and tick come from the live book. You can type shares now.` No book for the token: `No live book for this market.` and the button stays disabled.
-2. `ticketGate(...)` non-null: §10.4 labels and copy unchanged (`Connect wallet` outline in `--t-focus`; `geo_blocked` → pane border `--t-down`, inputs disabled, button `Trading blocked in your region`; `geo_failed` → border `--t-warn`; creds / allowance steps as today).
+2. `ticketGate(...)` non-null: §10.4 labels and copy unchanged (where the mockup copy differs, e.g. `Research above stays free to read.`, §10.4 wins; the allowance steps say "trading allowances" because the approvals also cover outcome tokens for SELL) (`Connect wallet` outline in `--t-focus`; `geo_blocked` → pane border `--t-down`, inputs disabled, button `Trading blocked in your region`; `geo_failed` → border `--t-warn`; creds / allowance steps as today).
 3. Phase machine (from TradeTicket, unchanged): `idle` → `Buy 500 YES at 41.2¢` filled with the outcome colour; armed → same label prefixed `Sign:` with a 2px `--t-focus` ring; `signing` → `Confirm in your wallet…`; `checking`; `open`/partial → `Cancel order` / `Cancel rest`; `filled`; `cancelled`; `unknown` → `Check open orders`; `error` → `Try again` with `Order failed: …` in `--t-down`.
 
 Tick rule: once `feed` has loaded, the ticket uses `feed.tickSize` for `onTick`, `validate`, nudges and display decimals (it overrides `market.tickSize`). Before that, submit is disabled. If `feed.tickSize` changes while a price is typed, re-round with `onTick` and show `Rounded to tick 0.1¢` under the field. `minOrderSize` (when non-null) is enforced: `Minimum order is 5 shares`.
 
 Sell: `S` enables a sell of the selected outcome's token, capped at the held shares from `clob.positions[tokenId]`. With no shares the Sell segment is disabled with visible text `No YES shares to sell`. Sell summary: `Proceeds`, `Fee (max)`; no `Max loss`/`Payout`. Sell needs a sell quote next to `quote()` in `ticket.ts` (proceeds = shares × price − taker fee); reuse `placeTicketOrder` with `side: "SELL"`.
 
-The price prefill when a market is selected: best ask for Buy, best bid for Sell, of the chosen outcome, from the feed. Field values survive feed polls; only a market switch or `New order` resets them.
+The price prefill when a market is selected: best ask for Buy, best bid for Sell, of the chosen outcome, from the feed. Field values survive feed polls; only a market switch or `New order` resets them. Changing side (`B`/`S`) or outcome (`Y`/`N`) re-prefills Limit from the new side/outcome book (intended: the old price belongs to the other book); Shares are kept. Side and outcome are locked while the ticket is not editable, and a market switch is blocked while an order is `signing`, `checking` or `unknown` (the list shows `Finish or check the current order first`).
 
 ### 11.7 Live updates, stale, error
 

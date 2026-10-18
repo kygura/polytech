@@ -10,7 +10,7 @@ export const inInput = (e: KeyboardEvent) => {
 const GO: Record<string, string> = { w: "/watchlist", f: "/fleet", c: "/calibration", p: "/paper", a: "/autonomy", s: "/settings" };
 
 /** g+<key> nav, `/` filter, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
-export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void; onTheme: () => void; go?: Record<string, string> }) {
+export function useGlobalKeys({ onHelp, onTheme, go = GO, canGo = () => true }: { onHelp: () => void; onTheme: () => void; go?: Record<string, string>; canGo?: () => boolean }) {
   const router = useRouter();
   useEffect(() => {
     let pendingG = 0;
@@ -23,7 +23,7 @@ export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void
       if (inInput(e)) return;
       const g = pendingG && Date.now() - pendingG < 800;
       pendingG = 0;
-      if (g && go[e.key]) { router.push(go[e.key]!); e.preventDefault(); return; }
+      if (g && go[e.key]) { if (canGo()) router.push(go[e.key]!); e.preventDefault(); return; }
       switch (e.key) {
         case "g": pendingG = Date.now(); break;
         case "/": document.querySelector<HTMLInputElement>("[data-filter]")?.focus(); e.preventDefault(); break;
@@ -33,7 +33,7 @@ export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [router, onHelp, onTheme, go]);
+  }, [router, onHelp, onTheme, go, canGo]);
 }
 
 export const SHORTCUTS: [string, string][] = [

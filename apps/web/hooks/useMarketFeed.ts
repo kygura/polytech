@@ -16,16 +16,23 @@ export function feedStatus(hasData: boolean, failing: boolean, ageMs: number): F
   return failing || ageMs > FEED_STALE_MS ? "stale" : "live";
 }
 
-/** Polls /api/public/markets/:id/feed every FEED_POLL_MS (paused while the tab is hidden). The payload is zod-parsed; an invalid one counts as a failure and the last good feed stays. */
-export function useMarketFeed(conditionId: string): { data: MarketFeed | null; status: FeedStatus; lastAt: number | null } {
-  const p = usePoll<unknown>(`/api/public/markets/${encodeURIComponent(conditionId)}/feed`, FEED_POLL_MS);
+export const feedUrl = (conditionId: string | null) => (conditionId ? `/api/public/markets/${encodeURIComponent(conditionId)}/feed` : null);
+/** The feed route answers 404 when the venue has no book for the token (502 = venue down, which is an error, not "no book"). */
+export const isNoBook = (status: number | null) => status === 404;
+
+/**
+ * Polls /api/public/markets/:id/feed every FEED_POLL_MS (paused while the tab is hidden). The payload is zod-parsed; an invalid one counts
+ * as a failure and the last good feed stays. `noBook` = the venue has no book for the token (HTTP 404). `conditionId` null = nothing polled.
+ */
+export function useMarketFeed(conditionId: string | null): { data: MarketFeed | null; status: FeedStatus; lastAt: number | null; noBook: boolean } {
+  const p = usePoll<unknown>(feedUrl(conditionId), FEED_POLL_MS);
   const good = useRef<{ id: string; at: number | null; data: MarketFeed } | null>(null);
   let bad = p.error != null;
-  if (p.data != null && p.lastAt !== good.current?.at) {
+  if (conditionId && p.data != null && p.lastAt !== good.current?.at) {
     const r = MarketFeedSchema.safeParse(p.data);
     if (r.success) good.current = { id: conditionId, at: p.lastAt, data: r.data };
     else bad = true;
   }
   const g = good.current?.id === conditionId ? good.current : null;
-  return { data: g?.data ?? null, status: feedStatus(g != null, bad, g ? feedAge(g.data, Date.now()) : 0), lastAt: g?.at ?? null };
+  return { data: g?.data ?? null, status: feedStatus(g != null, bad, g ? feedAge(g.data, Date.now()) : 0), lastAt: g?.at ?? null, noBook: isNoBook(p.status) };
 }

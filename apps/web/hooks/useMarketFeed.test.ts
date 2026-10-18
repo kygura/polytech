@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feedAge, feedStatus, FEED_STALE_MS } from "./useMarketFeed";
+import { feedAge, feedStatus, feedUrl, FEED_STALE_MS, isNoBook } from "./useMarketFeed";
 
 describe("feedStatus", () => {
   it("loading / error without data; live / stale with data", () => {
@@ -13,5 +13,10 @@ describe("feedStatus", () => {
     const now = 1_000_000, f = { at: now - 10_000 };
     expect(feedStatus(true, false, feedAge(f, now))).toBe("stale");
     expect(feedStatus(true, false, feedAge({ at: now - 1_000 }, now))).toBe("live");
+  });
+  it("no market selected: nothing polled; 404 = no book, 502 is an error", () => {
+    expect(feedUrl(null)).toBeNull();
+    expect(feedUrl("0xab")).toBe("/api/public/markets/0xab/feed");
+    expect([404, 502, 200, null].map(isNoBook)).toEqual([true, false, false, false]);
   });
 });
