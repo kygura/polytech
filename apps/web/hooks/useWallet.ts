@@ -43,7 +43,7 @@ export function useWalletConnection(): Wallet {
     const p = injected();
     if (!p) return;
     const n = ++seq.current;
-    const [{ signer }, funder] = await Promise.all([signerFor(p, address), resolveFunder(address).catch(() => { throw new Error(ACCOUNT_CHECK); })]);
+    const [{ signer }, funder] = await Promise.all([signerFor(p, address), resolveFunder(address).catch((e) => { console.warn("resolveFunder failed", e); throw new Error(ACCOUNT_CHECK); })]);
     if (n !== seq.current) return;
     setConn({ address, funder, exchange: visitorExchange(signer, address, funder) });
     setStatus("connected");
