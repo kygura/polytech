@@ -9,8 +9,8 @@ export const inInput = (e: KeyboardEvent) => {
 
 const GO: Record<string, string> = { w: "/watchlist", f: "/fleet", r: "/research", c: "/calibration", p: "/paper", a: "/autonomy", s: "/settings" };
 
-/** g+<key> nav, `/` find market, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
-export function useGlobalKeys({ onHelp, onTheme, onSearch, go = GO }: { onHelp: () => void; onTheme: () => void; onSearch?: () => void; go?: Record<string, string> }) {
+/** g+<key> nav, `/` find market, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a); `canGo` can veto g-navigation. */
+export function useGlobalKeys({ onHelp, onTheme, onSearch, go = GO, canGo = () => true }: { onHelp: () => void; onTheme: () => void; onSearch?: () => void; go?: Record<string, string>; canGo?: () => boolean }) {
   const router = useRouter();
   useEffect(() => {
     let pendingG = 0;
@@ -24,7 +24,7 @@ export function useGlobalKeys({ onHelp, onTheme, onSearch, go = GO }: { onHelp: 
       if (inInput(e)) return;
       const g = pendingG && Date.now() - pendingG < 800;
       pendingG = 0;
-      if (g && go[e.key]) { router.push(go[e.key]!); e.preventDefault(); return; }
+      if (g && go[e.key]) { if (canGo()) router.push(go[e.key]!); e.preventDefault(); return; }
       switch (e.key) {
         case "g": pendingG = Date.now(); break;
         case "/": if (onSearch) { onSearch(); e.preventDefault(); } break;
@@ -34,7 +34,7 @@ export function useGlobalKeys({ onHelp, onTheme, onSearch, go = GO }: { onHelp: 
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [router, onHelp, onTheme, onSearch, go]);
+  }, [router, onHelp, onTheme, onSearch, go, canGo]);
 }
 
 export const SHORTCUTS: [string, string][] = [

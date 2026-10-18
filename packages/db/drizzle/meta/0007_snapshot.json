@@ -1,5 +1,5 @@
 {
-  "id": "08532577-9508-402a-84a9-95fe57b2e636",
+  "id": "71857ad6-6029-4b54-be27-7cb8994f356d",
   "prevId": "6ba72849-b6ff-4b61-a002-08b84a072d8b",
   "version": "7",
   "dialect": "postgresql",
@@ -391,6 +391,12 @@
           "type": "double precision",
           "primaryKey": false,
           "notNull": false
+        },
+        "tick_size": {
+          "name": "tick_size",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -632,18 +638,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "profile_id": {
-          "name": "profile_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "steering": {
-          "name": "steering",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -1129,84 +1123,6 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.research_profiles": {
-      "name": "research_profiles",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "filter": {
-          "name": "filter",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "steering": {
-          "name": "steering",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "every_min": {
-          "name": "every_min",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_run_at": {
-          "name": "last_run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "research_profiles_name_unique": {
-          "name": "research_profiles_name_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "name"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

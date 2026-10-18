@@ -9,6 +9,8 @@ import { RegionContext, useRegionCheck } from "../../hooks/useRegion";
 import { useTheme } from "../../hooks/useTheme";
 import { useWallet, useWalletConnection, WalletContext } from "../../hooks/useWallet";
 import { Drawer } from "../Drawer";
+import { isTerminal, terminalNav } from "../../lib/terminalPath";
+import { TERMINAL_SHORTCUTS } from "../terminal/shortcuts";
 import shell from "../Shell.module.css";
 import ui from "../ui.module.css";
 import { RegionStatus } from "./RegionStatus";
@@ -21,6 +23,9 @@ const SHORTCUTS: [string, string][] = [
 ];
 
 export const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+// The terminal blocks g-navigation while an order is mid-send, and says why.
+const canGo = () => { if (terminalNav.locked) terminalNav.onBlocked(); return !terminalNav.locked; };
+export const DISCLAIMER = "Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions; you are responsible for complying with yours.";
 
 export function PublicShell({ children }: { children: ReactNode }) {
   const region = useRegionCheck();
@@ -29,15 +34,17 @@ export function PublicShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const sheet = useRef<HTMLDialogElement>(null);
   const { toggle } = useTheme();
-  useGlobalKeys({ onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []), onTheme: toggle, go: GO });
+  useGlobalKeys({ onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []), onTheme: toggle, go: GO, canGo });
 
   // The region check is only needed to trade: run it once a wallet is connected (the ticket also asks for it).
   const { ensure } = region;
   useEffect(() => { if (wallet.status === "connected") ensure(); }, [wallet.status, ensure]);
 
+  const terminal = isTerminal(path); // the terminal (DESIGN 11) brings its own top bar and disclaimer
   return (
     <RegionContext.Provider value={region}>
       <WalletContext.Provider value={{ ...wallet, clob }}>
+        {terminal ? children : <>
         <header className={shell.header}>
           <Link href="/trade" className={shell.wordmark} style={{ whiteSpace: "nowrap" }}>PM-EDGE</Link>
           <span className={css.tagline}>{"·"} research</span>
@@ -53,9 +60,10 @@ export function PublicShell({ children }: { children: ReactNode }) {
         </header>
         <main className={shell.main}>{children}</main>
         <PublicFooter />
+        </>}
         <dialog ref={sheet} className={shell.sheet} aria-label="keyboard shortcuts">
           <h2>Shortcuts</h2>
-          <table><tbody>{SHORTCUTS.map(([k, d]) => <tr key={k}><th scope="row">{k}</th><td className="ui muted">{d}</td></tr>)}</tbody></table>
+          <table><tbody>{(terminal ? TERMINAL_SHORTCUTS : SHORTCUTS).map(([k, d]) => <tr key={k}><th scope="row">{k}</th><td className="ui muted">{d}</td></tr>)}</tbody></table>
           <p className="muted ui" style={{ margin: "var(--sp-2) 0 0" }}>Esc closes</p>
         </dialog>
       </WalletContext.Provider>
@@ -66,7 +74,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
 export function PublicFooter() {
   return (
     <p className={css.footer}>
-      Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions; you are responsible for complying with yours.
+      {DISCLAIMER}
     </p>
   );
 }

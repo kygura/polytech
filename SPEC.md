@@ -305,3 +305,17 @@ The app is deployed at a public URL. Anonymous visitors see the LLM-scouted watc
 - A visitor with an injected wallet on Polygon, in a non-restricted jurisdiction, can derive CLOB credentials and place and cancel a limit order. This is verified by a person, because the build machine cannot reach Polymarket.
 - `bun install && bunx turbo typecheck test build` is green, including unit tests for the visitor autonomy decision function against a fake exchange.
 - Scouting test runs: research pods run on at least 8 live markets across at least 4 categories on the deployed instance, with results in `docs/research/scouting-test-runs.md`. Blocked until `ANTHROPIC_API_KEY` is provided.
+
+## Trading terminal redesign — public `/trade` (2026-10-18)
+
+The public `/trade` surface becomes a single-screen, multi-pane trading terminal. The operator app is out of scope and keeps its current look.
+
+**Panes (one screen, no route transition to trade):** market list/search, live order book with a clickable price ladder, price chart, live trade tape, keyboard-driven trade ticket, and the visitor's positions and open orders. Selecting a market swaps pane contents in place.
+
+**Live data:** the server proxies a live feed for the selected market (book levels, mid/last price, recent trades) through `@pm/pm`; clients never call Polymarket directly. Tick size comes from the market, not a hardcoded 0.01; the ticket rounds and validates to it.
+
+**Keyboard:** order entry, side switch, price nudge by tick, size entry, and submit are reachable without the mouse. Existing wallet connect, region gate and signing flow are reused unchanged.
+
+**Visual direction:** a new terminal design system chosen by the user from 2–3 rendered directions (dense, numeric-first, monospaced figures, dark-first). The chosen tokens supersede `DESIGN.md` §10 for `/trade`.
+
+**Done:** `bun run build`, `bun run typecheck`, `bun run test` green; `/trade` verified in a real browser (live book updates, keyboard order path reaches the signing step, correct tick on a 0.001 market) and checked for drift against the approved mockup.

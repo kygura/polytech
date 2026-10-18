@@ -13,7 +13,8 @@ import { takeSnapshots } from "./sweep";
 
 const MIN = 60_000;
 const TTL = 15 * MIN; // SPEC: proposals expire after 15 min (core proposalExpiry)
-const TICK = 0.01; // ponytail: per-market tick not stored (snapshots drop tick_size); 0.01 is the common tick, store it if 0.001 markets matter
+const tickOf = (m: Pick<Row, "tickSize">) => m.tickSize ?? 0.01;
+const onGrid = (x: number, tick: number) => Math.abs(x / tick - Math.round(x / tick)) <= 1e-6;
 const SHARE_STEP = 100; // shares rounded down to 0.01 so cost never exceeds the risk-checked sizeUsd
 
 type Proposal = typeof s.proposals.$inferSelect;
@@ -117,7 +118,7 @@ export async function propose(d: Deps) {
       if (!a.ok) { a.failed.forEach(skip); continue; }
       const { sz } = a;
       const tokenId = t.side === "YES" ? row.yesTokenId : row.noTokenId;
-      const limit = livelimitPrice({ vwap: sz.sizeUsd / sz.shares, pPost: sz.pPost, tick: TICK });
+      const limit = livelimitPrice({ vwap: sz.sizeUsd / sz.shares, pPost: sz.pPost, tick: tickOf(row) });
       if (!tokenId || limit == null) { skip("NO_LIMIT"); continue; }
       if (!gtdExpiry(t.expiresAt, new Date(now))) { skip("THESIS_EXPIRING"); continue; }
       const shares = Math.floor((sz.sizeUsd / limit) * SHARE_STEP) / SHARE_STEP;
@@ -222,7 +223,7 @@ async function proposeExits(d: Deps, top: Mode, skip: (r: string) => void) {
     const sn = snaps.get(p.conditionId), yes = p.tokenId === m.yesTokenId;
     const bid = yes ? sn?.bestBid : sn?.bestAsk == null ? null : 1 - sn.bestAsk;
     if (bid == null || sn?.mid == null) { skip("NO_BOOK"); continue; }
-    const limit = Math.max(TICK, Math.round(Math.floor(Math.round((bid - 0.02) / TICK * 1e6) / 1e6) * TICK * 1e8) / 1e8);
+    const tick = tickOf(m), limit = Math.max(tick, Math.round(Math.floor(Math.round((bid - 0.02) / tick * 1e6) / 1e6) * tick * 1e8) / 1e8);
     const shares = Math.floor(p.size * SHARE_STEP) / SHARE_STEP;
     if (!(shares > 0)) continue;
     const sizeUsd = shares * limit;
@@ -312,8 +313,9 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
   if (!exit) {
     const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
     const a = th ? assess(d, th, row, snap, now) : undefined;
-    if (!a?.ok || livelimitPrice({ vwap: p.limitPrice, pPost: a.sz.pPost, tick: TICK }) == null) return expire(d, p, "PRICE_MOVED");
+    if (!a?.ok || livelimitPrice({ vwap: p.limitPrice, pPost: a.sz.pPost, tick: tickOf(row) }) == null) return expire(d, p, "PRICE_MOVED");
   }
+  if (!onGrid(p.limitPrice, tickOf(row))) return expire(d, p, "PRICE_MOVED"); // the market tick changed since the proposal: the venue would reject the price
 
   // Risk re-check -> CAS -> order insert -> place under one lock: two approvals cannot both pass the same caps. Held => busy, proposal stays pending.
   const r = await withLock(d, "live-send", 60_000, async (): Promise<Decision> => {

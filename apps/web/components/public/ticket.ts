@@ -1,50 +1,26 @@
-// Pure TradeTicket math: prefill from the public detail, the quote lines, field validation. No React, no network.
-import { crowd, DEFAULT_SETTINGS, livelimitPrice, mirror, sizeTrade, takerFeePerShare, vwapForUsd, type Side } from "@pm/core";
+// Pure ticket math: tick rounding, the quote lines, field validation, the gate, the send. No React, no network.
+import { takerFeePerShare, type Side } from "@pm/core";
 import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
-import type { PublicMarketDetail } from "../../lib/public";
 
-export const TICK = 0.01; // ponytail: tick size is not stored server-side (public.ts); 0.01 is the common tick, 0.001 markets get a coarser limit
+export const DEFAULT_TICK = 0.01; // used until the live book states the tick
 const SHARE_STEP = 100; // shares rounded down to 0.01 so the cost never exceeds the amount
 
-export type Prefill = { side: Side; price: number | null; amount: number | null };
-
-/** Asks of the token bought for `side`, from the YES book. */
-export const sideAsks = (d: PublicMarketDetail, side: Side) => (!d.snapshot ? [] : side === "YES" ? d.snapshot.asks : mirror(d.snapshot.bids));
-export const bestAsk = (d: PublicMarketDetail, side: Side) => vwapForUsd(sideAsks(d, side), 0);
-
-/**
- * Thesis side; limit = livelimitPrice on that side's book (vwap of the sized order, or the best ask); amount = sizeTrade
- * with bankroll = balance and default settings. No thesis: YES at the best ask, no amount. No edge at the limit: best ask, no amount.
- */
-export function prefill(d: PublicMarketDetail, balance: number | null): Prefill {
-  const t = d.thesis, s = d.snapshot;
-  const side: Side = t?.side ?? "YES";
-  const best = bestAsk(d, side);
-  if (!t || !s || best == null) return { side, price: best, amount: null };
-  let sized: ReturnType<typeof sizeTrade> = null;
-  if (balance != null && balance > 0 && s.mid != null && t.pYes != null) {
-    const cr = crowd({ top10Share: s.top10Share ?? 0, netFlow: s.netFlow, skew: 0 });
-    try {
-      sized = sizeTrade({
-        bids: s.bids, asks: s.asks, pMid: s.mid, pHat: t.pYes, c: t.c, daysLeft: d.market.daysLeft, feeRate: d.market.feeRate,
-        crowdC: cr.c, crowdSide: cr.side, settings: { ...DEFAULT_SETTINGS, bankroll: balance },
-      });
-    } catch { sized = null; } // out-of-range input: no size suggestion
-    if (sized && (sized.side !== side || !(sized.sizeUsd > 0))) sized = null;
-  }
-  const limit = livelimitPrice({ vwap: sized ? sized.sizeUsd / sized.shares : best, pPost: sized?.pPost ?? t.pPost, tick: TICK });
-  if (limit == null) return { side, price: best, amount: null };
-  return { side, price: limit, amount: sized ? Math.floor(sized.sizeUsd * 100) / 100 : null };
-}
+/** Decimals needed to print a price on this tick (0.01 -> 2, 0.001 -> 3, 0.0001 -> 4). */
+export const tickDecimals = (tick: number) => Math.max(0, Math.min(8, Math.ceil(-Math.log10(tick) - 1e-9)));
 
 /** Limit rounded DOWN to the tick: a buy never pays more than typed, and the venue rejects off-tick prices. */
-export const onTick = (p: number, tick = TICK) => Math.round(Math.floor(p / tick + 1e-9) * tick * 1e6) / 1e6;
+export const onTick = (p: number, tick: number) => Math.round(Math.floor(p / tick + 1e-9) * tick * 1e6) / 1e6;
+
+/** Limit rounded UP to the tick: a sell never goes below the typed price. */
+export const onTickUp = (p: number, tick: number) => Math.round(Math.ceil(p / tick - 1e-9) * tick * 1e6) / 1e6;
+/** Side-aware: BUY rounds down, SELL rounds up. An on-tick price is unchanged. */
+export const roundTick = (side: "BUY" | "SELL", p: number, tick: number) => (side === "SELL" ? onTickUp(p, tick) : onTick(p, tick));
 
 export type Quote = { shares: number; cost: number; fee: number; maxLoss: number; payout: number };
 
 /** Buy `amount` USD at limit `price`: shares rounded down to 0.01; fee = taker fee (an upper bound: a resting maker fill pays none). */
-export function quote(rawPrice: number, amount: number, feeRate: number): Quote | null {
-  const price = onTick(rawPrice);
+export function quote(rawPrice: number, amount: number, feeRate: number, tick: number): Quote | null {
+  const price = onTick(rawPrice, tick);
   if (!(price > 0 && price < 1) || !(amount > 0)) return null;
   const shares = Math.floor((amount / price) * SHARE_STEP) / SHARE_STEP;
   if (!(shares > 0)) return null;
@@ -52,14 +28,46 @@ export function quote(rawPrice: number, amount: number, feeRate: number): Quote 
   return { shares, cost, fee, maxLoss: cost + fee, payout: shares };
 }
 
-export type FieldErrors = { price?: string; amount?: string };
+export type FieldErrors = { price?: string; amount?: string; shares?: string };
 
-export function validate(price: number | null, amount: number | null, balance: number | null, q: Quote | null): FieldErrors {
+const priceError = (price: number | null, tick: number, side: "BUY" | "SELL" = "BUY") => {
+  const lo = tick, hi = Math.round((1 - tick) * 1e6) / 1e6;
+  const r = price == null ? null : roundTick(side, price, tick);
+  return r == null || !(r >= lo && r <= hi) ? `Price must be between ${lo} and ${hi}` : undefined;
+};
+
+export function validate(price: number | null, amount: number | null, balance: number | null, q: Quote | null, tick: number): FieldErrors {
   const e: FieldErrors = {};
-  if (price == null || !(onTick(price) >= TICK && onTick(price) <= 1 - TICK)) e.price = `Price must be between ${TICK} and ${1 - TICK}`;
+  const pe = priceError(price, tick);
+  if (pe) e.price = pe;
   if (amount == null || !(amount > 0)) e.amount = "Enter an amount";
   else if (!q) e.amount = "Amount is too small for one share step";
   else if (balance != null && q.maxLoss > balance) e.amount = "Amount exceeds your balance";
+  return e;
+}
+
+export type SellQuote = { shares: number; proceeds: number; fee: number };
+
+/** Sell `shares` at limit `price`: shares rounded down to 0.01; price rounds UP to the tick; fee = taker fee (an upper bound); proceeds = shares x price - fee. */
+export function sellQuote(rawPrice: number, shares: number, feeRate: number, tick: number): SellQuote | null {
+  const price = onTickUp(rawPrice, tick);
+  if (!(price > 0 && price < 1) || !(shares > 0)) return null;
+  const n = Math.floor(shares * SHARE_STEP + 1e-9) / SHARE_STEP;
+  if (!(n > 0)) return null;
+  const fee = takerFeePerShare(feeRate, price) * n;
+  return { shares: n, proceeds: n * price - fee, fee };
+}
+
+/** Sell fields: shares > 0 and <= held of the outcome token, price on the tick range, minOrderSize when the venue states one. */
+export function validateSell(o: { price: number | null; shares: number | null; held: number; tick: number; outcome: Side; minShares?: number | null }): FieldErrors {
+  const e: FieldErrors = {};
+  const pe = priceError(o.price, o.tick, "SELL");
+  if (pe) e.price = pe;
+  if (!(o.held > 0)) e.shares = `No ${o.outcome} shares to sell`;
+  else if (o.shares == null || !(o.shares > 0)) e.shares = "Enter shares to sell";
+  else if (o.shares > o.held + 1e-9) e.shares = `You hold ${Math.floor(o.held * SHARE_STEP) / SHARE_STEP} ${o.outcome} shares`;
+  else if (Math.floor(o.shares * SHARE_STEP + 1e-9) / SHARE_STEP <= 0) e.shares = "Shares too small for one share step";
+  else if (o.minShares != null && Math.floor(o.shares * SHARE_STEP + 1e-9) / SHARE_STEP < o.minShares) e.shares = `Minimum order is ${o.minShares} shares`;
   return e;
 }
 

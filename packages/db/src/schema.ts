@@ -18,6 +18,7 @@ export const markets = pgTable("markets", {
   yesTokenId: text("yes_token_id"),
   noTokenId: text("no_token_id"),
   vol24h: dp("vol_24h"),
+  tickSize: dp("tick_size"), // null = unknown, callers fall back to 0.01
 });
 
 export const snapshots = pgTable("snapshots", {

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B Graphite Ladder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Direction B: Graphite Ladder. Inter for words, JetBrains Mono for every number. Floating panes, DOM ladder is the hero, violet = keyboard focus. */
+:root, :root[data-theme="dark"] {
+  --bg: #0b0d10; --pane: #13161b; --pane-2: #1a1e25; --line: #232830; --line-2: #2f3540;
+  --text: #e4e7ec; --dim: #8b93a1; --faint: #555d6b;
+  --yes: #2bc4a0; --yes-bg: rgb(43 196 160 / .13); --no: #ff6b88; --no-bg: rgb(255 107 136 / .13);
+  --focus: #9d8cff; --focus-bg: rgb(157 140 255 / .14); --tint: rgb(157 140 255 / .22);
+  --shadow: none;
+}
+:root[data-theme="light"] {
+  --bg: #eceef2; --pane: #ffffff; --pane-2: #f4f5f8; --line: #e1e4ea; --line-2: #cfd4dc;
+  --text: #161a20; --dim: #5d6573; --faint: #9aa1ad;
+  --yes: #0c8e70; --yes-bg: rgb(12 142 112 / .10); --no: #d23a5c; --no-bg: rgb(210 58 92 / .09);
+  --focus: #5b45e0; --focus-bg: rgb(91 69 224 / .09); --tint: rgb(91 69 224 / .16);
+  --shadow: 0 1px 2px rgb(20 24 32 / .06);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 400 13px/18px Inter, system-ui, sans-serif; }
+.m, td, .num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 12px; }
+.app { display: grid; height: 100vh; padding: 6px; gap: 6px; grid-template-columns: 264px 1fr 316px 312px; grid-template-rows: 44px 1fr 214px; }
+.pane { background: var(--pane); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; box-shadow: var(--shadow); }
+.ph { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12px; flex: none; }
+.ph .r { margin-left: auto; color: var(--dim); font-weight: 400; display: flex; gap: 6px; align-items: center; }
+.ph .t { color: var(--dim); font-weight: 500; height: 100%; display: flex; align-items: center; } .ph .t.on { color: var(--text); box-shadow: inset 0 -2px var(--focus); }
+kbd { font: 500 10px/14px "JetBrains Mono", monospace; padding: 0 4px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; color: var(--dim); background: var(--pane-2); }
+.yes { color: var(--yes); } .no { color: var(--no); } .dim { color: var(--dim); }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 0 10px; height: 24px; white-space: nowrap; text-align: right; }
+th { font: 500 11px Inter, sans-serif; color: var(--dim); height: 26px; }
+td:first-child, th:first-child { text-align: left; }
+/* header */
+.top { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: center; gap: 16px; padding: 0 12px; }
+.logo { font: 600 13px "JetBrains Mono", monospace; letter-spacing: .02em; }
+.logo i { font-style: normal; color: var(--focus); }
+.search { width: 360px; height: 30px; border: 1px solid var(--line-2); border-radius: 6px; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--dim); background: var(--pane-2); }
+.search kbd { margin-left: auto; }
+.top .sp { margin-left: auto; }
+.pill { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 6px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--yes); display: inline-block; }
+/* list */
+.list { grid-row: 2 / 4; }
+.cats { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.cats span { padding: 1px 8px; border-radius: 10px; color: var(--dim); font-size: 12px; border: 1px solid var(--line); } .cats .on { color: var(--text); border-color: var(--line-2); background: var(--pane-2); }
+.mrow { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.mrow .q { font-size: 12.5px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow .sub { color: var(--dim); font-size: 11px; }
+.mrow .px { text-align: right; font-weight: 500; }
+.mrow.sel { background: var(--focus-bg); box-shadow: inset 2px 0 var(--focus); }
+/* chart pane */
+.chartp { grid-column: 2; grid-row: 2; }
+.hero { display: flex; align-items: flex-end; gap: 28px; padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+.hero h1 { font-size: 16px; line-height: 21px; margin: 0 0 6px; font-weight: 600; }
+.hero .meta { color: var(--dim); font-size: 12px; }
+.out { display: flex; gap: 6px; margin-left: auto; }
+.out div { border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 12px; min-width: 104px; }
+.out div.on { border-color: var(--yes); background: var(--yes-bg); }
+.out label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+.out .big { font: 600 22px/28px "JetBrains Mono", monospace; }
+.stats { display: flex; gap: 22px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.stats label { display: block; color: var(--dim); font-size: 11px; }
+.stats .num { font-size: 13px; font-weight: 500; }
+.chart { flex: 1; position: relative; }
+/* ladder */
+.ladder { grid-column: 3; grid-row: 2 / 4; }
+.ladder td { position: relative; height: 23px; padding: 0 8px; cursor: pointer; }
+.ladder td.px { text-align: center; font-weight: 500; background: var(--pane-2); width: 76px; }
+.ladder td.bs, .ladder td.as { width: 96px; }
+.ladder td.as { text-align: left; }
+.ladder .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 2px; }
+.ladder td.bs .bar { right: 0; background: var(--yes-bg); } .ladder td.as .bar { left: 0; background: var(--no-bg); }
+.ladder td span { position: relative; }
+.ladder td.my { width: 52px; color: var(--focus); font-size: 11px; }
+.ladder tr.ask td.px { color: var(--no); } .ladder tr.bid td.px { color: var(--yes); }
+.ladder tr.spr td { height: 30px; background: var(--pane-2); font-family: Inter, sans-serif; color: var(--dim); font-size: 12px; text-align: center; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.ladder tr.spr b { font: 600 15px "JetBrains Mono", monospace; color: var(--text); }
+.ladder tr.cur td { box-shadow: inset 0 1px var(--focus), inset 0 -1px var(--focus); }
+.ladder tr.cur td.px { background: var(--focus-bg); color: var(--focus); }
+.tint { background: var(--tint); border-radius: 3px; padding: 0 3px; }
+.lfoot { margin-top: auto; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11.5px; display: flex; gap: 10px; flex-wrap: wrap; }
+/* ticket */
+.col4 { grid-column: 4; grid-row: 2 / 4; display: flex; flex-direction: column; gap: 6px; min-height: 0; } .ticket { flex: none; }
+.tk { padding: 12px; display: grid; gap: 10px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--pane-2); border-radius: 6px; padding: 3px; gap: 3px; }
+.seg div { height: 30px; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--dim); }
+.seg .on.y { background: var(--yes); color: var(--pane); } .seg .on.y kbd { color: var(--text); }
+.seg .on.w { background: var(--pane); color: var(--text); box-shadow: 0 0 0 1px var(--line-2); }
+.fld label { display: flex; justify-content: space-between; color: var(--dim); font-size: 11.5px; margin-bottom: 4px; }
+.inp { height: 36px; border: 1px solid var(--line-2); border-radius: 6px; display: flex; align-items: center; padding: 0 6px 0 12px; gap: 8px; font: 500 16px "JetBrains Mono", monospace; }
+.inp.f { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-bg); }
+.inp .u { margin-left: auto; color: var(--dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
+.nudge { display: flex; flex-direction: column; gap: 1px; } .nudge kbd { line-height: 11px; padding: 0 3px; }
+.quick { display: flex; gap: 6px; } .quick span { flex: 1; text-align: center; border: 1px solid var(--line); border-radius: 4px; font: 500 11px "JetBrains Mono", monospace; color: var(--dim); padding: 2px 0; }
+.sum { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12px; padding-top: 2px; }
+.sum span:nth-child(odd) { color: var(--dim); } .sum span:nth-child(even) { font-family: "JetBrains Mono", monospace; text-align: right; }
+.go { height: 40px; border-radius: 6px; background: var(--yes); color: var(--pane); font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.go kbd { background: transparent; color: var(--pane); border-color: currentColor; }
+.note { color: var(--dim); font-size: 11px; line-height: 15px; }
+/* tape */
+.tape { flex: 1; }
+.tape td { height: 19px; font-size: 11.5px; }
+/* account */
+.acct { grid-column: 2; grid-row: 3; }
+.acct td { height: 26px; }
+.acct td.q { font: 400 12.5px Inter, sans-serif; }
+.tag { font: 600 10.5px "JetBrains Mono", monospace; padding: 1px 6px; border-radius: 4px; }
+.tag.yes { background: var(--yes-bg); } .tag.no { background: var(--no-bg); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="pane top">
+    <span class="logo">PM<i>/</i>EDGE <span class="dim" style="font-weight:400">terminal</span></span>
+    <div class="search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>Search markets<kbd>/</kbd></div>
+    <span class="sp dim m"><span class="dot"></span> live · 14:32:41</span>
+    <span class="pill"><span class="dot"></span>Region ok</span>
+    <span class="pill m">0x3fa1…9c2e <span class="dim">Polygon</span></span>
+    <span class="pill m"><span class="dim">USDC</span> 214.40</span>
+  </div>
+
+  <div class="pane list">
+    <div class="ph">Markets <span class="r"><kbd>J</kbd><kbd>K</kbd></span></div>
+    <div class="cats"><span class="on">All</span><span>Finance</span><span>Politics</span><span>Crypto</span><span>Tech</span><span>Sports</span></div>
+    <div id="mk" style="overflow:hidden"></div>
+  </div>
+
+  <div class="pane chartp">
+    <div class="hero">
+      <div><h1>Fed cuts 50+ bps at the December 2026 FOMC meeting?</h1><div class="meta">Finance · ends Dec 15, 2026 · 58 days · <span class="m">tick 0.001</span></div></div>
+      <div class="out">
+        <div class="on"><label><span>YES</span><kbd>Y</kbd></label><span class="big yes">41.2¢</span></div>
+        <div><label><span>NO</span><kbd>N</kbd></label><span class="big no">58.8¢</span></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div><label>24h change</label><span class="num yes">+1.8¢</span></div>
+      <div><label>Best bid</label><span class="num">41.1¢</span></div>
+      <div><label>Best ask</label><span class="num">41.3¢</span></div>
+      <div><label>Spread</label><span class="num">0.2¢</span></div>
+      <div><label>24h volume</label><span class="num">$2.41M</span></div>
+      <div><label>Liquidity</label><span class="num">$318K</span></div>
+      <div style="margin-left:auto"><label>Range</label><span class="num dim">1H <b style="color:var(--text)">1D</b> 1W 1M ALL</span></div>
+    </div>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="pane ladder">
+    <div class="ph">Order book · YES <span class="r">click a price or <kbd>L</kbd></span></div>
+    <table><thead><tr><th style="text-align:left">Mine</th><th>Bid</th><th style="text-align:center">Price ¢</th><th style="text-align:left">Ask</th><th>Mine</th></tr></thead><tbody id="ld"></tbody></table>
+    <div class="lfoot"><span>Depth ±2¢ <span class="m" style="color:var(--text)">$41.8K / $38.2K</span></span><span>book 14:32:41.2</span></div>
+  </div>
+
+  <div class="col4">
+  <div class="pane ticket">
+    <div class="ph"><span class="t on">Limit</span><span class="t">Market</span><span class="r"><kbd>T</kbd> focus</span></div>
+    <div class="tk">
+      <div class="seg"><div class="on y">Buy <kbd>B</kbd></div><div>Sell <kbd>S</kbd></div></div>
+      <div class="fld"><label><span>Limit price · YES</span><span>bid 41.1 · ask 41.3</span></label><div class="inp f">41.2<span class="u">¢ <span class="nudge"><kbd>↑</kbd><kbd>↓</kbd></span></span></div></div>
+      <div class="fld"><label><span>Shares</span><span>≈ <span class="m">$206.00</span></span></label><div class="inp">500<span class="u">sh <kbd>Tab</kbd></span></div></div>
+      <div class="quick"><span>25%</span><span>50%</span><span>75%</span><span>Max</span></div>
+      <div class="sum"><span>Fee</span><span>$0.31</span><span>Max loss</span><span class="no">$206.31</span><span>Payout if YES</span><span class="yes">$500.00</span></div>
+      <div class="go">Buy 500 YES at 41.2¢ <kbd>⏎</kbd></div>
+      <div class="note">Your wallet asks you to sign. Signing sends the order to Polymarket; funds move only when it fills.</div>
+    </div>
+  </div>
+
+  <div class="pane tape">
+    <div class="ph">Trades <span class="r">size ≥ $1k bold</span></div>
+    <table><tbody id="tape"></tbody></table>
+  </div>
+  </div>
+
+  <div class="pane acct">
+    <div class="ph"><span class="t on">Positions&nbsp;<span class="dim">3</span></span><span class="t">Open orders&nbsp;<span class="dim">2</span></span><span class="t">History</span><span class="r">Unrealized <span class="m yes">+$12.48</span></span></div>
+    <table><thead><tr><th>Market</th><th>Outcome</th><th>Shares</th><th>Avg</th><th>Mark</th><th>Value</th><th>PnL</th><th></th></tr></thead><tbody id="pos"></tbody></table>
+  </div>
+</div>
+<script src="mock.js"></script>
+<script>
+const M = MOCK, $ = (id) => document.getElementById(id);
+$("mk").innerHTML = M.markets.map((m, i) => `<div class="mrow ${i ? "" : "sel"}"><span class="q" title="${m.q}">${m.q}</span><span class="m px">${fmt.c(m.p)}¢</span><span class="sub">${m.cat} · ${m.vol}</span><span class="m sub" style="text-align:right;color:var(${m.ch > 0 ? "--yes" : m.ch < 0 ? "--no" : "--dim"})">${m.ch > 0 ? "+" : ""}${m.ch.toFixed(1)}</span></div>`).join("");
+const N = 14, max = Math.max(...M.asks.slice(0, N).map((x) => x.sz), ...M.bids.slice(0, N).map((x) => x.sz));
+const bar = (v) => `<i class="bar" style="width:${(v / max) * 100}%"></i>`;
+$("ld").innerHTML =
+  M.asks.slice(0, N).reverse().map((a) => `<tr class="ask"><td class="my"></td><td class="bs"></td><td class="px">${fmt.c(a.p)}</td><td class="as">${bar(a.sz)}<span class="${a.p === 0.416 ? "tint" : ""}">${fmt.n(a.sz)}</span></td><td class="my">${a.p === 0.419 ? "−90" : ""}</td></tr>`).join("") +
+  `<tr class="spr"><td colspan="5">last <b>41.2</b> &nbsp;·&nbsp; spread 0.2¢ &nbsp;·&nbsp; mid 41.2</td></tr>` +
+  M.bids.slice(0, N).map((b) => `<tr class="bid ${b.p === 0.411 ? "cur" : ""}"><td class="my">${b.p === 0.405 ? "+800" : ""}</td><td class="bs">${bar(b.sz)}<span>${fmt.n(b.sz)}</span></td><td class="px">${fmt.c(b.p)}</td><td class="as"></td><td class="my"></td></tr>`).join("");
+$("tape").innerHTML = M.tape.slice(0, 18).map((t) => `<tr style="${t.sz * t.p > 1000 ? "font-weight:600" : ""}"><td class="dim">${t.t}</td><td class="${t.side === "BUY" ? "yes" : "no"}">${fmt.c(t.p)}</td><td>${fmt.n(t.sz)}</td></tr>`).join("");
+$("pos").innerHTML = M.positions.map((p) => `<tr><td class="q">${p.q}</td><td><span class="tag ${p.o === "YES" ? "yes" : "no"}">${p.o}</span></td><td>${fmt.n(p.sh)}</td><td>${fmt.c(p.avg)}¢</td><td>${fmt.c(p.mark)}¢</td><td>${fmt.usd(p.sh * p.mark)}</td><td class="${p.pnl >= 0 ? "yes" : "no"}">${p.pnl >= 0 ? "+" : ""}${fmt.usd(p.pnl)}</td><td><kbd>C</kbd></td></tr>`).join("");
+// chart: area + volume ticks
+const draw = () => {
+const el = $("chart"), w = el.clientWidth - 64, h = el.clientHeight - 56, lo = 0.30, hi = 0.50, y = (v) => 16 + h - ((v - lo) / (hi - lo)) * h;
+const line = pathOf(M.series, w, h, lo, hi).replace(/,(\d+(\.\d+)?)/g, (_, n) => "," + (+n + 16).toFixed(1));
+const grid = [0.32, 0.36, 0.40, 0.44, 0.48].map((v) => `<line x1="16" x2="${w}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${w + 10}" y="${y(v) + 4}" fill="var(--dim)" font-size="11" font-family="JetBrains Mono">${fmt.c(v, 0)}¢</text>`).join("");
+const vols = M.series.map((_, i) => { const v = 3 + ((i * 37) % 17) + (i > 148 && i < 156 ? 14 : 0); return `<rect x="${(i / 239) * w}" y="${h + 40 - v}" width="${w / 260}" height="${v}" fill="var(--line-2)"/>`; }).join("");
+el.innerHTML = `<svg width="${w + 60}" height="${h + 44}" style="margin:8px 0 0 0"><defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--yes)" stop-opacity=".22"/><stop offset="1" stop-color="var(--yes)" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${line}L${w},${h + 16}L0,${h + 16}Z" fill="url(#g)"/><path d="${line}" fill="none" stroke="var(--yes)" stroke-width="1.6"/>${vols}<line x1="0" x2="${w}" y1="${y(0.405)}" y2="${y(0.405)}" stroke="var(--focus)" stroke-dasharray="4 4"/><text x="8" y="${y(0.405) - 5}" fill="var(--focus)" font-size="11" font-family="JetBrains Mono">your bid 40.5 · 800</text><rect x="${w + 4}" y="${y(M.mid) - 10}" width="50" height="20" rx="4" fill="var(--yes)"/><text x="${w + 9}" y="${y(M.mid) + 4}" fill="var(--pane)" font-size="11.5" font-weight="600" font-family="JetBrains Mono">41.2¢</text></svg>`;
+};
+addEventListener("load", draw); addEventListener("resize", draw);
+</script>
+</body>
+</html>

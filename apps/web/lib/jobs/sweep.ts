@@ -30,6 +30,7 @@ export const toMarketRow = (m: PmMarket): typeof s.markets.$inferInsert => ({
   yesTokenId: m.yes_token_id ?? null,
   noTokenId: m.no_token_id ?? null,
   vol24h: m.volume_24h ?? null,
+  tickSize: m.tick_size ?? null,
 });
 
 /** pm universe (markets + events) -> `markets` upsert. Fee rate fetched once per new market (null = unknown -> category fallback at use). */
@@ -53,6 +54,7 @@ export async function sweepUniverse(d: Deps) {
           eventId: ex(t.eventId), question: ex(t.question), rules: ex(t.rules), category: ex(t.category), tags: ex(t.tags),
           endDate: ex(t.endDate), negRiskGroup: ex(t.negRiskGroup), status: ex(t.status), pmId: ex(t.pmId),
           yesTokenId: ex(t.yesTokenId), noTokenId: ex(t.noTokenId), vol24h: ex(t.vol24h),
+          tickSize: sql`coalesce(excluded."tick_size", ${t.tickSize})`,
           feeRate: sql`coalesce(excluded."fee_rate", ${t.feeRate})`,
         },
       });

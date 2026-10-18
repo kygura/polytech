@@ -49,8 +49,8 @@ type Thesis = NonNullable<Detail["thesis"]>;
 
 // Thesis age = thesis.createdAt; data age = snapshot.ts. Everything the visitor loop needs for sizeTrade / livelimitPrice / checkOrder / qualifies: YES book (bids, asks, mid),
 // crowd inputs (top10Share, netFlow), endDate/daysLeft, resolved feeRate, category, eventId + negRiskGroup (exposure key),
-// thesis pYes + c (already capped by category confidence) + side + capped, token ids. Tick size is not stored server-side.
-export const MARKET_KEYS = ["conditionId", "question", "rules", "category", "tags", "eventId", "negRiskGroup", "endDate", "daysLeft", "status", "yesTokenId", "noTokenId"] as const;
+// thesis pYes + c (already capped by category confidence) + side + capped, token ids. tickSize (null = unknown, treat as 0.01).
+export const MARKET_KEYS = ["conditionId", "question", "rules", "category", "tags", "eventId", "negRiskGroup", "endDate", "daysLeft", "status", "tickSize", "yesTokenId", "noTokenId"] as const;
 export const SNAP_KEYS = ["ts", "mid", "bestBid", "bestAsk", "depth5cUsd", "vol24h", "oi", "top10Share", "bids", "asks", "netFlow"] as const;
 export const SCREEN_KEYS = ["ts", "R", "I", "L", "T", "C", "priority", "tier"] as const;
 export const THESIS_KEYS = ["id", "createdAt", "expiresAt", "side", "pHat", "c", "pPost", "edgeC", "rAnn", "catalysts", "killCriteria", "thesis", "pYes", "pMidYes", "capped"] as const;
@@ -92,9 +92,16 @@ export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDet
 export const PUBLIC_LIMIT = 60, PUBLIC_WINDOW_MS = 60_000;
 const CACHE = "public, s-maxage=30, stale-while-revalidate=60";
 
+const limited = (retryAfter: number) => Response.json({ error: "rate limited" }, { status: 429, headers: { "retry-after": String(retryAfter), "cache-control": "no-store" } });
 /** 429 Response when the caller's IP is over 60/min, else null. */
 export async function publicLimit(req: Request, kv: Kv = getKv()): Promise<Response | null> {
   const r = await kv.rateLimit(`pub:${clientIp(req.headers)}`, PUBLIC_LIMIT, PUBLIC_WINDOW_MS);
-  return r.ok ? null : Response.json({ error: "rate limited" }, { status: 429, headers: { "retry-after": String(PUBLIC_WINDOW_MS / 1000), "cache-control": "no-store" } });
+  return r.ok ? null : limited(PUBLIC_WINDOW_MS / 1000);
+}
+/** The live feed polls every few seconds, so it gets its own bucket (120/min per IP) and never eats the 60/min of the other public routes. */
+export const FEED_LIMIT = 120;
+export async function publicFeedLimit(req: Request, kv: Kv = getKv()): Promise<Response | null> {
+  const r = await kv.rateLimit(`pubfeed:${clientIp(req.headers)}`, FEED_LIMIT, PUBLIC_WINDOW_MS);
+  return r.ok ? null : limited(PUBLIC_WINDOW_MS / 1000);
 }
 export const publicJson = (body: unknown) => Response.json(body, { headers: { "cache-control": CACHE } });
