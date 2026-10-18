@@ -1,0 +1,21 @@
+# Heartbeat for scouting on Vercel Hobby (vercel.json crons are once-per-day there).
+# A read of the public watchlist runs kickIfStale, which starts scoutChain (sweep -> snapshot -> screen -> research)
+# when the last kick is older than 30 min; its KV lock keeps overlapping pings to one start.
+name: scout
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # ponytail: ~1,440 runner-min/month, inside the 2,000 free for a private repo; go tighter if public
+  workflow_dispatch:
+
+jobs:
+  kick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping public watchlist
+        env:
+          SCOUT_URL: ${{ vars.SCOUT_URL }} # deployment origin, e.g. https://polytech.vercel.app
+        run: |
+          test -n "$SCOUT_URL" || { echo "::error::set repo variable SCOUT_URL"; exit 1; }
+          curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" "$SCOUT_URL/api/public/watchlist"
