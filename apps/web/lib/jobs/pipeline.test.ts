@@ -193,6 +193,11 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect(await paperBook(d)).toMatchObject({ mode: "L0", filled: 0 });
   });
 
+  it("sweep never walks the events listing (nested markets OOM a Vercel function)", async () => {
+    const noEvents = { ...pm, listEvents: async () => { throw new Error("listEvents called"); } } as typeof pm;
+    await expect(sweepUniverse({ ...d, pm: noEvents })).resolves.not.toThrow();
+  });
+
   it("truncated listing does not mass-close", async () => {
     const all = await pm.listMarkets();
     const half = { ...pm, listMarkets: async () => all.slice(0, Math.floor(all.length / 2)), listEvents: async () => [] } as typeof pm;

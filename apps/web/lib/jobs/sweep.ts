@@ -16,11 +16,8 @@ const statusOf = (m: PmMarket) => (!m.open ? "closed" : m.in_dispute ? "disputed
 /** pm universe (markets + events) -> `markets` upsert. Fee rate fetched once per new market (null = unknown -> category fallback at use). */
 export async function sweepUniverse(d: Deps) {
   return withLock(d, "sweep", 10 * 60_000, async () => {
-    const [list, events] = await Promise.all([d.pm.listMarkets(), d.pm.listEvents()]);
-    const byCond = new Map<string, PmMarket>();
-    for (const e of events)
-      for (const m of e.markets) byCond.set(m.condition_id, e.neg_risk && !m.neg_risk_group ? { ...m, neg_risk_group: e.id } : m);
-    for (const m of list) byCond.set(m.condition_id, { ...byCond.get(m.condition_id), ...Object.fromEntries(Object.entries(m).filter(([k, v]) => v != null && !(k === "neg_risk" && !v))) } as PmMarket); // list wins per field, but never nulls event-derived eventId/neg_risk_group
+    // markets only: each carries its event id and neg-risk group; the events walk is ~1.7 GB of nested markets (OOM on Vercel)
+    const byCond = new Map<string, PmMarket>((await d.pm.listMarkets()).map((m) => [m.condition_id, m]));
     if (!byCond.size) return { markets: 0, newMarkets: 0, feesFetched: 0, closed: 0 };
 
     const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status }).from(s.markets)).map((r) => [r.id, r]));
