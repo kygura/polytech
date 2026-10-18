@@ -9,8 +9,7 @@ export const inInput = (e: KeyboardEvent) => {
 
 const GO: Record<string, string> = { w: "/watchlist", f: "/fleet", c: "/calibration", p: "/paper", a: "/autonomy", s: "/settings" };
 
-/** g+<key> nav, `/` filter, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. */
-/** `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
+/** g+<key> nav, `/` filter, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
 export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void; onTheme: () => void; go?: Record<string, string> }) {
   const router = useRouter();
   useEffect(() => {

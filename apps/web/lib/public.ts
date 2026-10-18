@@ -70,6 +70,9 @@ export type PublicMarketDetail = {
   research: ResearchStatus;
 };
 
+/** Evidence links come from model output: only http(s) reaches an anonymous page (no javascript:, data:, ...). "" = dropped. */
+export const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : "");
+
 export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDetail {
   const m = d.market;
   return {
@@ -79,7 +82,7 @@ export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDet
     screen: d.screen ? { ...pick(d.screen, SCREEN_KEYS), structural: struct(d.screen.structural as StructDetail | null) } : null,
     thesis: d.thesis ? pick(d.thesis, THESIS_KEYS) : null,
     thesisMarkers: d.thesisMarkers.map((x) => pick(x, MARKER_KEYS)),
-    evidence: d.evidence.map((x) => pick(x, EVIDENCE_KEYS)),
+    evidence: d.evidence.map((x) => ({ ...pick(x, EVIDENCE_KEYS), url: safeUrl(x.url) })),
     agents: d.agents.map((x) => pick(x, AGENT_KEYS)),
     research: researchOf(d.thesis != null, d.pod?.status === "running", disabled),
   };

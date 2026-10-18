@@ -1,5 +1,6 @@
 // Pure TradeTicket math: prefill from the public detail, the quote lines, field validation. No React, no network.
 import { crowd, DEFAULT_SETTINGS, livelimitPrice, mirror, sizeTrade, takerFeePerShare, vwapForUsd, type Side } from "@pm/core";
+import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 import type { PublicMarketDetail } from "../../lib/public";
 
 export const TICK = 0.01; // ponytail: tick size is not stored server-side (public.ts); 0.01 is the common tick, 0.001 markets get a coarser limit
@@ -36,10 +37,14 @@ export function prefill(d: PublicMarketDetail, balance: number | null): Prefill 
   return { side, price: limit, amount: sized ? Math.floor(sized.sizeUsd * 100) / 100 : null };
 }
 
+/** Limit rounded DOWN to the tick: a buy never pays more than typed, and the venue rejects off-tick prices. */
+export const onTick = (p: number, tick = TICK) => Math.round(Math.floor(p / tick + 1e-9) * tick * 1e6) / 1e6;
+
 export type Quote = { shares: number; cost: number; fee: number; maxLoss: number; payout: number };
 
 /** Buy `amount` USD at limit `price`: shares rounded down to 0.01; fee = taker fee (an upper bound: a resting maker fill pays none). */
-export function quote(price: number, amount: number, feeRate: number): Quote | null {
+export function quote(rawPrice: number, amount: number, feeRate: number): Quote | null {
+  const price = onTick(rawPrice);
   if (!(price > 0 && price < 1) || !(amount > 0)) return null;
   const shares = Math.floor((amount / price) * SHARE_STEP) / SHARE_STEP;
   if (!(shares > 0)) return null;
@@ -51,7 +56,7 @@ export type FieldErrors = { price?: string; amount?: string };
 
 export function validate(price: number | null, amount: number | null, balance: number | null, q: Quote | null): FieldErrors {
   const e: FieldErrors = {};
-  if (price == null || !(price >= 0.001 && price <= 0.999)) e.price = "Price must be between 0.001 and 0.999";
+  if (price == null || !(onTick(price) >= TICK && onTick(price) <= 1 - TICK)) e.price = `Price must be between ${TICK} and ${1 - TICK}`;
   if (amount == null || !(amount > 0)) e.amount = "Enter an amount";
   else if (!q) e.amount = "Amount is too small for one share step";
   else if (balance != null && q.maxLoss > balance) e.amount = "Amount exceeds your balance";
@@ -71,4 +76,30 @@ export function ticketGate(s: GateIn): Gate | null {
   if (!s.credsReady) return "creds_needed";
   if (s.approved == null) return "allowance_checking";
   return s.approved ? null : "allowance_needed";
+}
+
+type Placer = Pick<ClobExchange, "place" | "openOrders">;
+export type PlaceResult = { kind: "open"; orderId: string } | { kind: "rejected"; error: string } | { kind: "declined" } | { kind: "unknown" };
+
+/**
+ * Places once. A throw that is not a wallet rejection is an UNKNOWN outcome (the order may have reached the venue, see Exchange.placeImmediate):
+ * look the order up instead of letting the visitor resend it blind.
+ */
+export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (e: unknown) => boolean): Promise<PlaceResult> {
+  try {
+    const r = await ex.place(o);
+    return r.status === "rejected" ? { kind: "rejected", error: r.error ?? "rejected by Polymarket" } : { kind: "open", orderId: r.orderId };
+  } catch (e) {
+    return isRejection(e) ? { kind: "declined" } : findPlaced(ex, o);
+  }
+}
+
+/** Same token, side, price and size among the open orders. ponytail: OpenOrder has no timestamp, so an older identical order also matches. */
+export async function findPlaced(ex: Pick<ClobExchange, "openOrders">, o: LimitOrder): Promise<PlaceResult> {
+  try {
+    const m = (await ex.openOrders()).find((x) => x.tokenId === o.tokenId && x.side === o.side && Math.abs(x.price - o.price) < 1e-9 && Math.abs(x.shares - o.shares) < 1e-6);
+    return m ? { kind: "open", orderId: m.orderId } : { kind: "unknown" };
+  } catch {
+    return { kind: "unknown" };
+  }
 }

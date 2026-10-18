@@ -86,11 +86,16 @@ export function useClob(ex: ClobExchange | null, pollMs = 30_000): Clob {
   const cancel = useCallback(async (ids: string[]) => { if (ex) { await ex.cancel(ids); await refresh(); } }, [ex, refresh]);
   const cancelAll = useCallback(async () => { if (ex) { await ex.cancelAll(); await refresh(); } }, [ex, refresh]);
 
+  // Also retries a failed allowance check (approved still null), so the ticket never sticks on "Checking allowance…".
   useEffect(() => {
     if (!s.credsReady) return;
-    const id = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, pollMs);
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refresh();
+      if (s.approved == null) checkApproval().catch(() => {});
+    }, pollMs);
     return () => clearInterval(id);
-  }, [s.credsReady, refresh, pollMs]);
+  }, [s.credsReady, s.approved, refresh, checkApproval, pollMs]);
 
   return { ...s, enable, approve, refresh, checkApproval, cancel, cancelAll };
 }

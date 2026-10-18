@@ -1,6 +1,6 @@
 "use client";
 // TradeTicket (DESIGN 10.4). Orders are signed by the visitor's wallet and sent browser -> clob.polymarket.com (no server relay).
-import type { ClobExchange } from "@pm/pm/exchange";
+import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useRegion } from "../../hooks/useRegion";
 import { isRejection, useWallet } from "../../hooks/useWallet";
@@ -9,7 +9,7 @@ import { loadVisitorSettings } from "../../lib/visitor/settings";
 import { fmt, truncate } from "../fmt";
 import ui from "../ui.module.css";
 import { short } from "./PublicShell";
-import { bestAsk, prefill, quote, ticketGate, validate, type Gate } from "./ticket";
+import { bestAsk, findPlaced, onTick, placeTicketOrder, prefill, quote, ticketGate, TICK, validate, type Gate } from "./ticket";
 import css from "./public.module.css";
 
 const ORDER_TTL_MS = 24 * 3_600_000; // ponytail: GTD 24 h, not in the brief; a resting order should not outlive the visitor's attention by much
@@ -26,7 +26,8 @@ type Phase =
   | { s: "open"; orderId: string; shares: number; filled: number; avg: number | null; since: number; cancelling?: boolean }
   | { s: "filled"; shares: number; avg: number; fee: number }
   | { s: "cancelled"; shares: number; filled: number }
-  | { s: "error"; msg: string };
+  | { s: "error"; msg: string }
+  | { s: "unknown"; order: LimitOrder; since: number; checking?: boolean };
 
 const GATE: Record<Gate, { button: string; copy: string; spin?: boolean; off?: boolean }> = {
   disconnected: { button: "Connect wallet", copy: "Connect a wallet on Polygon to trade. Research above stays free to read." },
@@ -88,11 +89,13 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     const ex = w.exchange;
     if (!openId || !ex) return;
     const live = (p: Phase) => p.s === "open" && p.orderId === openId && !p.cancelling;
+    let inflight = false; // a slow CLOB must not stack status calls every 5 s
     const tick = () => {
       const p = cur.current;
-      if (p.s !== "open" || !live(p)) return;
+      if (inflight || p.s !== "open" || !live(p)) return;
+      inflight = true;
       // CLOB down: keep polling; AccountPanel shows the error.
-      orderStatus(ex, p).then((n) => n && setPhase((x) => (live(x) ? n : x))).catch(() => {});
+      orderStatus(ex, p).then((n) => n && setPhase((x) => (live(x) ? n : x))).catch(() => {}).finally(() => { inflight = false; });
     };
     tick();
     const t = setInterval(tick, STATUS_MS);
@@ -103,7 +106,7 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
   const pr = num(price), amt = num(amount);
   const q = pr == null || amt == null ? null : quote(pr, amt, d.market.feeRate);
   const errs = validate(pr, amt, balance, q);
-  if (!errs.amount && amt != null && amt > perTradeMax) errs.amount = `Above your per-trade max $${perTradeMax}`;
+  if (!errs.amount && q && q.maxLoss > perTradeMax) errs.amount = `Above your per-trade max $${perTradeMax}`;
   const valid = !errs.price && !errs.amount && q != null;
   const mid = d.snapshot?.mid == null ? null : side === "YES" ? d.snapshot.mid : 1 - d.snapshot.mid;
   const ask = bestAsk(d, side);
@@ -140,17 +143,26 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     setNote(null);
     setPhase({ s: "signing" });
     const since = Date.now();
-    try {
-      const res = await ex.place({ tokenId, side: "BUY", price: pr, shares: q.shares, expiresAt: new Date(since + ORDER_TTL_MS) });
-      if (res.status === "rejected") setPhase({ s: "error", msg: res.error ?? "rejected by Polymarket" });
-      else setPhase({ s: "open", orderId: res.orderId, shares: q.shares, filled: 0, avg: null, since });
-      void c.refresh();
-    } catch (e) {
-      if (isRejection(e)) { setPhase({ s: "idle" }); setNote({ text: "You rejected the signature. Nothing was sent.", tone: "muted" }); }
-      else setPhase({ s: "error", msg: msg(e) });
-    }
+    const order: LimitOrder = { tokenId, side: "BUY", price: onTick(pr), shares: q.shares, expiresAt: new Date(since + ORDER_TTL_MS) };
+    const res = await placeTicketOrder(ex, order, isRejection);
+    if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: q.shares, filled: 0, avg: null, since });
+    else if (res.kind === "rejected") setPhase({ s: "error", msg: res.error });
+    else if (res.kind === "declined") { setPhase({ s: "idle" }); setNote({ text: "You rejected the signature. Nothing was sent.", tone: "muted" }); }
+    else setPhase({ s: "unknown", order, since });
+    void c.refresh();
     btn.current?.focus();
   };
+
+  const recheck = async () => {
+    const ex = w.exchange;
+    if (phase.s !== "unknown" || !ex) return;
+    const p = phase;
+    setPhase({ ...p, checking: true });
+    const res = await findPlaced(ex, p.order);
+    setPhase(res.kind === "open" ? { s: "open", orderId: res.orderId, shares: p.order.shares, filled: 0, avg: null, since: p.since } : { ...p, checking: false });
+  };
+  // Leaving "unknown" clears the amount: no one-click identical resend.
+  const startOver = () => { setPhase({ s: "idle" }); setTouched(true); setAmount(""); };
 
   const cancel = async () => {
     const ex = w.exchange;
@@ -182,12 +194,13 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     if (gate === "disconnected") onClick = () => void w.connect();
     if (gate === "wrong_network") onClick = () => void w.switchChain();
     if (gate === "creds_needed") { onClick = () => void run(c.enable, "You rejected the signature. Trading stays off."); if (c.enabling || busy) { label = "Confirm in your wallet…"; spin = off = true; } }
+    if (gate === "allowance_checking" && c.error) line = <>{c.error} <button type="button" className={css.linkBtn} onClick={() => void c.checkApproval().catch(() => {})}>Retry check</button></>;
     if (gate === "allowance_needed") { onClick = () => void run(c.approve, "You rejected the transaction. Nothing was approved."); if (c.approving || busy) { label = "Confirm in your wallet…"; spin = off = true; } }
   } else {
     switch (phase.s) {
       case "idle":
         label = "Sign and place order"; stateWord = "ready"; off = !valid; onClick = () => void place();
-        if (q) aria = `Sign and place order: buy ${side} ${shares(q.shares)} shares at ${pr!.toFixed(3)}, up to ${usd(q.maxLoss)}`;
+        if (q) aria = `Sign and place order: buy ${side} ${shares(q.shares)} shares at ${onTick(pr!).toFixed(3)}, up to ${usd(q.maxLoss)}`;
         break;
       case "signing":
         label = "Confirm in your wallet…"; spin = off = true; stateWord = "signing";
@@ -207,6 +220,10 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
       case "cancelled":
         label = "New order"; stateWord = "cancelled"; onClick = () => setPhase({ s: "idle" });
         line = <span className="muted">cancelled {"·"} {shares(phase.filled)}/{shares(phase.shares)} filled</span>;
+        break;
+      case "unknown":
+        label = phase.checking ? "Checking open orders…" : "Check open orders"; spin = off = !!phase.checking; stateWord = "unknown"; onClick = () => void recheck();
+        line = <span className="neg">Outcome unknown {"—"} check open orders before retrying. <button type="button" className={css.linkBtn} onClick={startOver}>Start over</button></span>;
         break;
       case "error":
         label = "Try again"; stateWord = "error"; onClick = () => setPhase({ s: "idle" });
@@ -228,9 +245,9 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
         </div>
 
         <label htmlFor="tk-price">Limit price</label>
-        <input id="tk-price" type="number" inputMode="decimal" step="0.001" min="0.001" max="0.999" value={price} disabled={!editable}
+        <input id="tk-price" type="number" inputMode="decimal" step={TICK} min={TICK} max={1 - TICK} value={price} disabled={!editable}
           aria-invalid={fields && !!errs.price} aria-describedby="tk-price-hint" onChange={(e) => edit(() => setPrice(e.target.value))} />
-        <span className={css.hint} id="tk-price-hint">mid {fmt(mid, "p")} {"·"} best ask {fmt(ask, "p")}</span>
+        <span className={css.hint} id="tk-price-hint">mid {fmt(mid, "p")} {"·"} best ask {fmt(ask, "p")}{pr != null && onTick(pr) !== pr && ` · sends ${onTick(pr).toFixed(3)} (tick ${TICK})`}</span>
         {fields && errs.price && price !== "" && <span className={css.fieldErr}>{errs.price}</span>}
 
         <label htmlFor="tk-amount">Amount <span className="muted">USD</span></label>

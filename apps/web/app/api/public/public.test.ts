@@ -64,3 +64,13 @@ describe("public api", () => {
     expect(r.headers.get("retry-after")).toBe("60");
   });
 });
+
+describe("public projection", () => {
+  it("evidence urls: only http(s) survive", async () => {
+    const { safeUrl } = await import("../../../lib/public");
+    expect(safeUrl("https://a.example/x")).toBe("https://a.example/x");
+    expect(safeUrl("HTTP://a.example")).toBe("HTTP://a.example");
+    expect(safeUrl("javascript:alert(1)")).toBe("");
+    expect(safeUrl("data:text/html,x")).toBe("");
+  });
+});

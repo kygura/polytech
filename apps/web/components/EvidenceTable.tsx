@@ -14,7 +14,7 @@ const COLS: Column<Ev>[] = [
   { id: "quote", header: "Quote", align: "l", cell: (e) => <span className={css.quote} title={e.quote ?? undefined}>{e.quote ? words(e.quote, 25) : "—"}</span> },
   { id: "pub", header: "Published", align: "l", sortable: true, cell: (e) => e.publishedAt ? mmdd(e.publishedAt) : <span className="muted">{"—"}</span> },
   { id: "ret", header: "Retrieved", align: "l", cell: (e) => mmdd(e.retrievedAt) },
-  { id: "url", header: "URL", align: "l", cell: (e) => <a href={e.url} target="_blank" rel="noreferrer" title={e.url}>{host(e.url)}</a> },
+  { id: "url", header: "URL", align: "l", cell: (e) => (e.url ? <a href={e.url} target="_blank" rel="noreferrer" title={e.url}>{host(e.url)}</a> : <span className="muted">{"—"}</span>) },
 ];
 const KEY: Record<string, (e: Ev) => number | string> = { dir: (e) => -e.direction, role: (e) => e.role, pub: (e) => e.publishedAt ?? 0 };
 
