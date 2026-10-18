@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PublicMarketDetail } from "../../lib/public";
-import { prefill, quote, validate } from "./ticket";
+import { prefill, quote, ticketGate, validate } from "./ticket";
 
 const detail = (over: Partial<PublicMarketDetail> = {}): PublicMarketDetail => ({
   market: { conditionId: "c1", question: "Q?", rules: "", category: "politics", tags: [], eventId: null, negRiskGroup: null, endDate: null, daysLeft: 30, status: "active", yesTokenId: "y", noTokenId: "n", feeRate: 0, negRisk: false },
@@ -47,5 +47,19 @@ describe("ticket quote + validate", () => {
     expect(validate(0.5, 200, 100, quote(0.5, 200, 0))).toEqual({ amount: "Amount exceeds your balance" });
     expect(validate(0.5, 10, 100, quote(0.5, 10, 0))).toEqual({});
     expect(validate(0.5, null, null, null)).toEqual({ amount: "Enter an amount" });
+  });
+});
+
+describe("ticket gate", () => {
+  const ok = { wallet: "connected", chainOk: true, region: "ok", credsReady: true, approved: true } as const;
+  it("first unmet precondition wins, in order", () => {
+    expect(ticketGate(ok)).toBeNull();
+    expect(ticketGate({ ...ok, wallet: "disconnected", chainOk: false, region: "blocked" })).toBe("disconnected");
+    expect(ticketGate({ ...ok, chainOk: false, region: "blocked" })).toBe("wrong_network");
+    expect(ticketGate({ ...ok, region: "failed", credsReady: false })).toBe("geo_failed");
+    expect(ticketGate({ ...ok, region: "idle" })).toBe("geo_checking");
+    expect(ticketGate({ ...ok, credsReady: false, approved: false })).toBe("creds_needed");
+    expect(ticketGate({ ...ok, approved: false })).toBe("allowance_needed");
+    expect(ticketGate({ ...ok, approved: null })).toBe("allowance_checking");
   });
 });

@@ -57,3 +57,18 @@ export function validate(price: number | null, amount: number | null, balance: n
   else if (balance != null && q.maxLoss > balance) e.amount = "Amount exceeds your balance";
   return e;
 }
+
+export type Gate = "disconnected" | "wrong_network" | "geo_checking" | "geo_blocked" | "geo_failed" | "creds_needed" | "allowance_checking" | "allowance_needed";
+type GateIn = { wallet: "unavailable" | "disconnected" | "connecting" | "connected"; chainOk: boolean; region: "idle" | "checking" | "ok" | "blocked" | "failed"; credsReady: boolean; approved: boolean | null };
+
+/** First unmet precondition, in DESIGN 10.4 order; null = ready to trade. Region fails closed: anything but "ok" blocks. */
+export function ticketGate(s: GateIn): Gate | null {
+  if (s.wallet !== "connected") return "disconnected";
+  if (!s.chainOk) return "wrong_network";
+  if (s.region === "blocked") return "geo_blocked";
+  if (s.region === "failed") return "geo_failed";
+  if (s.region !== "ok") return "geo_checking";
+  if (!s.credsReady) return "creds_needed";
+  if (s.approved == null) return "allowance_checking";
+  return s.approved ? null : "allowance_needed";
+}

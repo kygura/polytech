@@ -3,9 +3,14 @@ import type { Detail } from "./detail";
 import { fmt, mmdd } from "./fmt";
 import css from "./detail.module.css";
 
+// Narrow slices so the public /trade detail (lib/public.ts projection) renders the same header.
+type Snap = Pick<NonNullable<Detail["snapshot"]>, "ts" | "mid" | "bestBid" | "bestAsk" | "depth5cUsd" | "vol24h" | "oi" | "top10Share"> | null;
+type Hist = Pick<Detail["history"][number], "ts" | "mid">[];
+type Mkt = Pick<Detail["market"], "conditionId" | "question" | "category" | "endDate" | "daysLeft" | "feeRate" | "status">;
+
 const usdK = (v: number | null) => (v == null ? "—" : v >= 1000 ? `$${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k` : `$${fmt(v, "usd")}`);
 
-export function KeyStats({ snapshot, history }: { snapshot: Detail["snapshot"]; history: Detail["history"] }) {
+export function KeyStats({ snapshot, history }: { snapshot: Snap; history: Hist }) {
   const s = snapshot;
   const last = history[history.length - 1]?.ts ?? 0;
   const day = history.filter((h) => h.ts >= last - 86_400_000 && h.mid != null).map((h) => h.mid as number);
@@ -23,7 +28,7 @@ export function KeyStats({ snapshot, history }: { snapshot: Detail["snapshot"]; 
   );
 }
 
-export function MarketHeader({ market: m, snapshot, history, now }: { market: Detail["market"]; snapshot: Detail["snapshot"]; history: Detail["history"]; now: number }) {
+export function MarketHeader({ market: m, snapshot, history, now }: { market: Mkt; snapshot: Snap; history: Hist; now: number }) {
   return (
     <header className={`pane ${css.head}`}>
       <h1 className={css.q}>{m.question}</h1>
