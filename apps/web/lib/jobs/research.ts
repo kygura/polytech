@@ -5,7 +5,7 @@ import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { categoryConfidence } from "./calib";
-import { DAY, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
+import { DAY, addSpend, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
 import { matchMarkets, listProfiles, type Match } from "./profiles";
 import { latestSnaps, shortlist } from "./screen";
@@ -34,10 +34,6 @@ const failedRecently = async (db: Deps["db"], now: number) =>
   new Set((await db.select({ c: s.pods.conditionId }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(now - FAILED_SKIP_MS))))).map((r) => r.c));
 // ponytail: a timed-out agent/judge reports no usage, so charge a flat guess per model (150k in/10k out agent, 20k in/2k out judge) so the daily cap cannot undercount; read real usage if the runner ever reports partials.
 const timeoutUsd = (model: string, judge = false) => (judge ? costUsd(model, 20_000, 2_000) : costUsd(model, 150_000, 10_000));
-
-const addSpend = (db: Deps["db"], now: number, usd: number, sandboxS: number) =>
-  db.insert(s.spend).values({ day: today(now), anthropicUsd: usd, sandboxS })
-    .onConflictDoUpdate({ target: s.spend.day, set: { anthropicUsd: sql`${s.spend.anthropicUsd} + ${usd}`, sandboxS: sql`${s.spend.sandboxS} + ${sandboxS}` } });
 
 /** Budget check -> pod -> judge -> sizing against the latest stored book -> `theses` row. */
 export async function researchMarket(d: Deps, conditionId: string, trigger: Trigger = "manual", opts: ResearchOpts = {}): Promise<ResearchResult> {

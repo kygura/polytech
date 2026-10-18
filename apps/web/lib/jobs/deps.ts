@@ -2,6 +2,7 @@ import { anthropicJudge, classifyR, disabledJudge, fakeJudge, isProd, pickRunner
 import { feeRateFor, type Market, type Snapshot } from "@pm/core";
 import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
+import { sql } from "drizzle-orm";
 import { getSettings, type AppSettings } from "./settings";
 
 export type Deps = {
@@ -13,7 +14,7 @@ export type Deps = {
   runner: AgentRunner;
   judge: Judge;
   /** LLM researchability R in 0..1; absent => deterministic heuristic from rules text. */
-  rScore?: (rules: string) => Promise<number>;
+  rScore?: (rules: string, deadline?: number) => Promise<number>;
   /** Live CLOB exchange; null = not configured (L2 refused). */
   exchange: Exchange | null;
 };
@@ -55,7 +56,7 @@ export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
     settings: over.settings ?? (await getSettings(db)),
     runner: over.runner ?? (await pickRunner()).runner,
     judge: over.judge ?? (client ? anthropicJudge(client) : process.env.PM_FIXTURES !== "1" && isProd(process.env) ? disabledJudge : fakeJudge),
-    rScore: over.rScore ?? (client ? async (rules) => (await classifyR(rules, client)).R : undefined),
+    rScore: over.rScore ?? (client ? async (rules, deadline) => (await classifyR(rules, client, undefined, { deadline }, { timeout: 15_000, maxRetries: 0 })).R : undefined),
     exchange: over.exchange !== undefined ? over.exchange : envExchange(),
   };
 }
@@ -115,3 +116,7 @@ export const toSnap = (r: SnapRow): Snapshot => ({
 });
 
 export const today = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+export const addSpend = (db: Deps["db"], now: number, usd: number, sandboxS: number) =>
+  db.insert(s.spend).values({ day: today(now), anthropicUsd: usd, sandboxS })
+    .onConflictDoUpdate({ target: s.spend.day, set: { anthropicUsd: sql`${s.spend.anthropicUsd} + ${usd}`, sandboxS: sql`${s.spend.sandboxS} + ${sandboxS}` } });

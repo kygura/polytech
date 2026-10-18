@@ -1,14 +1,21 @@
-import { rulesHash } from "@pm/agents";
+import { costUsd, modelFor, rulesHash } from "@pm/agents";
 import {
   ladderViolations, mirrorPairs, negRiskArb, pass1, screen, sortAsc, takerFeePerShare,
   type Pass1Reason, type Tier,
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
-import { chunks, feeOf, groupBy, toMarket, toSnap, withLock, type Deps } from "./deps";
+import { addSpend, chunks, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import type { AppSettings } from "./settings";
 
+/** Function limit is 300s and the reads alone take ~30s: stop issuing LLM batches at 170s, leaving room for ~8.5k row writes. */
+const BUDGET_MS = 170_000;
+/** ~30 batches of 10 (~1-2s each): a cold cache fills over several runs, best candidates first. */
+const MAX_LLM = 300;
+// ponytail: classifyR usage is not returned, so charge a flat haiku estimate (~1.5k in / 0.4k out) per call against the daily cap.
+const R_TIMEOUT_MS = 20_000; // hard bound per classifier call (the stub or SDK may hang)
+const R_CALL_USD = costUsd(modelFor("r_classifier"), 1_500, 400);
 const OPEN = ["active", "disputed", "not_accepting"];
 
 export type StructDetail = {
@@ -110,7 +117,8 @@ export const smallCapTooBusy = (tier: Tier, vol24h: number, structural: boolean,
 
 const by = (rows: { m: { conditionId: string; eventId: string; negRiskGroup: string | null } }[], id: string) => rows.find((r) => r.m.conditionId === id)!.m;
 
-export async function screenAll(d: Deps) {
+export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: number } = {}) {
+  const t0 = Date.now(), o = { budgetMs: BUDGET_MS, maxLlm: MAX_LLM, ...opts };
   return withLock(d, "screen", 10 * 60_000, async () => {
     const now = d.now(), st = d.settings;
     const mrows = await d.db.select().from(s.markets).where(inArray(s.markets.status, OPEN));
@@ -121,7 +129,7 @@ export async function screenAll(d: Deps) {
     const trueSize = new Map<string, number>();
     const flagged = [...detectStructural(rows, cap)].flatMap(([id, x]) => (x.type === "neg-risk-sum" && x.kind === "buy-all" ? [by(rows, id)] : []));
     for (const m of new Map(flagged.map((m) => [m.negRiskGroup!, m])).values())
-      trueSize.set(m.negRiskGroup!, await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m.negRiskGroup).length : -1), () => -1));
+      trueSize.set(m.negRiskGroup!, Date.now() - t0 > o.budgetMs ? -1 : await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m.negRiskGroup).length : -1), () => -1));
     const structural = detectStructural(rows, cap, new Map([...dbSize, ...trueSize]));
 
     // pass 1 on everything; R (cached by rules hash) only for survivors and structural legs
@@ -135,25 +143,39 @@ export async function screenAll(d: Deps) {
     const todo = rows.filter(({ m }) => alive.has(m.conditionId) || structural.has(m.conditionId));
     const cached = new Map((await d.db.select().from(s.rrCache)).map((c) => [`${c.conditionId}:${c.rulesHash}`, c]));
     const R = new Map<string, number>();
-    const fresh: (typeof s.rrCache.$inferInsert)[] = [];
-    for (const batch of chunks(todo, 10))
+    const crowd = (snap: SnapRow) => ({ top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }); // ponytail: comment skew not wired
+    const score = ({ m, snap }: Pick<(typeof todo)[number], "m" | "snap">, r: number) =>
+      screen({ market: m, snap: toSnap(snap), R: r, structural: structural.has(m.conditionId), settings: st, now, crowd: crowd(snap) });
+    const need: typeof todo = [];
+    for (const x of todo) {
+      const hit = cached.get(`${x.m.conditionId}:${rulesHash(x.m.rules)}`);
+      if (hit && !((hit.detail as { fallback?: boolean } | null)?.fallback && d.rScore)) R.set(x.m.conditionId, hit.r);
+      else need.push(x);
+    }
+    const sp = d.rScore ? (await d.db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0] : undefined;
+    const capped = (sp?.anthropicUsd ?? 0) >= st.budget.dailySpendCapUsd; // daily spend cap hit: heuristic only
+    // LLM budget: best heuristic-priority first, capped per run and by wall clock (function limit 300s, reads included); the rest take the heuristic and are retried next run
+    const first = d.rScore && !capped ? need.map((x) => [x, +alive.has(x.m.conditionId) * 10 + score(x, heuristicR(x.m.rules)).priority] as const).sort((a, b) => b[1] - a[1]).slice(0, o.maxLlm).map(([x]) => x) : d.rScore ? [] : need;
+    let llm = 0;
+    for (const batch of chunks(first, d.rScore ? 10 : 200)) {
+      if (Date.now() - t0 > o.budgetMs) break;
+      const fresh: (typeof s.rrCache.$inferInsert)[] = [];
       await Promise.all(batch.map(async ({ m }) => {
-        const h = rulesHash(m.rules), hit = cached.get(`${m.conditionId}:${h}`);
-        if (hit && !((hit.detail as { fallback?: boolean } | null)?.fallback && d.rScore)) return void R.set(m.conditionId, hit.r);
         let r: number | undefined, fallback = false;
-        try { r = d.rScore ? clamp01(await d.rScore(m.rules)) : undefined; } catch { /* outage: fall through */ }
+        let tm: ReturnType<typeof setTimeout> | undefined;
+        try { r = d.rScore ? clamp01(await Promise.race([d.rScore(m.rules, t0 + o.budgetMs), new Promise<never>((_, no) => (tm = setTimeout(() => no(new Error("R timeout")), R_TIMEOUT_MS)))])) : undefined; } catch { /* outage/timeout: fall through */ } finally { clearTimeout(tm); }
         if (r === undefined) { r = heuristicR(m.rules); fallback = true; }
         R.set(m.conditionId, r);
-        fresh.push({ conditionId: m.conditionId, rulesHash: h, r, detail: { fallback } });
+        fresh.push({ conditionId: m.conditionId, rulesHash: rulesHash(m.rules), r, detail: { fallback } });
       }));
-    for (const f of fresh)
-      await d.db.insert(s.rrCache).values(f).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: f.r, detail: f.detail } });
+      await d.db.insert(s.rrCache).values(fresh).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: sql`excluded.r`, detail: sql`excluded.detail` } });
+      if (d.rScore) { llm += batch.length; await addSpend(d.db, now, batch.length * R_CALL_USD, 0); }
+    }
+    for (const x of need) if (!R.has(x.m.conditionId)) R.set(x.m.conditionId, heuristicR(x.m.rules));
+    console.log(`screen: R by llm/attempted=${llm} cached=${todo.length - need.length} heuristic-only=${need.length - first.length}`);
 
     const out = todo.flatMap(({ m, snap }) => {
-      const sc = screen({
-        market: m, snap: toSnap(snap), R: R.get(m.conditionId)!, structural: structural.has(m.conditionId), settings: st, now,
-        crowd: { top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }, // ponytail: comment skew not wired
-      });
+      const sc = score({ m, snap }, R.get(m.conditionId)!);
       const d1 = structural.get(m.conditionId);
       if (smallCapTooBusy(sc.tier, snap.vol24h ?? 0, !!d1, st)) return []; // busy small-cap markets are already efficient; size tier and structural legs exempt
       return [{
@@ -162,7 +184,10 @@ export async function screenAll(d: Deps) {
         tier: sc.tier, structuralFlag: sc.structural, structuralDetail: d1 ?? null,
       } satisfies typeof s.screens.$inferInsert];
     });
-    for (const c of chunks(out, 200)) await d.db.insert(s.screens).values(c);
+    // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen. neon-http has no interactive transactions but batches atomically.
+    const parts = chunks(out, 500);
+    if ("batch" in d.db) await (d.db as unknown as { batch(q: unknown[]): Promise<unknown> }).batch(parts.map((c) => d.db.insert(s.screens).values(c)));
+    else await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
 
     const list = await shortlist(d.db, 20);
     const res = {
