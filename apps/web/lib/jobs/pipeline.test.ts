@@ -231,3 +231,9 @@ describe("research disabled (prod without ANTHROPIC_API_KEY)", () => {
     expect(await n()).toEqual(before);
   });
 });
+
+describe("sweep timestamp", () => {
+  it("successful sweep writes kick:sweepAt", async () => {
+    expect(await d.kv.get<number>("kick:sweepAt")).toBeGreaterThan(0);
+  });
+});
