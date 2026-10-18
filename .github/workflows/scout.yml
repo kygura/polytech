@@ -1,6 +1,6 @@
 # Heartbeat for scouting on Vercel Hobby (vercel.json crons are once-per-day there).
 # A read of the public watchlist runs kickIfStale, which starts scoutChain (sweep -> snapshot -> screen -> research)
-# when the last kick is older than 30 min; its KV lock keeps overlapping pings to one start.
+# when the last kick is older than 30 min; its KV lock keeps overlapping pings to one start. Merged with the sweep fixes in 85b81c8.
 name: scout
 
 on:
