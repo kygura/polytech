@@ -23,6 +23,7 @@ type Side = "YES" | "NO";
 type Phase =
   | { s: "idle" }
   | { s: "signing" }
+  | { s: "checking" }
   | { s: "open"; orderId: string; shares: number; filled: number; avg: number | null; since: number; cancelling?: boolean }
   | { s: "filled"; shares: number; avg: number; fee: number }
   | { s: "cancelled"; shares: number; filled: number }
@@ -144,7 +145,8 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
     setPhase({ s: "signing" });
     const since = Date.now();
     const order: LimitOrder = { tokenId, side: "BUY", price: onTick(pr), shares: q.shares, expiresAt: new Date(since + ORDER_TTL_MS) };
-    const res = await placeTicketOrder(ex, order, isRejection);
+    // the send didn't confirm: say so while the outcome is looked up (the wait runs only between re-checks)
+    const res = await placeTicketOrder(ex, order, isRejection, (ms) => { setPhase({ s: "checking" }); return new Promise((r) => setTimeout(r, ms)); });
     if (res.kind === "open") setPhase({ s: "open", orderId: res.orderId, shares: q.shares, filled: 0, avg: null, since });
     else if (res.kind === "filled") setPhase({ s: "filled", shares: res.shares, avg: res.avg, fee: res.fee });
     else if (res.kind === "rejected") setPhase({ s: "error", msg: res.error });
@@ -204,6 +206,10 @@ export function TradeTicket({ d }: { d: PublicMarketDetail }) {
       case "idle":
         label = "Sign and place order"; stateWord = "ready"; off = !valid; onClick = () => void place();
         if (q) aria = `Sign and place order: buy ${side} ${shares(q.shares)} shares at ${onTick(pr!).toFixed(3)}, up to ${usd(q.maxLoss)}`;
+        break;
+      case "checking":
+        label = "Checking if your order went through…"; spin = off = true; stateWord = "checking";
+        line = "The send didn't confirm. Looking it up on Polymarket before anything else.";
         break;
       case "signing":
         label = "Confirm in your wallet…"; spin = off = true; stateWord = "signing";

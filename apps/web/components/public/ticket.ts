@@ -107,7 +107,7 @@ export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (
 // Err wide: a missed real fill reads as `unknown` and invites a resend (double exposure); a false `filled` only misreports until the
 // positions refresh. Same 60s window as the ticket's order-status check.
 const SKEW_MS = 60_000;
-const LAG_TRIES = 3, LAG_MS = 5_000; // the venue's trade index can trail the match: re-check ~15s before saying unknown
+const LAG_TRIES = 3, LAG_MS = 5_000; // the venue's trade index can trail the match: up to 3 lookups 5s apart (~10s) before saying unknown
 // a limit fills at the resting maker's price: at or below the limit for BUY, at or above for SELL
 const atOrBetter = (p: number, o: LimitOrder) => (o.side === "BUY" ? p <= o.price + 1e-9 : p >= o.price - 1e-9);
 
