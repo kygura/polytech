@@ -5,11 +5,18 @@ import { big, clamp, elapsed, hhmm, int, left } from "../fmt";
 import type { Fleet as FleetT, Pod } from "../types";
 import { type Col, type Ctx, Err, Pane, Table } from "../ui";
 
-const ROLES = ["researcher", "skeptic", "base-rate", "news", "judge"];
+const BUILT_IN_ROLES = ["rules", "source", "base_rate", "news", "red_team"];
 const GLYPH: Record<string, [string, string | undefined]> = { queued: ["○", "gray"], running: ["◐", "cyan"], done: ["●", "green"], failed: ["✗", "red"] };
 const STATUS_COLOR: Record<string, string> = { queued: "gray", running: "cyan", judging: "cyan", done: "green", failed: "red" };
 const tokens = (p: Pod) => p.agents.reduce((t, a) => t + (a.usage?.inputTokens ?? 0) + (a.usage?.outputTokens ?? 0), 0);
-const agentGlyph = (p: Pod, role: string) => GLYPH[p.agents.find((a) => a.role === role || a.role.startsWith(role.slice(0, 4)))?.status ?? "queued"] ?? GLYPH.queued!;
+/** Roles present in these pods: built-ins first (in order), then custom roles as first seen, judge last. */
+export function rolesOf(pods: Pod[]): string[] {
+  const seen = new Set(pods.flatMap((p) => p.agents.map((a) => a.role)));
+  const builtIn = BUILT_IN_ROLES.filter((r) => seen.has(r));
+  const custom = [...seen].filter((r) => !BUILT_IN_ROLES.includes(r) && r !== "judge");
+  return [...builtIn, ...custom, ...(seen.has("judge") ? ["judge"] : [])];
+}
+const agentGlyph = (p: Pod, role: string) => GLYPH[p.agents.find((a) => a.role === role)?.status ?? "queued"] ?? GLYPH.queued!;
 
 const COLS: Col<Pod>[] = [
   { h: "Pod", w: 6, cell: (p) => p.id.slice(0, 6) },
@@ -25,7 +32,7 @@ const COLS: Col<Pod>[] = [
 export function Fleet({ ctx }: { ctx: Ctx }) {
   const [sel, setSel] = useState(0), [open, setOpen] = useState(false), [scroll, setScroll] = useState(0);
   const { data, error } = useFetch<FleetT>("/api/fleet", ctx.tick);
-  const pods = data?.pods ?? [], cur = pods[clamp(sel, pods.length)];
+  const pods = data?.pods ?? [], cur = pods[clamp(sel, pods.length)], roles = rolesOf(pods);
   useInput(
     (ch, key) => {
       if (open && (key.escape || key.backspace || key.delete)) setOpen(false);
@@ -59,10 +66,10 @@ export function Fleet({ ctx }: { ctx: Ctx }) {
     <Box flexDirection="column">
       <Text>{` pods today ${b.podsToday}/${b.maxPodsPerDay}  sandboxes ${b.activeSandboxes}/${b.maxConcurrentSandboxes}  sandbox min ${Math.round(b.sandboxS / 60)}  tokens ${big(b.tokensIn)}/${big(b.tokensOut)}  spend $${b.spendTodayUsd.toFixed(2)}/$${b.dailySpendCapUsd}`}</Text>
       <Table
-        cols={[...COLS.slice(0, 6), { h: "R S B N J", w: 9, cell: () => "" }, ...COLS.slice(6)]}
+        cols={[...COLS.slice(0, 6), { h: roles.map((r) => r.charAt(0).toUpperCase()).join(" "), w: Math.max(1, roles.length * 2 - 1), cell: (p) => roles.map((r) => agentGlyph(p, r)[0]).join(" ") }, ...COLS.slice(6)]}
         rows={pods} sel={clamp(sel, pods.length)} height={ctx.h - 1} width={ctx.w}
       />
-      {pods.length > 0 && <Text color="gray">  agents: {ROLES.map((r) => { const g = agentGlyph(cur!, r); return <Text key={r} color={g[1]}>{g[0]} </Text>; })} for selected pod · Enter → agents + output</Text>}
+      {pods.length > 0 && <Text color="gray">  agents: {roles.map((r) => { const g = agentGlyph(cur!, r); return <Text key={r} color={g[1]}>{g[0]} </Text>; })} for selected pod · Enter → agents + output</Text>}
     </Box>
   );
 }

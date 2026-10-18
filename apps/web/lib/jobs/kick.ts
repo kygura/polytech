@@ -9,10 +9,12 @@ const STARTED = "kick:startedAt";
 /** Scouting chain in cron order, same JOBS the cron route runs. Each job keeps its own lock; research keeps its budget cap. */
 export async function scoutChain() {
   "use workflow";
-  await chainStep("sweep");
-  await chainStep("snapshot", "all");
-  await chainStep("screen");
-  await chainStep("research");
+  // steps keep their durable retries; one that still fails after them must not block the later ones (each job is idempotent and locked)
+  const run = (n: JobName, sc?: "watchlist" | "all") => chainStep(n, sc).catch((e) => console.error(`chain: ${n} failed`, e));
+  await run("sweep");
+  await run("snapshot", "all");
+  await run("screen");
+  await run("research");
 }
 
 async function chainStep(name: JobName, scope?: "watchlist" | "all") {

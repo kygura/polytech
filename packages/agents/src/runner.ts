@@ -3,7 +3,8 @@ import { AgentOutput } from "@pm/core";
 import { withBackoff, type BackoffOpts } from "./backoff";
 import type { AgentRole, Brief } from "./prompts";
 
-export type RunOpts = { model: string; timeoutMs: number; exaCallCap: number; hint?: string };
+/** `system` overrides ROLE_PROMPTS[role] (custom roles); `maxTurns` bounds the agent loop. */
+export type RunOpts = { model: string; timeoutMs: number; exaCallCap: number; hint?: string; system?: string; maxTurns?: number; deadline?: number /* epoch ms: no attempt starts or runs past it */ };
 export type Usage = { inputTokens: number; outputTokens: number; costUsd: number };
 export type Run = { output: AgentOutput; usage: Usage; durationS: number; sandboxS: number };
 export type AgentRunner = (role: AgentRole, brief: Brief, opts: RunOpts) => Promise<Run>;
@@ -15,7 +16,9 @@ export const validated =
   async (role, brief, opts) => {
     let hint = opts.hint;
     for (let attempt = 0; ; attempt++) {
-      const r = await withBackoff(() => raw(role, brief, { ...opts, hint }), backoff);
+      const left = (opts.deadline ?? Infinity) - Date.now();
+      if (left <= 0) throw new Error("TIMEOUT: deadline reached before attempt");
+      const r = await withBackoff(() => raw(role, brief, { ...opts, hint, timeoutMs: Math.min(opts.timeoutMs, left) }), { ...backoff, deadline: opts.deadline });
       const p = AgentOutput.safeParse(r.output);
       if (p.success && p.data.role === role) return { ...r, output: p.data };
       const why = p.success ? `role must be "${role}"` : p.error.message;

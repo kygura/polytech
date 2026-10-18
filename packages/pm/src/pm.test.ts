@@ -30,7 +30,7 @@ describe("fetch wrapper", () => {
     const pm = createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) });
     expect(await pm.feeRateBps("1")).toBe(400);
     expect(f).toHaveBeenCalledTimes(3);
-    expect(sleeps).toEqual([250, 500]);
+    expect(sleeps).toEqual([5000, 500]);
   });
   it("caps retry-after at 30s", async () => {
     const f = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "999" } })).mockResolvedValueOnce(json({ base_fee: "1" }));
@@ -68,6 +68,30 @@ describe("pagination", () => {
     await createPm({ fixtures: false, fetch: f as never }).listMarkets({ liquidityMin: 1000, endDateMin: "2026-01-03T00:00:00.000Z", endDateMax: "2026-05-01T00:00:00.000Z" });
     const q = new URL(String((f.mock.calls[0] as unknown[])[0])).searchParams;
     expect([q.get("closed"), q.get("liquidity_num_min"), q.get("end_date_min"), q.get("end_date_max")]).toEqual(["false", "1000", "2026-01-03T00:00:00.000Z", "2026-05-01T00:00:00.000Z"]);
+  });
+  it("walkMarkets streams pages and stops cleanly (complete=false) on a persistent 429", async () => {
+    const m = (n: number) => ({ id: String(n), conditionId: `0x${n}`, question: `q${n}` });
+    const f = vi.fn()
+      .mockResolvedValueOnce(json({ markets: [m(1), m(2)], next_cursor: "c1" }))
+      .mockResolvedValue(new Response("1015", { status: 429, headers: { "retry-after": "2" } }));
+    const sleeps: number[] = [];
+    const got: string[][] = [];
+    const r = await createPm({ fixtures: false, fetch: f as never, sleep: async (ms) => void sleeps.push(ms) }).walkMarkets({}, (ms) => void got.push(ms.map((x) => x.id)));
+    expect(got).toEqual([["1", "2"]]);
+    expect(r).toEqual({ pages: 1, complete: false });
+    expect(sleeps).toEqual([100, 5000]); // page gap, then one wait floored at 5 s; no hammering
+    expect(f).toHaveBeenCalledTimes(3);
+  });
+  it("walkMarkets: budget exhausted -> complete=false after the page in flight", async () => {
+    const f = vi.fn(async () => json({ markets: [{ id: "1", conditionId: "0x1", question: "q" }], next_cursor: `c${Math.random()}` }));
+    const r = await createPm({ fixtures: false, fetch: f as never, sleep: async () => {} }).walkMarkets({ budgetMs: -1 }, () => {});
+    expect(r).toEqual({ pages: 1, complete: false });
+  });
+  it("429 waits at least 5 s even with Retry-After: 0", async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "0" } })).mockResolvedValueOnce(json({ base_fee: "1" }));
+    const sleeps: number[] = [];
+    await createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) }).feeRateBps("1");
+    expect(sleeps[0]).toBeGreaterThanOrEqual(5000);
   });
   it("stops on a repeated cursor (API quirk)", async () => {
     const f = vi.fn(async () => json({ markets: [{ id: "1", conditionId: "0x1", question: "q" }], next_cursor: "same" }));
@@ -151,5 +175,30 @@ describe("fixture client", () => {
   it("network failures after retries are marked like HTTP failures", async () => {
     const pm = createPm({ fixtures: false, fetch: (async () => { throw new TypeError("fetch failed"); }) as never, sleep: async () => {} });
     await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/oi -> network fetch failed/);
+  });
+});
+
+describe("searchMarkets", () => {
+  it("returns open markets matching the query, deduped and capped (fixtures)", async () => {
+    const pm = createPm({ fixtures: true });
+    const ms = await pm.searchMarkets("fed", 3);
+    expect(ms.length).toBeGreaterThan(0);
+    expect(ms.length).toBeLessThanOrEqual(3);
+    expect(ms.every((m) => m.open && m.accepting_orders && m.condition_id)).toBe(true);
+    expect(await pm.searchMarkets("zzzz-no-such-market")).toEqual([]);
+  });
+  it("returns at most 3 markets per event", async () => {
+    const mk = (id: string) => ({ id, conditionId: `0x${id}`, question: `Q${id}`, active: true, closed: false, outcomes: '["Yes","No"]', outcomePrices: '["0.5","0.5"]' });
+    const f = vi.fn().mockResolvedValue(json({ events: [{ id: "big", markets: ["1", "2", "3", "4", "5"].map(mk) }, { id: "e2", markets: [mk("9")] }] }));
+    expect((await createPm({ fixtures: false, fetch: f }).searchMarkets("x")).map((m) => m.id)).toEqual(["1", "2", "3", "9"]);
+  });
+  it("drops closed and non-accepting markets from a live-shaped response", async () => {
+    const mk = (id: string, extra: object) => ({ id, conditionId: `0x${id}`, question: `Q${id}`, active: true, closed: false, outcomes: '["Yes","No"]', outcomePrices: '["0.5","0.5"]', ...extra });
+    const f = vi.fn().mockResolvedValue(json({ events: [{ id: "e1", markets: [mk("1", {}), mk("2", { closed: true }), mk("3", { acceptingOrders: false }), mk("1", {})] }, null] }));
+    const ms = await createPm({ fixtures: false, fetch: f }).searchMarkets("x");
+    expect(ms.map((m) => m.id)).toEqual(["1"]);
+    const u = new URL(f.mock.calls[0]![0]);
+    expect(u.pathname).toBe("/public-search");
+    expect(u.searchParams.get("q")).toBe("x");
   });
 });

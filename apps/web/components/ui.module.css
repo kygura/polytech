@@ -77,3 +77,9 @@
 .drawer::backdrop { background: var(--backdrop); }
 .drawerHead { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); font-weight: 600; }
 .drawerBody { padding: var(--sp-3); overflow: auto; max-height: calc(100vh - 40px); }
+
+.hits { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+.hit { padding: var(--sp-2); border-left: 2px solid transparent; cursor: pointer; display: flex; flex-direction: column; gap: var(--sp-1); }
+.search { width: 100%; margin-top: var(--sp-1); }
+.searchMsg { margin: var(--sp-2) 0 0; }
+.hit[aria-selected="true"], .hit:hover { background: var(--surface-2); border-left-color: var(--accent); }

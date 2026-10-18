@@ -1,4 +1,4 @@
-import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Tier, type WatchCore } from "@pm/core";
+import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
@@ -152,6 +152,8 @@ export async function fleet(r: ReadDeps) {
   const { db } = r, now = r.now();
   const st = await getSettings(db);
   const pods = await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId)).orderBy(desc(s.pods.startedAt)).limit(50);
+  const pids = [...new Set(pods.flatMap((x) => (x.p.profileId ? [x.p.profileId] : [])))];
+  const names = new Map((pids.length ? await db.select({ id: s.researchProfiles.id, name: s.researchProfiles.name }).from(s.researchProfiles).where(inArray(s.researchProfiles.id, pids)) : []).map((x) => [x.id, x.name]));
   const runs = pods.length ? await db.select().from(s.agentRuns).where(inArray(s.agentRuns.podId, pods.map((x) => x.p.id))).orderBy(asc(s.agentRuns.id)) : [];
   type U = { inputTokens: number; outputTokens: number; costUsd: number };
   const usage = (a: (typeof runs)[number]) => (a.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }) as U;
@@ -167,7 +169,7 @@ export async function fleet(r: ReadDeps) {
       tokensIn: todayRuns.reduce((t, a) => t + usage(a).inputTokens, 0), tokensOut: todayRuns.reduce((t, a) => t + usage(a).outputTokens, 0),
     },
     pods: pods.map(({ p, q }) => ({
-      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, status: p.status, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
+      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, profileId: p.profileId, profileName: p.profileId ? names.get(p.profileId) ?? null : null, steering: p.steering as Partial<Steering> | null, steered: p.steering != null, steeringQuestion: (p.steering as { question?: string } | null)?.question ?? null, status: p.status, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
       agents: runs.filter((a) => a.podId === p.id).map((a) => ({ role: a.role, model: a.model, status: a.status, durationS: a.durationS, usage: usage(a), output: a.outputJson })),
     })),
   };

@@ -7,15 +7,16 @@ export const inInput = (e: KeyboardEvent) => {
   return !!t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable);
 };
 
-const GO: Record<string, string> = { w: "/watchlist", f: "/fleet", c: "/calibration", p: "/paper", a: "/autonomy", s: "/settings" };
+const GO: Record<string, string> = { w: "/watchlist", f: "/fleet", r: "/research", c: "/calibration", p: "/paper", a: "/autonomy", s: "/settings" };
 
-/** g+<key> nav, `/` filter, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
-export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void; onTheme: () => void; go?: Record<string, string> }) {
+/** g+<key> nav, `/` find market, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused. `go` replaces the operator g-map (the /trade shell registers only g w / g a). */
+export function useGlobalKeys({ onHelp, onTheme, onSearch, go = GO }: { onHelp: () => void; onTheme: () => void; onSearch?: () => void; go?: Record<string, string> }) {
   const router = useRouter();
   useEffect(() => {
     let pendingG = 0;
     const h = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.querySelector("dialog[open]")) return; // modal open (search, shortcuts, drawers): it owns the keyboard; Esc closes it natively
       if (e.key === "Escape") {
         (document.activeElement as HTMLElement | null)?.blur();
         return;
@@ -26,18 +27,18 @@ export function useGlobalKeys({ onHelp, onTheme, go = GO }: { onHelp: () => void
       if (g && go[e.key]) { router.push(go[e.key]!); e.preventDefault(); return; }
       switch (e.key) {
         case "g": pendingG = Date.now(); break;
-        case "/": document.querySelector<HTMLInputElement>("[data-filter]")?.focus(); e.preventDefault(); break;
+        case "/": if (onSearch) { onSearch(); e.preventDefault(); } break;
         case "?": onHelp(); break;
         case "t": onTheme(); break;
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [router, onHelp, onTheme, go]);
+  }, [router, onHelp, onTheme, onSearch, go]);
 }
 
 export const SHORTCUTS: [string, string][] = [
-  ["g w / g f / g c / g p / g a / g s", "watchlist / fleet / calibration / book / autonomy / settings"],
-  ["j / k", "move selection"], ["Enter", "open row"], ["/", "focus filter"], ["Esc", "blur / close"],
-  ["p / m / r", "pin / mute / re-research selected"], ["t", "toggle theme"], ["?", "this sheet"],
+  ["g w / g f / g r / g c / g p / g a / g s", "watchlist / fleet / research / calibration / book / autonomy / settings"],
+  ["j / k", "move selection"], ["Enter", "open row"], ["/", "find a market to research"], ["Esc", "blur / close"],
+  ["p / m / r / s", "pin / mute / re-research / steer & research (market page)"], ["n / p / x", "research page: new / preview / run now"], ["t", "toggle theme"], ["?", "this sheet"],
 ];

@@ -58,6 +58,20 @@ export const pods = pgTable("pods", {
   status: text("status").notNull().default("running"),
   trigger: text("trigger").notNull(),
   costSandboxS: dp("cost_sandbox_s").notNull().default(0),
+  profileId: text("profile_id"), // research_profiles.id; null = screener / ad-hoc
+  steering: jsonb("steering").$type<Record<string, unknown>>(), // resolved steering that ran
+});
+
+export const researchProfiles = pgTable("research_profiles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  enabled: boolean("enabled").notNull().default(false),
+  filter: jsonb("filter").$type<Record<string, unknown>>().notNull(),
+  steering: jsonb("steering").$type<Record<string, unknown>>().notNull(),
+  everyMin: integer("every_min"),
+  lastRunAt: ts("last_run_at"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
 export const agentRuns = pgTable("agent_runs", {

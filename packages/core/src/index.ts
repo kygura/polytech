@@ -6,4 +6,5 @@ export * from "./screen/index";
 export * from "./sizing";
 export * from "./structural";
 export * from "./agent-output";
+export * from "./research-profile";
 export * from "./book/index"; // T2

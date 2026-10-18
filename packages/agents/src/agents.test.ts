@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@pm/core";
 import { AgentOutput } from "@pm/core";
-import { AnthropicOutageError, isOverloadText, PodFailedError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
+import { DEFAULT_STEERING, type Steering } from "@pm/core";
+import { AnthropicOutageError, anthropicJudge, userPrompt, isOverloadText, PodFailedError, PodTimeoutError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
 
 const mk = (q: string): Market => ({
@@ -54,7 +55,7 @@ describe("runPod", () => {
   });
 
   it("caps confidence when estimates straddle p_mid", async () => {
-    const p = { rules: null, source: 0.9, base_rate: 0.8, news: 0.2, red_team: 0.1 } as const;
+    const p = { rules: null, source: 0.9, base_rate: 0.8, news: 0.2, red_team: 0.1 } as Record<string, number | null>;
     const raw: RawRunner = async (role, brief, o) => {
       const r = await fakeRaw(role, brief, o);
       return { ...r, output: { ...(r.output as object), probability: p[role] } };
@@ -65,7 +66,7 @@ describe("runPod", () => {
   });
 
   it("capped means straddle tripped, even if judge confidence is already below the cap", async () => {
-    const p = { rules: null, source: 0.9, base_rate: 0.8, news: 0.2, red_team: 0.1 } as const;
+    const p = { rules: null, source: 0.9, base_rate: 0.8, news: 0.2, red_team: 0.1 } as Record<string, number | null>;
     const raw: RawRunner = async (role, brief, o) => ({ ...(await fakeRaw(role, brief, o)), output: { ...((await fakeRaw(role, brief, o)).output as object), probability: p[role] } });
     const judge: typeof fakeJudge = async (x) => { const j = await fakeJudge(x); return { ...j, judge: { ...j.judge, confidence: 0.3 } }; };
     const r = await runPod({ market, siblings: sibs, book, runner: validated(raw), judge });
@@ -80,6 +81,18 @@ describe("runPod", () => {
     expect(e.agents).toHaveLength(5);
   });
 
+  it("hung agents / judge hit the pod deadline and fail with TIMEOUT instead of hanging", async () => {
+    const hang = () => new Promise<never>(() => {});
+    const a = await runPod({ market, siblings: sibs, book, runner: hang, judge: fakeJudge, settings: { agentsMs: 30 } }).catch((x) => x);
+    expect(a).toBeInstanceOf(PodFailedError);
+    expect(a.cause).toBeInstanceOf(PodTimeoutError);
+    expect(a.agents.every((x: { ok: boolean; error?: string }) => !x.ok && x.error!.startsWith("TIMEOUT"))).toBe(true);
+    const j = await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: hang, settings: { judgeMs: 30 } }).catch((x) => x);
+    expect(j).toBeInstanceOf(PodFailedError);
+    expect(j.cause).toBeInstanceOf(PodTimeoutError);
+    expect(j.agents).toHaveLength(5);
+  });
+
   it("proceeds with 3 ok, fails with fewer", async () => {
     const failing = (n: number): RawRunner => async (role, brief, o) => {
       if (["source", "news", "red_team"].slice(0, n).includes(role)) throw new Error("boom");
@@ -88,6 +101,93 @@ describe("runPod", () => {
     const r = await runPod({ market, siblings: sibs, book, runner: validated(failing(2)), judge: fakeJudge });
     expect(r.agents.filter((a) => !a.ok)).toHaveLength(2);
     await expect(runPod({ market, siblings: sibs, book, runner: validated(failing(3)), judge: fakeJudge })).rejects.toThrow(/pod failed/);
+  });
+});
+
+describe("runPod steering", () => {
+  const steer = (o: Partial<Steering>): Steering => ({ ...DEFAULT_STEERING, ...o });
+  const spy = () => {
+    const calls: { role: string; brief: Parameters<typeof fakeRunner>[1]; o: Parameters<typeof fakeRunner>[2] }[] = [];
+    const runner: typeof fakeRunner = async (role, brief, o) => { calls.push({ role, brief, o }); return fakeRunner(role, brief, o); };
+    return { calls, runner };
+  };
+
+  it("role subset runs only those roles", async () => {
+    const { calls, runner } = spy();
+    const r = await runPod({ market, siblings: sibs, book, runner, judge: fakeJudge, steering: steer({ roles: ["rules", "news", "source"] }) });
+    expect(calls.map((c) => c.role).sort()).toEqual(["news", "rules", "source"]);
+    expect(r.agents.map((a) => a.role)).toEqual(["rules", "news", "source"]);
+  });
+
+  it("custom role runs with COMMON + operator prompt and a valid output keyed by its role", async () => {
+    const seen: string[] = [];
+    const runner = validated(async (role, brief, o) => { seen.push(`${role}:${o.system ?? ""}`); return fakeRaw(role, brief, o); });
+    const r = await runPod({
+      market, siblings: sibs, book, runner, judge: fakeJudge,
+      steering: steer({ roles: ["rules", "source", "news"], customRoles: [{ key: "macro", prompt: "Cover macro drivers only." }] }),
+    });
+    const macro = seen.find((x) => x.startsWith("macro:"))!;
+    expect(macro).toMatch(/forecasting pod/);
+    expect(macro).toMatch(/Cover macro drivers only\./);
+    expect(seen.filter((x) => !x.startsWith("macro:")).every((x) => x.endsWith(":"))).toBe(true); // built-ins keep ROLE_PROMPTS
+    expect(r.agents.map((a) => a.role)).toEqual(["rules", "source", "news", "macro"]);
+    expect(r.agents.every((a) => a.ok)).toBe(true);
+  });
+
+  it("question reaches every agent prompt and the judge prompt", async () => {
+    const { calls, runner } = spy();
+    const q = "Is the filing deadline binding?";
+    await runPod({ market, siblings: sibs, book, runner, judge: fakeJudge, steering: steer({ question: q }) });
+    expect(calls).toHaveLength(5);
+    for (const c of calls) {
+      expect(userPrompt(c.brief)).toContain(`Operator focus: ${q}`);
+      expect(userPrompt(c.brief).split("Operator focus")[0]).not.toContain(q); // prose after the JSON, not inside it
+    }
+    let sent = "";
+    const out = { content: [{ type: "text", text: JSON.stringify({ p_hat: 0.5, confidence: 0.5, thesis: "t", catalysts: [], kill_criteria: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } };
+    const client = { messages: { create: async (a: { messages: { content: string }[] }) => ((sent = a.messages[0]!.content), out) } };
+    await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: anthropicJudge(client as never), steering: steer({ question: q }) });
+    expect(sent).toContain(`Operator focus: ${q}`);
+    await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: anthropicJudge(client as never) });
+    expect(sent).not.toContain("Operator focus");
+  });
+
+  it("per-role models reach the runner and judge; others fall back to settings, then defaults", async () => {
+    const { calls, runner } = spy();
+    let judgeModel: string | undefined;
+    const judge: typeof fakeJudge = async (i) => { judgeModel = i.model; return fakeJudge(i); };
+    await runPod({
+      market, siblings: sibs, book, runner, judge, settings: { models: { news: "claude-opus-5-5" } },
+      steering: steer({ models: { source: "claude-haiku-5-5", judge: "claude-sonnet-5-5" } }),
+    });
+    const m = Object.fromEntries(calls.map((c) => [c.role, c.o.model]));
+    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-haiku-5-5", red_team: "claude-sonnet-5-5" });
+    expect(judgeModel).toBe("claude-sonnet-5-5");
+  });
+
+  it("exaCallCap / maxTurns: steering may only lower the settings values", async () => {
+    const { calls, runner } = spy();
+    await runPod({ market, siblings: sibs, book, runner, judge: fakeJudge, settings: { exaCallCap: 6, maxTurns: 12 }, steering: steer({ exaCallCap: 2, maxTurns: 50 }) });
+    expect(calls.every((c) => c.o.exaCallCap === 2 && c.o.maxTurns === 12)).toBe(true);
+  });
+
+  it("maxCostUsd skips queued roles (recorded as skipped); judge still runs", async () => {
+    let started = 0;
+    const runner: typeof fakeRunner = async (role, brief, o) => { started++; return { ...(await fakeRunner(role, brief, o)), usage: { inputTokens: 0, outputTokens: 0, costUsd: 1 } }; };
+    const r = await runPod({ market, siblings: sibs, book, runner, judge: fakeJudge, settings: { concurrency: 1 }, steering: steer({ maxCostUsd: 3 }) });
+    expect(started).toBe(3);
+    expect(r.agents.filter((a) => a.ok)).toHaveLength(3);
+    expect(r.agents.filter((a) => !a.ok && a.skipped).map((a) => a.role)).toEqual(["news", "red_team"]);
+    expect(r.judge.p_hat).toBeGreaterThan(0);
+  });
+
+  it("success threshold is min(3, roleCount)", async () => {
+    const failing = (bad: string[]): RawRunner => async (role, brief, o) => { if (bad.includes(role)) throw new Error("boom"); return fakeRaw(role, brief, o); };
+    const one = steer({ roles: ["source"] }), two = steer({ roles: ["source", "news"] });
+    expect((await runPod({ market, siblings: sibs, book, runner: validated(failing([])), judge: fakeJudge, steering: one })).agents).toHaveLength(1);
+    expect((await runPod({ market, siblings: sibs, book, runner: validated(failing([])), judge: fakeJudge, steering: two })).agents).toHaveLength(2);
+    await expect(runPod({ market, siblings: sibs, book, runner: validated(failing(["source"])), judge: fakeJudge, steering: one })).rejects.toThrow(/pod failed/);
+    await expect(runPod({ market, siblings: sibs, book, runner: validated(failing(["news"])), judge: fakeJudge, steering: two })).rejects.toThrow(/pod failed/);
   });
 });
 

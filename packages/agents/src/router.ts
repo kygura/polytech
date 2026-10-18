@@ -1,6 +1,8 @@
+import type { ALLOWED_MODELS } from "@pm/core";
+
 export type ModelRole = "rules" | "source" | "base_rate" | "news" | "red_team" | "judge" | "r_classifier";
 
-export const DEFAULT_MODELS: Record<ModelRole, string> = {
+export const DEFAULT_MODELS: Record<ModelRole, (typeof ALLOWED_MODELS)[number]> = {
   rules: "claude-haiku-5-5",
   source: "claude-sonnet-5-5",
   base_rate: "claude-sonnet-5-5",
@@ -10,9 +12,9 @@ export const DEFAULT_MODELS: Record<ModelRole, string> = {
   r_classifier: "claude-haiku-5-5",
 };
 
-/** role -> model id; `models` is the Settings override map. */
-export const modelFor = (role: ModelRole, models?: Partial<Record<ModelRole, string>>) =>
-  models?.[role] ?? DEFAULT_MODELS[role];
+/** role -> model id; `models` is the Settings override map. Custom role keys fall back to the source model. */
+export const modelFor = (role: string, models?: Partial<Record<string, string>>) =>
+  models?.[role] ?? (DEFAULT_MODELS as Record<string, string>)[role] ?? DEFAULT_MODELS.source;
 
 // ponytail: placeholder USD per Mtok (in/out) to cost judge + classifier calls; replace with real pricing.
 const PRICE: [string, number, number][] = [["haiku", 1, 5], ["sonnet", 3, 15], ["opus", 5, 25]];

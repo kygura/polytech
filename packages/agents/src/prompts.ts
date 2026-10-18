@@ -1,8 +1,9 @@
 import type { Market } from "@pm/core";
-import type { AgentOutput } from "@pm/core";
+import type { AgentOutput, RoleKey } from "@pm/core";
 
 export type AgentRole = AgentOutput["role"];
-export type Brief = { question: string; rules: string; tags: string[]; end_date: string; siblings: { question: string }[] };
+/** `focus` = steering.question (operator focus); rendered as prose after the JSON, not inside it. */
+export type Brief = { question: string; rules: string; tags: string[]; end_date: string; siblings: { question: string }[]; focus?: string };
 
 /** Blind brief: NEVER add price/mid/book fields here. */
 export const buildBrief = (m: Market, siblings: Market[]): Brief => ({
@@ -13,9 +14,9 @@ export const buildBrief = (m: Market, siblings: Market[]): Brief => ({
   siblings: siblings.map((s) => ({ question: s.question })),
 });
 
-const COMMON = `You are one analyst in a forecasting pod for a prediction market question. You get a JSON brief (question, rules, tags, end_date, siblings). You are NOT told the market price; estimate blind. Every fact must carry a source url, a short verbatim quote (under 25 words) and its date. Use only retrieved sources; never invent urls. Output ONLY the structured result: role, probability (0..1, or null for the rules reader), confidence (0..1, your own), key_facts[{claim,url,quote,date}], risks[], notes (max 150 words).`;
+export const COMMON = `You are one analyst in a forecasting pod for a prediction market question. You get a JSON brief (question, rules, tags, end_date, siblings). You are NOT told the market price; estimate blind. Every fact must carry a source url, a short verbatim quote (under 25 words) and its date. Use only retrieved sources; never invent urls. Output ONLY the structured result: role, probability (0..1, or null for the rules reader), confidence (0..1, your own), key_facts[{claim,url,quote,date}], risks[], notes (max 150 words).`;
 
-export const ROLE_PROMPTS: Record<AgentRole, string> = {
+export const ROLE_PROMPTS: Record<RoleKey, string> = {
   rules: `${COMMON}
 Role: rules reader (role="rules", probability=null). Parse the resolution text: the exact settling source, deadlines, edge cases, ambiguity, and how the crowd is likely to misread it. Put the checklist in notes and ambiguity in risks. No web search needed unless a source named in the rules must be checked.`,
   source: `${COMMON}
@@ -32,4 +33,5 @@ export const JUDGE_PROMPT = `You are the judge of a forecasting pod. You receive
 
 export const R_PROMPT = `You rate how researchable a prediction market is from its resolution rules alone. Return: R (0..1, can public sources settle it), objective_source (bool: a named objective source decides it), scheduled_event (bool: resolves on a dated, scheduled event), public_data_release (bool: a public data release decides it), rule_ambiguity (0..1, higher = more ambiguous), note (one short sentence).`;
 
-export const userPrompt = (b: Brief) => `Brief:\n${JSON.stringify(b, null, 2)}`;
+export const focusLine = (b: Brief) => (b.focus ? `\n\nOperator focus: ${b.focus}` : "");
+export const userPrompt = (b: Brief) => `Brief:\n${JSON.stringify({ ...b, focus: undefined }, null, 2)}${focusLine(b)}`;

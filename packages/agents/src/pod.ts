@@ -1,21 +1,25 @@
-import { capConfidence, straddles, type AgentOutput, type Level, type Market, type Settings } from "@pm/core";
+import { DEFAULT_STEERING, capConfidence, straddles, type AgentOutput, type Level, type Market, type Settings, type Steering } from "@pm/core";
 import type { Judge, JudgeOut } from "./judge";
-import { buildBrief, type AgentRole } from "./prompts";
+import { COMMON, buildBrief, type AgentRole } from "./prompts";
 import { AnthropicOutageError, isOverload } from "./backoff";
 import { modelFor, type ModelRole } from "./router";
 import type { AgentRunner, Run, Usage } from "./runner";
 
 export const ROLES: AgentRole[] = ["rules", "source", "base_rate", "news", "red_team"];
-const MIN_OK = 3;
 
 export type PodSettings = {
   models?: Partial<Record<ModelRole, string>>;
   concurrency?: number;
   timeoutMs?: number; // per agent; default 10 min
-  exaCallCap?: number; // per agent
+  agentsMs?: number; // hard wall-clock budget for the whole agent phase (all waves); default none
+  judgeMs?: number; // hard wall-clock budget for the judge call; default none
+  exaCallCap?: number; // per agent; steering may only lower it
+  maxTurns?: number; // per agent; default 20, steering may only lower it
   core?: Settings;
 };
-export type AgentResult = { role: AgentRole; model: string; ok: true; run: Run } | { role: AgentRole; model: string; ok: false; error: string; outage: boolean };
+export type AgentResult =
+  | { role: AgentRole; model: string; ok: true; run: Run }
+  | { role: AgentRole; model: string; ok: false; error: string; outage: boolean; skipped?: true }; // skipped: never started (cost cap)
 export type EvidenceRow = { agent_role: AgentRole; claim: string; url: string; quote: string; date: string; direction: "+" | "-" };
 export type PodResult = {
   agents: AgentResult[];
@@ -30,6 +34,17 @@ export class PodFailedError extends Error {
   }
 }
 
+/** A pod phase ran out of wall-clock budget (the host function window); recorded as reason TIMEOUT. */
+export class PodTimeoutError extends Error {
+  constructor(public what: string) { super(`TIMEOUT: ${what}`); }
+}
+/** Hard stop: retries/backoff inside `p` can outlive its own timeout, so race it. `p` keeps running but is ignored. */
+const within = <T>(p: Promise<T>, ms: number, what: string) => {
+  if (!Number.isFinite(ms)) return p;
+  let t: ReturnType<typeof setTimeout>;
+  return Promise.race([p, new Promise<never>((_, rej) => { t = setTimeout(() => rej(new PodTimeoutError(what)), Math.max(0, ms)); })]).finally(() => clearTimeout(t));
+};
+
 const trim = (q: string, n = 24) => q.trim().split(/\s+/).slice(0, n).join(" ");
 
 export async function runPod(a: {
@@ -37,20 +52,43 @@ export async function runPod(a: {
   siblings: Market[];
   book: { bids: Level[]; asks: Level[]; pMid: number };
   settings?: PodSettings;
+  steering?: Steering;
   runner: AgentRunner;
   judge: Judge;
   onAgentDone?: (r: AgentResult) => void;
 }): Promise<PodResult> {
   const { settings = {}, book } = a;
-  const brief = buildBrief(a.market, a.siblings);
+  const st = a.steering ?? DEFAULT_STEERING;
+  const models = { ...settings.models, ...st.models }; // steering wins over settings
+  const brief = { ...buildBrief(a.market, a.siblings), ...(st.question ? { focus: st.question } : {}) };
+  const custom = new Map(st.customRoles.map((r) => [r.key, `${COMMON}\nRole key: role="${r.key}".\n${r.prompt}`]));
+  const roles: AgentRole[] = [...st.roles, ...custom.keys()];
+  const exaCap = Math.min(st.exaCallCap ?? Infinity, settings.exaCallCap ?? 10), turnCap = settings.maxTurns ?? 20;
+  const maxTurns = Math.min(st.maxTurns ?? Infinity, turnCap);
   const agents: AgentResult[] = [];
-  const queue = [...ROLES];
+  let spent = 0;
+  const queue = [...roles];
+  const t0 = Date.now(), agentsEnd = t0 + (settings.agentsMs ?? Infinity);
   const worker = async () => {
     for (let role = queue.shift(); role; role = queue.shift()) {
-      const model = modelFor(role, settings.models);
+      const model = modelFor(role, models);
       let r: AgentResult;
+      if (st.maxCostUsd != null && spent >= st.maxCostUsd) {
+        r = { role, model, ok: false, error: "skipped: maxCostUsd reached", outage: false, skipped: true };
+        agents.push(r);
+        a.onAgentDone?.(r);
+        continue;
+      }
+      const left = agentsEnd - Date.now();
+      if (left <= 0) {
+        r = { role, model, ok: false, error: "TIMEOUT: agent phase budget spent before start", outage: false, skipped: true };
+        agents.push(r);
+        a.onAgentDone?.(r);
+        continue;
+      }
       try {
-        const run = await a.runner(role, brief, { model, timeoutMs: settings.timeoutMs ?? 600_000, exaCallCap: settings.exaCallCap ?? 10 });
+        const run = await within(a.runner(role, brief, { model, timeoutMs: Math.min(settings.timeoutMs ?? 600_000, left), exaCallCap: exaCap, maxTurns, system: custom.get(role), deadline: agentsEnd }), left, `agent ${role}`);
+        spent += run.usage.costUsd;
         r = { role, model, ok: true, run };
       } catch (e) {
         r = { role, model, ok: false, error: e instanceof Error ? e.message : String(e), outage: e instanceof AnthropicOutageError || isOverload(e) };
@@ -59,18 +97,21 @@ export async function runPod(a: {
       a.onAgentDone?.(r);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(settings.concurrency ?? 5, ROLES.length) }, worker));
-  agents.sort((x, y) => ROLES.indexOf(x.role) - ROLES.indexOf(y.role));
+  await Promise.all(Array.from({ length: Math.min(settings.concurrency ?? 5, roles.length) }, worker));
+  agents.sort((x, y) => roles.indexOf(x.role) - roles.indexOf(y.role));
 
   const ok = agents.flatMap((x) => (x.ok ? [x.run] : []));
-  if (ok.length < MIN_OK) throw new PodFailedError(agents);
+  if (ok.length < Math.min(3, roles.length)) throw new PodFailedError(agents, agents.some((x) => !x.ok && x.error.startsWith("TIMEOUT")) ? new PodTimeoutError("agents") : undefined);
   const outputs: AgentOutput[] = ok.map((r) => r.output);
 
   const bidP = book.bids.map((l) => l.price), askP = book.asks.map((l) => l.price);
   const usd = (ls: Level[]) => ls.reduce((s, l) => s + l.price * l.size, 0);
-  const j = await a.judge({
+  const judgeEnd = Date.now() + (settings.judgeMs ?? Infinity);
+  const j = await within(a.judge({
+    deadline: judgeEnd,
     brief,
     outputs,
+    model: modelFor("judge", models),
     book: {
       pMid: book.pMid,
       bestBid: bidP.length ? Math.max(...bidP) : null,
@@ -78,7 +119,7 @@ export async function runPod(a: {
       bidDepthUsd: usd(book.bids),
       askDepthUsd: usd(book.asks),
     },
-  }).catch((e) => { throw new PodFailedError(agents, e); });
+  }), settings.judgeMs ?? Infinity, "judge").catch((e) => { throw new PodFailedError(agents, e); });
 
   const probs = outputs.map((o) => o.probability);
   const confidence = capConfidence(j.judge.confidence, probs, book.pMid);

@@ -12,6 +12,8 @@ const put = (url: string, body: unknown) => new Request(url, { method: "PUT", bo
 const post = (body?: unknown) => new Request("http://x/", { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 const U = "http://x/api";
 
+vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), after: (f: () => unknown) => void f() })); // no request scope in tests
+
 // The test env has no exchange, so the real rebaseline always refuses before the failed_unknown check. The mock keeps the real job and lets one test inject a needsAck refusal.
 vi.mock("../../lib/jobs", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../lib/jobs")>();
@@ -29,6 +31,8 @@ beforeAll(async () => {
     watchlist: await import("./watchlist/route"),
     market: await import("./markets/[id]/route"),
     flags: await import("./markets/[id]/flags/route"),
+    search: await import("./markets/search/route"),
+    ingest: await import("./markets/ingest/route"),
     settings: await import("./settings/route"),
     mode: await import("./autonomy/mode/route"),
     kill: await import("./autonomy/kill/route"),
@@ -53,6 +57,37 @@ describe("http api", () => {
       expect(Array.isArray(await r.json())).toBe(true);
     }
     expect((await h.watchlist!.GET(new Request(`${U}/watchlist?tab=nope`))).status).toBe(400);
+  });
+
+  it("market search validates q, returns open matches, ingest upserts the pick", async () => {
+    for (const q of ["", "a", "x".repeat(101)]) expect((await h.search!.GET(new Request(`${U}/markets/search?q=${q}`))).status).toBe(400);
+    const r = await h.search!.GET(new Request(`${U}/markets/search?q=fed`));
+    expect(r.status).toBe(200);
+    const hits = await r.json();
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.length).toBeLessThanOrEqual(10);
+    // a pasted polymarket link searches by its slug words
+    expect((await h.search!.GET(new Request(`${U}/markets/search?q=${encodeURIComponent("https://polymarket.com/event/fed-decision-in-december?tid=1")}`))).status).toBe(200);
+    const bad = await h.ingest!.POST(post({ nope: 1 }));
+    expect(bad.status).toBe(400);
+    expect((await h.ingest!.POST(post({ id: "no-such-id" }))).status).toBe(404); // Gamma 404
+    // malformed %-escape in a pasted link falls back to the raw slug instead of throwing
+    expect((await h.search!.GET(new Request(`${U}/markets/search?q=${encodeURIComponent("https://polymarket.com/event/fed-%E0%A4%A")}`))).status).toBe(200);
+    const ok = await h.ingest!.POST(post({ id: hits[0].id }));
+    expect(ok.status).toBe(200);
+    const { conditionId } = await ok.json();
+    expect((await h.market!.GET(post(), ctx({ id: conditionId }))).status).toBe(200);
+  });
+
+  it("research answers 409 with the reason when the pod is skipped (no book)", async () => {
+    const route = await import("./markets/[id]/research/route");
+    const a = await import("../../lib/api"), { schema: sc } = await import("@pm/db");
+    const d = await a.getDeps();
+    const c = cid("nobook");
+    await d.db.insert(sc.markets).values({ conditionId: c, question: "q", rules: "", tags: [], status: "active" } as any);
+    const r = await route.POST(post(), ctx({ id: c }) as any);
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ reason: "NO_BOOK" });
   });
 
   it("market detail 200 / 404", async () => {

@@ -4,7 +4,8 @@ const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
 export const AgentOutput = z
   .object({
-    role: z.enum(["rules", "source", "base_rate", "news", "red_team"]),
+    // built-in or operator custom role key (see Steering.customRoles); "judge" is reserved
+    role: z.string().regex(/^[a-z][a-z0-9_]{1,23}$/).refine((r) => r !== "judge"),
     probability: z.number().min(0).max(1).nullable(), // null for rules reader
     confidence: z.number().min(0).max(1),
     key_facts: z.array(z.object({ claim: z.string(), url: z.url(), quote: z.string(), date: z.string() })),

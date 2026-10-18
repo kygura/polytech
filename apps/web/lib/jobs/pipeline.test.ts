@@ -1,12 +1,12 @@
 import { AnthropicOutageError, disabledRunner, fakeJudge, fakeRunner, type AgentRunner } from "@pm/agents";
-import { DEFAULT_SETTINGS } from "@pm/core";
+import { DEFAULT_SETTINGS, DEFAULT_STEERING, ProfileFilterSchema, type ResearchProfile } from "@pm/core";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
-import { calibrateNightly, deps, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
+import { calibrateNightly, createProfile, deps, runProfile, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
 process.env.PGLITE_DIR = "memory://";
 const cid = (k: string) => "0x" + createHash("sha256").update("cond:" + k).digest("hex"); // gen-fixtures.ts
@@ -28,6 +28,8 @@ beforeAll(async () => {
   await setMode(d, "L1", "test");
   await paperBook(d);
 }, 60_000);
+
+const walk = (list: () => Promise<any[]>) => async (_o: unknown, on: (ms: any[]) => Promise<void>) => { await on(await list()); return { pages: 1, complete: true }; };
 
 describe("pipeline (fixtures + fake runner/judge)", () => {
   it("sweep maps pm -> markets", async () => {
@@ -163,6 +165,47 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect((await read.autonomy(r)).mode).toBe("L1");
   });
 
+  it("agents that ran out of the pod deadline fail the pod with reason TIMEOUT", async () => {
+    const late: AgentRunner = async () => { throw new Error("TIMEOUT: agent source"); };
+    const res = await researchMarket({ ...d, settings: await read.settingsGet(r), runner: late }, cid("p3"), "manual");
+    expect(res).toMatchObject({ status: "failed", reason: "TIMEOUT" });
+    expect((await d.db.select().from(s.pods).where(eq(s.pods.id, (res as { podId: string }).podId)))[0]!.status).toBe("failed");
+  });
+
+  it("a timed-out pod still charges the daily spend (estimate), so the cap cannot undercount", async () => {
+    const total = async () => (await d.db.select().from(s.spend)).reduce((t, x) => t + x.anthropicUsd, 0);
+    const before = await total();
+    const late: AgentRunner = async () => { throw new Error("TIMEOUT: agent source"); };
+    expect(await researchMarket({ ...d, settings: await read.settingsGet(r), runner: late }, cid("p3"), "manual")).toMatchObject({ reason: "TIMEOUT" });
+    expect(await total()).toBeGreaterThan(before);
+  });
+
+  describe("shared deadline and failed-pod skip", () => {
+    const mk = (name: string, keys: string[]) => createProfile(d.db, { name, enabled: false, filter: ProfileFilterSchema.parse({ includeConditionIds: ids(keys), skipIfResearchedWithinHours: 0 }), steering: DEFAULT_STEERING, everyMin: null } as never) as Promise<ResearchProfile>;
+    const pods = async () => (await d.db.select().from(s.pods)).length;
+    const match = (keys: string[]) => ids(keys).map((conditionId) => ({ conditionId }));
+
+    it("no pod starts past a deadline shared across runs (shortlist -> profiles)", async () => {
+      const deadline = d.now() + 300_000;
+      const slow: AgentRunner = async (role, ...a) => { if (role === "rules") t += 250_000; return fakeRunner(role, ...a); }; // one pod burns 250 s
+      const keys = ["a1", "a2", "a3"], n0 = await pods();
+      const first = await runProfile({ ...d, runner: slow }, await mk("dl1", keys), match(keys), deadline);
+      expect(first).toMatchObject({ stopped: "WINDOW" });
+      const n1 = await pods();
+      expect(n1 - n0).toBe(1); // second wave never started
+      const second = await runProfile(d, await mk("dl2", keys), match(keys), deadline);
+      expect(second).toMatchObject({ stopped: "WINDOW", done: 0, failed: 0 });
+      expect(await pods()).toBe(n1);
+    });
+
+    it("markets with a pod that failed in the last 24h are not picked again", async () => {
+      await d.db.insert(s.pods).values({ id: "pod_poison", conditionId: cid("a4"), startedAt: new Date(d.now() - 20 * 3_600_000), status: "failed", trigger: "manual" });
+      const n0 = await pods();
+      expect(await runProfile(d, await mk("poison", ["a4"]), match(["a4"]))).toMatchObject({ candidates: 0 });
+      expect(await pods()).toBe(n0);
+    });
+  });
+
   it("pod.failed payload is scrubbed of key-shaped strings", async () => {
     let msg = "";
     const off = subscribe((e) => { if (e.type === "pod.failed") msg = (e.payload as { error: string }).error; });
@@ -179,7 +222,7 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const base = (await pm.listMarkets()).find((x) => x.condition_id === gone)!;
     const sim = {
       ...pm,
-      listMarkets: async () => (await pm.listMarkets()).filter((x) => x.condition_id !== gone),
+      walkMarkets: walk(async () => (await pm.listMarkets()).filter((x) => x.condition_id !== gone)),
       listEvents: async () => (await pm.listEvents()).map((e) => ({ ...e, markets: e.markets.filter((x) => x.condition_id !== gone) })),
       market: async (id: string) => (id === base.id ? { ...base, open: false, closed: true, yes_price: yes ? 1 : 0 } : pm.market(id)),
     } as typeof pm;
@@ -207,6 +250,14 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect(await paperBook(d)).toMatchObject({ mode: "L0", filled: 0 });
   });
 
+  it("sweep from a listing cut short (429) upserts what came and closes nothing", async () => {
+    const all = await pm.listMarkets();
+    const cut = { ...pm, walkMarkets: async (_o: unknown, on: (m: typeof all) => Promise<void>) => { await on(all.slice(0, 1)); return { pages: 1, complete: false }; } } as unknown as typeof pm;
+    const before = await d.kv.get(`sweep:listing:${d.settings.universe.minLiquidityUsd}:${d.settings.filters.minDays}:${d.settings.filters.maxDays}`);
+    expect(await sweepUniverse({ ...d, pm: cut })).toMatchObject({ markets: 1, closed: 0, complete: false });
+    expect(await d.kv.get(`sweep:listing:${d.settings.universe.minLiquidityUsd}:${d.settings.filters.minDays}:${d.settings.filters.maxDays}`)).toBe(before);
+  });
+
   it("sweep never walks the events listing (nested markets OOM a Vercel function)", async () => {
     const noEvents = { ...pm, listEvents: async () => { throw new Error("listEvents called"); } } as typeof pm;
     await expect(sweepUniverse({ ...d, pm: noEvents })).resolves.not.toThrow();
@@ -214,7 +265,7 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
 
   it("truncated listing does not mass-close", async () => {
     const all = await pm.listMarkets();
-    const half = { ...pm, listMarkets: async () => all.slice(0, Math.floor(all.length / 2)), listEvents: async () => [] } as typeof pm;
+    const half = { ...pm, walkMarkets: walk(async () => all.slice(0, Math.floor(all.length / 2))), listEvents: async () => [] } as typeof pm;
     const d3 = { ...d, pm: half };
     expect(await sweepUniverse(d3)).toMatchObject({ closed: 0 });
     expect(await sweepUniverse(d3)).toMatchObject({ closed: 0 });
@@ -275,6 +326,19 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     await sweepUniverse({ ...d, settings: { ...d.settings, universe: { ...d.settings.universe, minLiquidityUsd: 1 } } }); // fresh key: no baseline
     expect(await status()).toBe("active");
     await d.db.update(s.proposals).set({ status: "rejected" }).where(eq(s.proposals.thesisId, "th-held"));
+    await sweepUniverse(d);
+    expect(await status()).toBe("closed");
+  });
+
+  it("market with a recent pod stays open when missing from the listing; closes once the pod is older than 30 d", async () => {
+    const [base] = await d.db.select().from(s.markets).limit(1);
+    const c = cid("held-pod"), { minDays, maxDays } = d.settings.filters;
+    await d.db.insert(s.markets).values({ ...base!, conditionId: c, pmId: "held-pod", endDate: new Date(t + ((minDays + maxDays) / 2) * 864e5), status: "active" });
+    await d.db.insert(s.pods).values({ id: "pod_held", conditionId: c, startedAt: new Date(d.now() - 864e5), status: "done", trigger: "manual" });
+    const status = async () => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, c)))[0]!.status;
+    await sweepUniverse(d);
+    expect(await status()).toBe("active");
+    await d.db.update(s.pods).set({ startedAt: new Date(d.now() - 40 * 864e5) }).where(eq(s.pods.id, "pod_held"));
     await sweepUniverse(d);
     expect(await status()).toBe("closed");
   });

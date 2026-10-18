@@ -38,6 +38,7 @@ describe("db (pglite memory)", () => {
     await db.insert(s.proposalSets).values(set);
     await expect(db.insert(s.proposalSets).values(set)).rejects.toThrow(); // one pending set per event
     await db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    await db.insert(s.researchProfiles).values({ id: "rp1", name: "p", filter: {}, steering: {} });
     expect((await db.select().from(s.fills))[0]?.paper).toBe(true);
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);

@@ -10,12 +10,13 @@ import { ErrorBar } from "./ErrorBar";
 import { killError, postKill, type Recon } from "./live";
 import { useTheme } from "../hooks/useTheme";
 import { KillSwitchButton } from "./KillSwitchButton";
+import { MarketSearch } from "./MarketSearch";
 import { ModeBadge } from "./ModeBadge";
 import { SseIndicator } from "./SseIndicator";
 import { STALE_MS, StaleBanner } from "./StaleBanner";
 import css from "./Shell.module.css";
 
-const NAV = [["/watchlist", "Watchlist"], ["/fleet", "Fleet"], ["/calibration", "Calibration"], ["/paper", "Book"], ["/autonomy", "Autonomy"], ["/settings", "Settings"]] as const;
+const NAV = [["/watchlist", "Watchlist"], ["/fleet", "Fleet"], ["/research", "Research"], ["/calibration", "Calibration"], ["/paper", "Book"], ["/autonomy", "Autonomy"], ["/settings", "Settings"]] as const;
 const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
 const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done", "set.updated"]);
 type Status = { pendingCount?: number; flaggedSets?: number; liveOpenOrders?: number; recon?: Recon | null };
@@ -27,6 +28,8 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   useEffect(() => setMode(initialMode), [initialMode]);
   const sheet = useRef<HTMLDialogElement>(null);
   const { toggle } = useTheme();
+  const [finding, setFinding] = useState(false);
+  const findBtn = useRef<HTMLButtonElement>(null);
 
   // A failed RSC refresh swaps the view for error.tsx; probe the view's API first so a refetch
   // failure shows ErrorBar above the last good data instead (error.tsx stays for first load).
@@ -34,7 +37,8 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   useEffect(() => setRefreshErr(null), [path]);
   const refreshNow = useCallback(async () => {
-    const r = await fetch(`/api${location.pathname}${location.search}`).catch(() => null);
+    // /research has no GET of its own; probe the profile list it renders.
+    const r = await fetch(location.pathname.startsWith("/research") ? "/api/research/profiles" : `/api${location.pathname}${location.search}`).catch(() => null);
     if (r?.ok) { setRefreshErr(null); router.refresh(); }
     else setRefreshErr(`Refresh failed: ${r ? r.status : "network error"} · showing last loaded data`);
   }, [router]);
@@ -64,6 +68,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   useGlobalKeys({
     onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []),
     onTheme: toggle,
+    onSearch: useCallback(() => setFinding(true), []),
   });
 
   const [killErr, setKillErr] = useState<string | null>(null);
@@ -86,6 +91,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
           {NAV.map(([href, label]) => <Link key={href} href={href} aria-current={path.startsWith(href) ? "page" : undefined}>{label}</Link>)}
         </nav>
         <div className={css.right}>
+          <button type="button" ref={findBtn} className={css.themeBtn} onClick={() => setFinding(true)} aria-label="find a market (/)" title="find a market (/)">find market</button>
           <button type="button" className={css.themeBtn} onClick={toggle} aria-label="toggle theme (t)" title="toggle theme (t)">theme</button>
           <SseIndicator status={sse.status} lastEventAt={sse.lastEventAt} />
           <ModeBadge mode={mode} size="lg" />
@@ -100,6 +106,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
         {lastSnapshotAt != null && now - lastSnapshotAt > STALE_MS && !/^\/(watchlist|settings)/.test(path) && <StaleBanner lastSnapshotAt={lastSnapshotAt} now={now} />}
         {children}
       </main>
+      <MarketSearch open={finding} onClose={() => { setFinding(false); findBtn.current?.focus(); }} />
       <dialog ref={sheet} className={css.sheet} aria-label="keyboard shortcuts">
         <h2>Shortcuts</h2>
         <table><tbody>{SHORTCUTS.map(([k, d]) => <tr key={k}><th scope="row">{k}</th><td className="ui muted">{d}</td></tr>)}</tbody></table>

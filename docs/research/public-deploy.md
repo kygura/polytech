@@ -217,3 +217,46 @@ Secondary (WebSearch summaries or third-party):
 - https://docs.polymarket.com/polymarket-learn/FAQ/geoblocking (from execution.md)
 - https://startpolymarket.com/countries/ireland/ (3P, low weight)
 - https://jsr.io/@hk/polymarket (3P proxy, not Polymarket policy)
+
+## Q6. Free scheduling: GitHub Actions vs Vercel Hobby vs always-on host
+
+Method: WebFetch of the primary URLs below on 2026-10-18. Numbers are tool-summarized from fetched pages; re-verify before relying on one.
+
+Implication: vercel.json crons that run more than once per day fail deployment on Hobby (cron page below), so sub-daily triggers need GitHub Actions `schedule` or an always-on host.
+
+### 1. GitHub Actions `schedule`
+- Minimum interval: 5 minutes. https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+- Delay/drop: can be delayed under high load; "some queued jobs may be dropped" if load is high enough. Same URL.
+- Default branch only: yes. Workflow file must exist on the default branch; scheduled runs only on the default branch. Same URL.
+- Auto-disable: public repos only, after 60 days with no repo activity. Private repos: unknown (not stated; the disable-and-enable page returned 404). Same URL.
+
+### 2. GitHub Actions billing and limits
+- Free, private repos: 2,000 included min/month. Linux 2-core list price $0.006/min. Linux minute multiplier: unknown (not stated on fetched pages). https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions
+- Public repos: standard GitHub-hosted runners are free. Same URL.
+- Max job duration: 6 hours. Max workflow run: 35 days. Free concurrency: 20 jobs total (5 macOS). Public-repo concurrency: unknown. https://docs.github.com/en/actions/reference/limits
+- Storage (Free): artifacts 500 MB (shared with Packages), cache 10 GB/repo. Same URL as billing above.
+
+### 3. GitHub-hosted runner egress
+- Verdict: region and IP ranges unknown. Linux/Windows runners run on Microsoft Azure VMs; no default region or US claim is stated. https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners
+- IP ranges are published via the `actions` key of GET https://api.github.com/meta (ranges only, no region labels). https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+- Polymarket geoblock: runner egress still needs a direct check against Polymarket's own geoblock endpoint before relying on any job.
+
+### 4. Vercel Hobby: Sandbox and Workflow
+- Sandbox Hobby included: 5 Active CPU hrs/month, 420 GB-hrs provisioned memory, 5,000 creations, 20 GB network, 10 concurrent sandboxes, 45 min max session, max 4 vCPU / 8 GB. https://vercel.com/docs/sandbox/pricing
+- Sandbox at limit: creation is paused until 30 days after first use; no charge. Same URL.
+- Workflow Hobby included: 50,000 events/month, 1 GB data written. https://vercel.com/docs/plans/hobby
+- Workflow at limit: unknown for Workflows specifically (workflows pricing page not fetched). General Hobby rule: exceeded limits wait for the 30-day cycle. Same URL.
+- Fair use: Hobby is "restricted to non-commercial, personal use only." Commercial = any deployment used for financial gain, including requesting/processing visitor payments or a paid developer. Donations are not commercial. https://vercel.com/docs/limits/fair-use-guidelines#commercial-usage
+- Blocker: if the trading app takes payment or fees, Hobby is out; that needs Pro.
+
+### 5. Railway
+- Free: $0/month, $1 monthly credit. Trial: one-time $5 credit, no card; duration shown as 30 days on the pricing page but "not stated" on the plans doc. https://railway.com/pricing and https://docs.railway.com/reference/pricing/plans
+- Hobby: $5/month, includes $5 of usage. Does not say whether this covers always-on services. Same URLs.
+- Rates (plans doc): $20/vCPU/month, $10/GB/month. Sleep configuration: not stated.
+- Cheapest always-on price: unknown as a product. Derived by me, not Railway's claim: at those rates $5 covers about 0.25 vCPU always-on with no memory.
+
+### 6. GitHub Actions calling a Vercel function on a schedule (curl + bearer)
+- Verdict: no Hobby rule against external triggering found in the fair-use, Hobby, or cron pages fetched. https://vercel.com/docs/limits/fair-use-guidelines and https://vercel.com/docs/plans/hobby
+- The once-per-day limit applies to vercel.json cron jobs only (cron page). External HTTP calls count as Function Invocations (1M/month included) and Active CPU (4 hrs/month included). https://vercel.com/docs/cron-jobs/usage-and-pricing
+- Deployment Protection: automation bypass header `x-vercel-protection-bypass` is available on all plans. https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
+- Fair use warns against "circumventing or otherwise misusing Vercel's limits." Keep cadence modest.

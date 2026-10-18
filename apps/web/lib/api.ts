@@ -1,4 +1,4 @@
-import { calibrateNightly, deps, expireProposals, getSettings, paperBook, propose, proposeSets, read, reconcileJob, researchShortlist, screenAll, snapshotBooks, sweepUniverse, syncFills, type Decision, type Deps } from "./jobs";
+import { calibrateNightly, deps, expireProposals, getSettings, paperBook, propose, proposeSets, read, reconcileJob, researchCron, screenAll, snapshotBooks, sweepUniverse, syncFills, type Decision, type Deps } from "./jobs";
 import type { z } from "zod";
 
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -29,7 +29,7 @@ export const JOBS = {
   sweep: () => getDeps().then(sweepUniverse),
   snapshot: (scope: "watchlist" | "all" = "watchlist") => getDeps().then((d) => snapshotBooks(d, scope)),
   screen: () => getDeps().then(screenAll),
-  research: () => getDeps().then((d) => researchShortlist(d)),
+  research: () => getDeps().then(researchCron),
   paper: () => getDeps().then(paperBook),
   calibrate: () => getDeps().then(calibrateNightly),
   propose: () => getDeps().then(propose),

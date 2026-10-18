@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type Host = "gamma" | "clob" | "data";
-export type Req = { params?: Record<string, string | number | boolean | undefined>; body?: unknown };
+export type Req = { params?: Record<string, string | number | boolean | undefined>; body?: unknown; /** retries on 429/5xx/network error; default 3 */ retries?: number };
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures"); // plain path: Turbopack must not treat it as an asset
 const cache = new Map<string, any>();
@@ -38,6 +38,10 @@ export function fixtureCall(host: Host, path: string, { params: p = {}, body }: 
     if (path === "/events/keyset") return keyset((load("events") as any[]).filter((e) => p.closed === undefined || String(e.closed) === String(p.closed)), "events", p);
     if (path.startsWith("/events/")) return (load("events") as any[]).find((e) => String(e.id) === decodeURIComponent(path.slice(8))) ?? notFound(path);
     if (path.startsWith("/markets/")) return (load("markets") as any[]).find((m) => m.id === decodeURIComponent(path.slice(9))) ?? notFound(path);
+    if (path === "/public-search") {
+      const q = String(p.q ?? "").toLowerCase();
+      return { events: (load("events") as any[]).filter((e) => `${e.title} ${(e.markets ?? []).map((m: any) => m.question).join(" ")}`.toLowerCase().includes(q)), pagination: { hasMore: false } };
+    }
     if (path === "/comments") return (load("comments") as any[]).filter((c) => String(c.parentEntityID) === String(p.parent_entity_id)).slice(0, Number(p.limit ?? 100));
   }
   if (host === "clob") {

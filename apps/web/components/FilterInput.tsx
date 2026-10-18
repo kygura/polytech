@@ -1,6 +1,6 @@
 import css from "./ui.module.css";
 
-/** `data-filter` is what the global `/` key focuses (see useGlobalKeys). */
+/** `data-filter` marks the page filter box. */
 export function FilterInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <input
