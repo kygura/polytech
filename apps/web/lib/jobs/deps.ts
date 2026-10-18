@@ -111,6 +111,7 @@ export const toSnap = (r: SnapRow): Snapshot => ({
   oi: r.oi ?? 0,
   top10Share: r.top10Share ?? 0,
   lastTradeTs: r.lastTradeTs?.getTime() ?? null,
+  flowUnknown: r.book?.flowUnknown,
 });
 
 export const today = (ms: number) => new Date(ms).toISOString().slice(0, 10);

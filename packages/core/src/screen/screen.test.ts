@@ -65,6 +65,10 @@ describe("factorI", () => {
     // spread .02->.2; stale 1; mid .03 pinned? .03 is .02 from .05 -> no; longshot 1 => (.2+1+0+1)/4
     expect(factorI(b, NOW)).toBeCloseTo(0.55, 9);
   });
+  it("unknown trade flow is neutral, not stale", () => {
+    const b = { ...snap, lastTradeTs: null };
+    expect(factorI({ ...b, flowUnknown: true }, NOW)).toBeLessThan(factorI(b, NOW));
+  });
   it("empty book -> 0", () => expect(factorI({ ...snap, bids: [] }, NOW)).toBe(0));
 });
 

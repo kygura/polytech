@@ -34,7 +34,7 @@ export function factorI(snap: Snapshot, now: number): number {
   const bid = Math.max(...snap.bids.map((l) => l.price));
   const ask = Math.min(...snap.asks.map((l) => l.price));
   const spread = clamp01((ask - bid) / 0.1);
-  const stale = snap.lastTradeTs == null ? 1 : clamp01((now - snap.lastTradeTs) / 3600_000 / 48);
+  const stale = snap.flowUnknown ? 0 : snap.lastTradeTs == null ? 1 : clamp01((now - snap.lastTradeTs) / 3600_000 / 48);
   const pinned = Math.abs(mid - Math.round(mid / 0.05) * 0.05) <= 0.005 + 1e-9 ? 1 : 0;
   const longshot = mid < 0.07 || mid > 0.93 ? 1 : 0;
   return (spread + stale + pinned + longshot) / 4;

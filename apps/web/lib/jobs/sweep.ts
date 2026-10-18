@@ -112,24 +112,28 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const now = d.now();
 
   // OI and trades are enrichment: a failing chunk (e.g. the data API's Cloudflare 403) leaves those markets without oi/flow, books still land.
-  const soft = async <T>(what: string, jobs: Promise<T>[]) => {
-    const rs = await Promise.allSettled(jobs);
+  // Only HTTP failures ("GET /oi -> 403 ...") are soft; anything else (TypeError, ...) is a bug and rethrows.
+  const soft = async <X, T>(what: string, xs: X[], fn: (x: X) => Promise<T>) => {
+    const rs = await Promise.allSettled(xs.map(fn));
     const bad = rs.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    const bug = bad.find((r) => !/^(GET|POST) \S+ -> \d{3}/.test(String(r.reason?.message ?? r.reason)));
+    if (bug) throw bug.reason;
     if (bad.length) console.warn(`snapshot: ${what} failed for ${bad.length}/${rs.length} chunks: ${String(bad[0]!.reason).slice(0, 120)}`);
-    return rs.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    return { ok: rs.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])), failed: xs.filter((_, i) => rs[i]!.status === "rejected") };
   };
   const [books, oiParts, tradeParts] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
-    soft("oi", chunks(conds, 50).map((c) => d.pm.oi(c))),
-    soft("trades", chunks(conds, 25).map((c) => d.pm.trades({ market: c, limit: 500 }))),
+    soft("oi", chunks(conds, 50), (c) => d.pm.oi(c)),
+    soft("trades", chunks(conds, 25), (c) => d.pm.trades({ market: c, limit: 500 })),
   ]);
+  const flowUnknown = new Set(tradeParts.failed.flat());
   const book = new Map(books.map((b) => [b.token_id, b]));
-  const oi: Record<string, number> = Object.assign({}, ...oiParts);
+  const oi: Record<string, number> = Object.assign({}, ...oiParts.ok);
 
   // trades -> last trade ts + signed 24h flow on the YES token (buy YES / sell NO = +)
   const yesOf = new Map(mkts.map((m) => [m.conditionId, m.yesTokenId]));
   const flow = new Map<string, { last: number; net: number; gross: number }>();
-  for (const tr of tradeParts.flat()) {
+  for (const tr of tradeParts.ok.flat()) {
     const c = tr.condition_id;
     if (!c || !yesOf.has(c)) continue;
     const f = flow.get(c) ?? { last: 0, net: 0, gross: 0 };
@@ -147,7 +151,7 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const hold = conds.filter((c) => researched.has(c));
   const tokCond = new Map(mkts.flatMap((m) => [[m.yesTokenId!, m.conditionId], [m.noTokenId ?? "", m.conditionId]] as const));
   const top10 = new Map<string, number>();
-  for (const g of (await Promise.all(chunks(hold, 20).map((c) => d.pm.holders(c)))).flat()) {
+  for (const g of (await soft("holders", chunks(hold, 20), (c) => d.pm.holders(c))).ok.flat()) {
     const c = tokCond.get(g.token_id);
     if (!c) continue;
     const sum = g.holders.map((h) => h.amount).sort((a, b) => b - a).slice(0, 10).reduce((x, y) => x + y, 0);
@@ -172,7 +176,7 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
       oi: o ?? null,
       top10Share: o && top10.has(m.conditionId) ? Math.min(1, top10.get(m.conditionId)! / o) : null,
       lastTradeTs: f?.last ? new Date(f.last) : null,
-      book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow: f?.gross ? f.net / f.gross : 0 },
+      book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow: f?.gross ? f.net / f.gross : 0, ...(flowUnknown.has(m.conditionId) && { flowUnknown: true }) },
     });
   }
   for (const c of chunks(rows, 200)) await insertSnapshots(d.db, c);

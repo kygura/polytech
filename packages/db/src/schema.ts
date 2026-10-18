@@ -33,7 +33,7 @@ export const snapshots = pgTable("snapshots", {
   top10Share: dp("top10_share"),
   lastTradeTs: ts("last_trade_ts"),
   // YES-token levels kept for sizing/fills + 24h net taker flow (-1..1) for crowding
-  book: jsonb("book").$type<{ bids: { price: number; size: number }[]; asks: { price: number; size: number }[]; netFlow: number }>(),
+  book: jsonb("book").$type<{ bids: { price: number; size: number }[]; asks: { price: number; size: number }[]; netFlow: number; flowUnknown?: boolean }>(),
 }, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]);
 
 export const screens = pgTable("screens", {

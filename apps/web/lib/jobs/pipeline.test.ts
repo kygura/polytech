@@ -114,12 +114,14 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const boom = async () => { throw new Error("GET /oi -> 403 <!DOCTYPE html>"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const before = (await d.db.select().from(s.snapshots)).length;
-    const out = (await snapshotBooks({ ...d, pm: { ...pm, oi: boom, trades: boom } as unknown as typeof pm }, "all")) as { snapshots: number };
+    const out = (await snapshotBooks({ ...d, pm: { ...pm, oi: boom, trades: boom, holders: boom } as unknown as typeof pm }, "all")) as { snapshots: number };
     warn.mockRestore();
     expect(out.snapshots).toBeGreaterThan(0);
     const fresh = (await d.db.select().from(s.snapshots)).slice(before);
     expect(fresh).toHaveLength(out.snapshots);
-    expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.lastTradeTs === null)).toBe(true);
+    expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.lastTradeTs === null && x.book?.flowUnknown === true)).toBe(true);
+    const bug = async () => { throw new TypeError("x is undefined"); };
+    await expect(snapshotBooks({ ...d, pm: { ...pm, oi: bug } as unknown as typeof pm }, "all")).rejects.toThrow(TypeError);
   });
 
   it("settings: merged on defaults, validated", async () => {

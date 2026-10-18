@@ -27,6 +27,7 @@ export type Snapshot = {
   oi: number;
   top10Share: number; // 0..1
   lastTradeTs: number | null;
+  flowUnknown?: boolean; // trades fetch failed: lastTradeTs null means unknown, not "no trades"
 };
 
 export type ScreenResult = {
