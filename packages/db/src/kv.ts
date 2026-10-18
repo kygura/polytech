@@ -72,10 +72,12 @@ export function upstashKv(redis: Redis): Kv {
 let kv: Kv | undefined;
 export function getKv(): Kv {
   if (kv) return kv;
-  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) return (kv = upstashKv(Redis.fromEnv()));
+  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+  if (url && token) return (kv = upstashKv(new Redis({ url, token })));
   // Serverless instances don't share memory, so rate limits/locks would be per-instance: refuse.
   if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
-    throw new Error("UPSTASH_REDIS_REST_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
+    throw new Error("UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
   }
   if (process.env.NODE_ENV === "production") console.warn("kv: Upstash not configured, using in-memory kv (single process only)");
   return (kv = memoryKv());
