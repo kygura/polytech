@@ -204,17 +204,22 @@ SPEC Rev 6: production URL on Vercel Hobby. Anonymous visitors browse scouted th
 | R4 | Research: signing delegation, CORS, geoblock, Vercel limits, wallet libs → docs/research/public-deploy.md | L0 research haiku@high | — | done |
 | M1 | Code map for public mode → docs/research/public-mode-map.md | L0 scout sonnet@medium | — | done |
 | C1 | Server prep: prod fake-runner guard, Exa → built-in web search fallback, move settings schema/limits to core, Hobby vercel.json, drop region pin, remove the read.ts eventTitle leftover | L2 worker sonnet@medium | — | done |
-| C2 | Public surface: proxy allowlist, /api/public/* projections + per-IP rate limit, / → /trade redirect, stale-sweep kick | L3 heavy opus@medium (trigger: auth boundary + traffic-triggered spend) | — | todo |
-| D4 | DESIGN.md §10: public /trade shell, watchlist, detail, trade ticket, wallet/geoblock states, positions, visitor autonomy panel | L2 designer fable@medium | — | todo |
-| P6a | Browser wallet + clobExchange(signer) + geoblock + browser trading-key store | L3 heavy opus@medium (trigger: key handling / signing) | — | todo |
+| C2 | Public surface: proxy allowlist, /api/public/* projections + per-IP rate limit, / → /trade redirect, stale-sweep kick | L3 heavy opus@medium (trigger: auth boundary + traffic-triggered spend) | — | done |
+| D4 | DESIGN.md §10: public /trade shell, watchlist, detail, trade ticket, wallet/geoblock states, positions, visitor autonomy panel | L2 designer fable@medium | — | done |
+| P6a | Browser wallet + clobExchange(signer) + geoblock + browser trading-key store | L3 heavy opus@medium (trigger: key handling / signing) | — | done |
 | P6b | Visitor autonomy loop: pure decide() + hook, tests with fakeExchange | L2 worker sonnet@medium | C1, P6a | todo |
-| U6 | /trade pages per D4 | L2 ui-impl fable@medium | D4, C2, P6a, P6b | todo |
+| U6a | /trade shell, watchlist, detail, ticket, account panel per D4 | L2 ui-impl fable@medium | D4, C2, P6a | todo |
+| U6b | /trade/autonomy panel per D4 on useVisitorLoop | L2 ui-impl fable@medium | U6a, P6b | todo |
 | DEP1 | Vercel link, Neon + Upstash, env, migrate, deploy --prod (C1+C2 commit), smoke, CORS/geoblock probe from Vercel | L2 worker sonnet@medium | C1, C2 | todo |
 | TR | Scouting test runs, at least 8 markets across at least 4 categories → docs/research/scouting-test-runs.md | L2 worker sonnet@medium | DEP1, ANTHROPIC_API_KEY | blocked (key) |
-| DEP2 | Redeploy with U6, smoke /trade | L1 grunt haiku@max | U6, DEP1 | todo |
+| DEP2 | Redeploy with U6a+U6b, smoke /trade | L1 grunt haiku@max | U6b, DEP1 | todo |
 | V4 | Gate: risk opus (C2, P6a, P6b + phase 7 sets/live left over from V3), reliability sonnet, drift haiku, ponytail + spec sonnet, full suite | reviewers | all | todo |
 
 ## Decisions so far (build 4)
 
 - 2026-10-18: Hobby plan confirmed, no git remote, suite green (357 tests). The project map found that production silently uses the fake runner when the key is unset. C1 fixes that.
 - 2026-10-18: C1 done (e2a1f95). pickRunner → disabledRunner + disabledJudge in prod without key (PM_FIXTURES=1 still allows fake); researchMarket skips before lock/DB. No EXA key → WebSearch/WebFetch. Core exports AppSettingsSchema/DEFAULT_APP_SETTINGS. Runner is picked once per process, so setting the key needs a redeploy. web 149.
+- 2026-10-18: D4 done (DESIGN §10, 589-740). Routes /trade, /trade/[id], /trade/autonomy. allowance_needed state added. Planner calls: withdraw = export only (v1); closing positions = link to Polymarket (v1); stale hint 6 h, loop skips data older than 2 h and re-prices from the live CLOB book before every send; EOA vs proxy and gas follow P6a's findings. Extra public fields sent to C2.
+- 2026-10-18: C2 done (4bd1e55). Public payload = explicit allowlists; detail carries every sizeTrade/livelimitPrice/checkOrder input (book, crowd, fee rate, pYes, c, token ids); `capped` kept public because `qualifies` needs it. PublicWatchlist {sweptAt, snapshotAt, stale (6 h), research on|disabled, rows}. scoutChain = "use workflow" in kick.ts (start() on Vercel, inline elsewhere), kick lock 10 min, 60 req/min/IP, s-maxage 30. Gap: sweptAt is written only at kick, so sweep.ts must write it too (follow-up). Tick size isn't stored; the visitor reads it from the live CLOB book.
+- 2026-10-18: P6a done (e71c359). clobExchange(ClobSigner | env), browser import via @pm/pm/exchange. Funder: a Gamma public-profile proxyWallet means polymarket mode; otherwise EOA mode (pUSD + POL + setupApprovals). Gasless setup needs a Polymarket relayer/builder key, which can't ship to the browser (future: a builder signing endpoint). Geoblock URL https://polymarket.com/api/geoblock UNVERIFIED; CORS unknown for clob, geoblock, gamma profile and the polygon RPC, so DEP1 probes from a Vercel Sandbox. Trading key create/import refuses to overwrite.
+- 2026-10-18: user asked for a /secret mod (mod-secret agent, outside the repo) and questioned infra (GitHub Actions vs Railway). Q6 research running; asked the user public/private GitHub. U6 split into U6a (now) and U6b (after P6b).
