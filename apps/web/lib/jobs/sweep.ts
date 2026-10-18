@@ -95,7 +95,7 @@ export async function sweepUniverse(d: Deps) {
     for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
 
     const out = { markets: rows.length, newMarkets: rows.filter((r) => !known.has(r.conditionId)).length, feesFetched, closed: gone.length };
-    await d.kv.set(KICK_AT, Date.now()); // same key as kickIfStale: public sweptAt/stale detection also covers cron sweeps
+    await d.kv.set(KICK_AT, Date.now()); // public sweptAt/stale detection, also covers cron sweeps
     publish("sweep.done", out);
     return out;
   });

@@ -36,7 +36,7 @@ export const publicWatchRow = (r: WatchlistRow, disabled = false): PublicWatchRo
 /** Data age for the UI stale hint (6 h) and the visitor loop cutoff (2 h). All epoch ms; null = never. */
 export type Freshness = { sweptAt: number | null; snapshotAt: number | null; stale: boolean };
 export const STALE_MS = 6 * 3_600_000;
-export const KICK_AT = "kick:sweepAt"; // written by kickIfStale when it starts the chain
+export const KICK_AT = "kick:sweepAt"; // written by the sweep on success (public sweptAt); kickIfStale keeps its own key
 export async function freshness(db: Db, kv: Kv, now: number): Promise<Freshness> {
   const [sweptAt, snap] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)]);
   const snapshotAt = snap[0]?.ts?.getTime() ?? null;

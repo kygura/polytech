@@ -14,16 +14,22 @@ describe("kickIfStale", () => {
   });
   it("fresh: no start", async () => {
     const kv = memoryKv(), run = vi.fn(async () => {});
-    await kv.set("kick:sweepAt", Date.now() - 10 * MIN);
+    await kv.set("kick:startedAt", Date.now() - 10 * MIN);
     expect(await kickIfStale(kv, Date.now(), run)).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
   it("stale but lock held: no start", async () => {
     const kv = memoryKv(), run = vi.fn(async () => {});
-    await kv.set("kick:sweepAt", Date.now() - 40 * MIN);
+    await kv.set("kick:startedAt", Date.now() - 40 * MIN);
     await kv.lock("kick", 10 * MIN);
     expect(await kickIfStale(kv, Date.now(), run)).toBe(false);
     expect(run).not.toHaveBeenCalled();
+  });
+  it("a recent sweep does not suppress the kick", async () => {
+    const kv = memoryKv(), run = vi.fn(async () => {});
+    await kv.set("kick:sweepAt", Date.now() - MIN);
+    expect(await kickIfStale(kv, Date.now(), run)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
   });
   it("start error propagates (route logs it)", async () => {
     await expect(kickIfStale(memoryKv(), Date.now(), async () => { throw new Error("boom"); })).rejects.toThrow("boom");

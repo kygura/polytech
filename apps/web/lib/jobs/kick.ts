@@ -3,6 +3,8 @@ import type { JobName } from "../api";
 
 const STALE_MS = 30 * 60_000;
 const LOCK_MS = 10 * 60_000;
+// own key: the sweep writes kick:sweepAt (public freshness), which must not suppress the snapshot/screen/research steps
+const STARTED = "kick:startedAt";
 
 /** Scouting chain in cron order, same JOBS the cron route runs. Each job keeps its own lock; research keeps its budget cap. */
 export async function scoutChain() {
@@ -33,12 +35,12 @@ async function startChain() {
  */
 export async function kickIfStale(kv?: Kv, now = Date.now(), run: () => Promise<unknown> = startChain): Promise<boolean> {
   // dynamic: this module is bundled into the workflow bundle, which cannot contain node-only deps (db, auth, agents)
-  const [{ getKv }, { KICK_AT: AT }] = await Promise.all([import("@pm/db"), import("../public")]);
+  const { getKv } = await import("@pm/db");
   kv ??= getKv();
-  const at = await kv.get<number>(AT);
+  const at = await kv.get<number>(STARTED);
   if (at != null && now - at < STALE_MS) return false;
   if (!(await kv.lock("kick", LOCK_MS))) return false;
-  await kv.set(AT, now);
+  await kv.set(STARTED, now);
   await run();
   return true;
 }
