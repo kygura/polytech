@@ -84,6 +84,9 @@ describe("resolveFunder", () => {
     expect(await resolveFunder(eoa, async () => null)).toEqual({ wallet: eoa, mode: "eoa" });
     expect(await resolveFunder(eoa, async () => ({ wallet: null }))).toEqual({ wallet: eoa, mode: "eoa" });
   });
+  it("rejects when the lookup fails, so a transient error never falls back to EOA", async () => {
+    await expect(resolveFunder(eoa, async () => { throw new Error("503"); })).rejects.toThrow("503");
+  });
 });
 
 describe("isRejection", () => {

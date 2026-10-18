@@ -22,7 +22,8 @@ export type Wallet = {
 
 /** EIP-1193 user rejection (code 4001), also after the exchange scrubbed the error down to a message. */
 export const isRejection = (e: unknown) =>
-  (e as { code?: unknown } | null)?.code === 4001 || /user (rejected|denied)|rejected the request/i.test(e instanceof Error ? e.message : String(e));
+  (e as { code?: unknown } | null)?.code === 4001 || /user (rejected|denied)/i.test(e instanceof Error ? e.message : String(e));
+const ACCOUNT_CHECK = "Could not check your Polymarket account. Try again.";
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Conn = { address: `0x${string}`; funder: Funder; exchange: ClobExchange };
@@ -41,7 +42,7 @@ export function useWalletConnection(): Wallet {
     const p = injected();
     if (!p) return;
     const n = ++seq.current;
-    const [{ signer }, funder] = await Promise.all([signerFor(p, address), resolveFunder(address)]);
+    const [{ signer }, funder] = await Promise.all([signerFor(p, address), resolveFunder(address).catch(() => { throw new Error(ACCOUNT_CHECK); })]);
     if (n !== seq.current) return;
     setConn({ address, funder, exchange: visitorExchange(signer, address, funder) });
     setStatus("connected");
@@ -64,7 +65,7 @@ export function useWalletConnection(): Wallet {
       await open(c.address);
     } catch (e) {
       setStatus("disconnected");
-      setError(isRejection(e) ? "You rejected the connection request." : `Could not connect: ${msg(e)}`);
+      setError(isRejection(e) ? "You rejected the connection request." : msg(e) === ACCOUNT_CHECK ? ACCOUNT_CHECK : `Could not connect: ${msg(e)}`);
     }
   }, [open]);
 
