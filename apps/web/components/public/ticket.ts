@@ -85,13 +85,18 @@ export type PlaceResult = { kind: "open"; orderId: string } | { kind: "filled"; 
  * Places once. A throw that is not a wallet rejection is an UNKNOWN outcome (the order may have reached the venue, see Exchange.placeImmediate):
  * look the order up instead of letting the visitor resend it blind.
  */
-export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (e: unknown) => boolean): Promise<PlaceResult> {
+export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (e: unknown) => boolean, wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))): Promise<PlaceResult> {
   const since = Date.now();
   try {
     const r = await ex.place(o);
     return r.status === "rejected" ? { kind: "rejected", error: r.error ?? "rejected by Polymarket" } : { kind: "open", orderId: r.orderId };
   } catch (e) {
-    return isRejection(e) ? { kind: "declined" } : findPlaced(ex, o, since);
+    if (isRejection(e)) return { kind: "declined" };
+    for (let i = 0; ; i++) {
+      const r = await findPlaced(ex, o, since);
+      if (r.kind !== "unknown" || i >= LAG_TRIES - 1) return r;
+      await wait(LAG_MS);
+    }
   }
 }
 
@@ -99,7 +104,10 @@ export async function placeTicketOrder(ex: Placer, o: LimitOrder, isRejection: (
  * Same token, side, price and size among the open orders; else a fill of it among the trades since the send started (an order that
  * filled on arrival is no longer open). ponytail: OpenOrder and trades carry no order match beyond the fields, so an older identical order also matches.
  */
-const SKEW_MS = 5_000; // client vs venue clock margin; wider would match an earlier identical fill
+// Err wide: a missed real fill reads as `unknown` and invites a resend (double exposure); a false `filled` only misreports until the
+// positions refresh. Same 60s window as the ticket's order-status check.
+const SKEW_MS = 60_000;
+const LAG_TRIES = 3, LAG_MS = 5_000; // the venue's trade index can trail the match: re-check ~15s before saying unknown
 // a limit fills at the resting maker's price: at or below the limit for BUY, at or above for SELL
 const atOrBetter = (p: number, o: LimitOrder) => (o.side === "BUY" ? p <= o.price + 1e-9 : p >= o.price - 1e-9);
 

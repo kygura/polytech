@@ -13,6 +13,7 @@ const detail = (over: Partial<PublicMarketDetail> = {}): PublicMarketDetail => (
   ...over,
 } as PublicMarketDetail);
 
+const nowait = async () => {};
 describe("ticket prefill", () => {
   it("thesis side, limit on tick, size from bankroll = balance", () => {
     const p = prefill(detail(), 1000);
@@ -83,29 +84,36 @@ describe("placeTicketOrder", () => {
   const no = () => false;
   it("unknown outcome: a throw then the order among open orders ends open with that id", async () => {
     const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [{ orderId: "o9", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, filled: 0 }], trades: async () => [] };
-    expect(await placeTicketOrder(ex, order, no)).toEqual({ kind: "open", orderId: "o9" });
+    expect(await placeTicketOrder(ex, order, no, nowait)).toEqual({ kind: "open", orderId: "o9" });
   });
   it("unknown outcome, not found (or lookup fails): unknown, never resent", async () => {
     let placed = 0;
     const ex = { place: async () => { placed++; throw new Error("timeout"); }, openOrders: async () => { throw new Error("down"); }, trades: async () => [] };
-    expect(await placeTicketOrder(ex, order, no)).toEqual({ kind: "unknown" });
+    expect(await placeTicketOrder(ex, order, no, nowait)).toEqual({ kind: "unknown" });
     expect(placed).toBe(1);
   });
   it("unknown outcome, filled on arrival: no open order, but the trades show the fill", async () => {
     const trade = { tradeId: "t1", orderId: "o7", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, fee: 0.1, at: new Date() };
     const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => [trade] };
-    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "filled", shares: 10, fee: 0.1 });
+    expect(await placeTicketOrder(ex, order, no, nowait)).toMatchObject({ kind: "filled", shares: 10, fee: 0.1 });
   });
   it("unknown outcome, filled on arrival at a better price than the limit: still filled, never unknown", async () => {
     const trade = { tradeId: "t2", orderId: "o8", tokenId: "y", side: "BUY" as const, price: 0.4, shares: 10, fee: 0.1, at: new Date() };
     const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => [trade] };
-    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "filled", shares: 10 });
+    expect(await placeTicketOrder(ex, order, no, nowait)).toMatchObject({ kind: "filled", shares: 10 });
   });
   it("unknown outcome: a fill above a BUY limit or before the send window is not ours", async () => {
     const worse = { tradeId: "t3", orderId: "o3", tokenId: "y", side: "BUY" as const, price: 0.43, shares: 10, fee: 0.1, at: new Date() };
-    const old = { ...worse, tradeId: "t4", price: 0.42, at: new Date(Date.now() - 60_000) };
+    const old = { ...worse, tradeId: "t4", price: 0.42, at: new Date(Date.now() - 120_000) };
     const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async (after?: Date) => [worse, old].filter((t) => !after || t.at >= after) };
-    expect(await placeTicketOrder(ex, order, no)).toMatchObject({ kind: "unknown" });
+    expect(await placeTicketOrder(ex, order, no, nowait)).toMatchObject({ kind: "unknown" });
+  });
+  it("unknown outcome: the trade index lags, the fill shows up on a re-check", async () => {
+    const trade = { tradeId: "t5", orderId: "o5", tokenId: "y", side: "BUY" as const, price: 0.42, shares: 10, fee: 0.1, at: new Date() };
+    let calls = 0;
+    const ex = { place: async () => { throw new Error("socket hang up"); }, openOrders: async () => [], trades: async () => (++calls >= 2 ? [trade] : []) };
+    expect(await placeTicketOrder(ex, order, no, nowait)).toMatchObject({ kind: "filled", shares: 10 });
+    expect(calls).toBe(2);
   });
   it("wallet rejection: declined; venue rejection: rejected", async () => {
     const rej = { place: async () => { throw new Error("User rejected"); }, openOrders: async () => [], trades: async () => [] };
