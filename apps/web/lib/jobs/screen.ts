@@ -108,13 +108,21 @@ export function detectStructural(
 export const smallCapTooBusy = (tier: Tier, vol24h: number, structural: boolean, st: Pick<AppSettings, "universe">) =>
   tier === "small-cap" && !structural && vol24h > st.universe.smallCapMaxVol24hUsd;
 
+const by = (rows: { m: { conditionId: string; eventId: string; negRiskGroup: string | null } }[], id: string) => rows.find((r) => r.m.conditionId === id)!.m;
+
 export async function screenAll(d: Deps) {
   return withLock(d, "screen", 10 * 60_000, async () => {
     const now = d.now(), st = d.settings;
     const mrows = await d.db.select().from(s.markets).where(inArray(s.markets.status, OPEN));
     const snaps = await latestSnaps(d.db, mrows.map((m) => m.conditionId));
     const rows = mrows.flatMap((r) => { const snap = snaps.get(r.conditionId); return snap?.book ? [{ r, m: toMarket(r), snap }] : []; });
-    const structural = detectStructural(rows, st.capFrac * st.bankroll, new Map([...groupBy(mrows.filter((r) => r.negRiskGroup), (r) => r.negRiskGroup!)].map(([g, v]) => [g, v.length])));
+    // buy-all needs every leg and the db only holds the filtered universe: confirm the true leg count with Gamma, one call per flagged group; a failed lookup rejects (-1 never matches)
+    const cap = st.capFrac * st.bankroll, dbSize = new Map([...groupBy(mrows.filter((r) => r.negRiskGroup), (r) => r.negRiskGroup!)].map(([g, v]) => [g, v.length]));
+    const trueSize = new Map<string, number>();
+    const flagged = [...detectStructural(rows, cap)].flatMap(([id, x]) => (x.type === "neg-risk-sum" && x.kind === "buy-all" ? [by(rows, id)] : []));
+    for (const m of new Map(flagged.map((m) => [m.negRiskGroup!, m])).values())
+      trueSize.set(m.negRiskGroup!, await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m.negRiskGroup).length : -1), () => -1));
+    const structural = detectStructural(rows, cap, new Map([...dbSize, ...trueSize]));
 
     // pass 1 on everything; R (cached by rules hash) only for survivors and structural legs
     const filtered: Partial<Record<Pass1Reason, number>> = {};

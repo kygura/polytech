@@ -1,7 +1,7 @@
 import { depthWithin, midOf } from "@pm/core";
 import { insertSnapshots, schema as s } from "@pm/db";
 import type { Market as PmMarket } from "@pm/pm";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -23,7 +23,7 @@ export async function sweepUniverse(d: Deps) {
     const byCond = new Map<string, PmMarket>((await d.pm.listMarkets({ liquidityMin, endDateMin: new Date(endMin).toISOString(), endDateMax: new Date(endMax).toISOString() })).map((m) => [m.condition_id, m]));
     if (!byCond.size) return { markets: 0, newMarkets: 0, feesFetched: 0, closed: 0 };
 
-    const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status, end: s.markets.endDate }).from(s.markets)).map((r) => [r.id, r]));
+    const known = new Map((await d.db.select({ id: s.markets.conditionId, fee: s.markets.feeRate, status: s.markets.status, end: s.markets.endDate, pmId: s.markets.pmId }).from(s.markets)).map((r) => [r.id, r]));
     const rows = [...byCond.values()].map((m): typeof s.markets.$inferInsert => ({
       conditionId: m.condition_id,
       eventId: m.event_id ?? null,
@@ -82,7 +82,16 @@ export async function sweepUniverse(d: Deps) {
     if (truncated) console.warn(`sweep: listing truncated (${byCond.size} vs previous ${prev}, ${streak}/3), skipping close`);
     await d.kv.set(shrinkKey, truncated ? streak : 0);
     if (!truncated) await d.kv.set(listingKey, byCond.size);
-    const gone = truncated ? [] : knownOpen.filter(([id]) => !byCond.has(id)).map(([id]) => id);
+    // a market we hold, or one in a pending proposal / unsettled set, closes only when Gamma says it is closed (resolution still needs the flip);
+    // merely falling out of the filter, or a failed lookup, keeps it open so snapshots and exits keep running
+    const held = new Set([
+      ...(await d.db.select({ c: s.positions.conditionId }).from(s.positions).where(isNull(s.positions.closedAt))).map((r) => r.c),
+      ...(await d.db.select({ c: s.proposals.conditionId }).from(s.proposals).where(inArray(s.proposals.status, ["pending", "approved"]))).map((r) => r.c),
+      ...(await d.db.select({ l: s.proposalSets.legs }).from(s.proposalSets).where(inArray(s.proposalSets.status, ["pending", "sending", "unwinding", "flagged"]))).flatMap((r) => r.l.map((l) => l.conditionId)),
+    ]);
+    const missing = truncated ? [] : knownOpen.filter(([id]) => !byCond.has(id));
+    const stillOpen = new Set((await Promise.all(missing.filter(([id]) => held.has(id)).map(async ([id, r]) => ((await d.pm.market(r.pmId ?? id).catch(() => undefined))?.open !== false ? id : null)))).flatMap((id) => id ?? []));
+    const gone = missing.map(([id]) => id).filter((id) => !stillOpen.has(id));
     for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
 
     const out = { markets: rows.length, newMarkets: rows.filter((r) => !known.has(r.conditionId)).length, feesFetched, closed: gone.length };

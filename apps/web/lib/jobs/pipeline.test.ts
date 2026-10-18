@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from "@pm/core";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { createHash } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import { calibrateNightly, deps, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
@@ -213,11 +213,56 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const mk = (k: string, end: number) => ({ ...base!, conditionId: cid("gone-" + k), pmId: "gone-" + k, endDate: new Date(end), status: "active" as const });
     const rows = [mk("soon", now + (minDays / 2) * day), mk("window", now + ((minDays + maxDays) / 2) * day), mk("past", now - day)];
     await d.db.insert(s.markets).values(rows);
+    await d.db.insert(s.positions).values({ conditionId: cid("gone-window"), tokenId: "tok", size: 1, avgCost: 0.5 }); // held: stays open
     await sweepUniverse(d);
     const status = async (k: string) => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, cid("gone-" + k))))[0]!.status;
     expect(await status("soon")).toBe("active");
-    expect(await status("window")).toBe("closed");
+    expect(await status("window")).toBe("active");
     expect(await status("past")).toBe("closed");
+    await d.db.update(s.positions).set({ closedAt: new Date(t) }).where(eq(s.positions.conditionId, cid("gone-window")));
+    await sweepUniverse(d);
+    expect(await status("window")).toBe("closed");
+  });
+
+  it("buy-all needs the true leg count from Gamma: lookup failure or an extra leg rejects it", async () => {
+    const buyAll = async (p: typeof pm) => { await screenAll({ ...d, pm: p }); return (await read.watchlist(r, "structural")).filter((x: any) => x.kind === "buy-all").length; };
+    expect(await buyAll(pm)).toBeGreaterThan(0);
+    expect(await buyAll({ ...pm, event: async () => { throw new Error("429"); } } as typeof pm)).toBe(0);
+    const extra = async (id: string) => { const e = await pm.event(id); return e && { ...e, markets: [...e.markets, { ...e.markets[0]!, condition_id: "0xhidden" }] }; };
+    expect(await buyAll({ ...pm, event: extra } as typeof pm)).toBe(0);
+    await screenAll(d);
+  });
+
+  it("screenAll skips a busy small-cap row and an undated market", async () => {
+    const [sc] = await d.db.select().from(s.screens).where(and(eq(s.screens.tier, "small-cap"), eq(s.screens.structuralFlag, false))).limit(1);
+    const snapOf = async (c: string) => (await d.db.select().from(s.snapshots).where(eq(s.snapshots.conditionId, c)).orderBy(desc(s.snapshots.ts)).limit(1))[0]!;
+    const n = async (c: string) => (await d.db.select().from(s.screens).where(eq(s.screens.conditionId, c))).length;
+    const { id: _i, ...snap } = await snapOf(sc!.conditionId);
+    await d.db.insert(s.snapshots).values({ ...snap, ts: new Date(t + 1000), vol24h: d.settings.universe.smallCapMaxVol24hUsd + 1 });
+    const before = await n(sc!.conditionId);
+    await screenAll(d);
+    expect(await n(sc!.conditionId)).toBe(before); // busy: no new screen row
+
+    const [base] = await d.db.select().from(s.markets).limit(1);
+    const u = cid("undated");
+    await d.db.insert(s.markets).values({ ...base!, conditionId: u, pmId: "undated", endDate: null, status: "active" });
+    const { id: _j, ...us } = await snapOf(base!.conditionId);
+    await d.db.insert(s.snapshots).values({ ...us, conditionId: u, ts: new Date(t + 1000) });
+    await screenAll(d);
+    expect((await d.db.select().from(s.screens).where(eq(s.screens.conditionId, u))).every((x) => x.priority === 0)).toBe(true); // pass1 days_out_of_range: never shortlisted
+  });
+
+  it("held market stays open when missing under a new baseline key (changed filter)", async () => {
+    const [base] = await d.db.select().from(s.markets).limit(1);
+    const c = cid("held-newkey"), { minDays, maxDays } = d.settings.filters;
+    await d.db.insert(s.markets).values({ ...base!, conditionId: c, pmId: "held-newkey", endDate: new Date(t + ((minDays + maxDays) / 2) * 864e5), status: "active" });
+    await d.db.insert(s.proposals).values({ thesisId: "th-held", conditionId: c, tokenId: "tok", side: "BUY", kind: "entry", sizeUsd: 1, shares: 1, limitPrice: 0.5, expectedProfit: 0, priceAtProposal: 0.5, expiresAt: new Date(t + 6e4), approveTokenHash: "a", rejectTokenHash: "b" });
+    const status = async () => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, c)))[0]!.status;
+    await sweepUniverse({ ...d, settings: { ...d.settings, universe: { ...d.settings.universe, minLiquidityUsd: 1 } } }); // fresh key: no baseline
+    expect(await status()).toBe("active");
+    await d.db.update(s.proposals).set({ status: "rejected" }).where(eq(s.proposals.thesisId, "th-held"));
+    await sweepUniverse(d);
+    expect(await status()).toBe("closed");
   });
 
   it("no candidates: 10 min old snapshots keep L1, 20 min downgrade", async () => {

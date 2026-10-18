@@ -36,6 +36,7 @@ export function fixtureCall(host: Host, path: string, { params: p = {}, body }: 
   if (host === "gamma") {
     if (path === "/markets/keyset") return keyset((load("markets") as any[]).filter((m) => p.closed === undefined || String(m.closed) === String(p.closed)), "markets", p);
     if (path === "/events/keyset") return keyset((load("events") as any[]).filter((e) => p.closed === undefined || String(e.closed) === String(p.closed)), "events", p);
+    if (path.startsWith("/events/")) return (load("events") as any[]).find((e) => String(e.id) === decodeURIComponent(path.slice(8))) ?? notFound(path);
     if (path.startsWith("/markets/")) return (load("markets") as any[]).find((m) => m.id === decodeURIComponent(path.slice(9))) ?? notFound(path);
     if (path === "/comments") return (load("comments") as any[]).filter((c) => String(c.parentEntityID) === String(p.parent_entity_id)).slice(0, Number(p.limit ?? 100));
   }

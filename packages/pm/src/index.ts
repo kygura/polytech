@@ -101,6 +101,7 @@ export function createPm(opts: PmOptions = {}) {
       keyset("/markets/keyset", "markets", { closed: o.closed ?? false, limit: o.limit, liquidity_num_min: o.liquidityMin, end_date_min: o.endDateMin, end_date_max: o.endDateMax }, (x) => normMarket(x)),
     listEvents: (o: { closed?: boolean; limit?: number } = {}): Promise<PmEvent[]> =>
       keyset("/events/keyset", "events", { closed: o.closed ?? false, limit: o.limit }, normEvent),
+    event: async (id: string): Promise<PmEvent | undefined> => normEvent(await raw("gamma", `/events/${encodeURIComponent(id)}`)),
     market: async (id: string): Promise<Market | undefined> => normMarket(await raw("gamma", `/markets/${encodeURIComponent(id)}`)),
     comments: async (o: { entityType?: string; entityId: string | number; limit?: number }): Promise<Comment[]> =>
       normComments(await raw("gamma", "/comments", { params: { parent_entity_type: o.entityType ?? "Event", parent_entity_id: o.entityId, limit: o.limit ?? 50 } })),
