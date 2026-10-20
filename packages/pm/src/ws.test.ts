@@ -87,6 +87,8 @@ class FakeWS implements WsLike {
   close() { if (this.readyState === 3) return; this.readyState = 3; this.onclose?.({ code: 1000, reason: "" }); }
 }
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+/** Real timers drift under load: wait for the condition instead of a fixed delay. */
+const until = async (ok: () => unknown, ms = 2000) => { for (const end = Date.now() + ms; !ok() && Date.now() < end; ) await tick(2); };
 
 describe("subscribeMarket (fake socket)", () => {
   it("subscribes on open, forwards events, pings, resubscribes the current set after a drop, stops on close()", async () => {
@@ -94,7 +96,7 @@ describe("subscribeMarket (fake socket)", () => {
     const events: MarketEvent[] = [];
     const status: string[] = [];
     const sock = subscribeMarket(["A", "B"], { onEvent: (e) => events.push(e), onStatus: (s) => status.push(s), WebSocketImpl: FakeWS, pingMs: 5, reconnectMinMs: 1, reconnectMaxMs: 2, random: () => 0.5 });
-    await tick(20);
+    await until(() => FakeWS.instances[0]?.sent.includes("PING"));
     const ws1 = FakeWS.instances[0]!;
     expect(ws1.url).toBe("wss://ws-subscriptions-clob.polymarket.com/ws/market");
     expect(JSON.parse(ws1.sent[0]!)).toEqual({ type: "market", assets_ids: ["A", "B"], custom_feature_enabled: true });
@@ -108,7 +110,7 @@ describe("subscribeMarket (fake socket)", () => {
     sock.unsubscribe(["A"]);
     expect(JSON.parse(ws1.sent.at(-1)!)).toEqual({ operation: "unsubscribe", assets_ids: ["A"] });
     ws1.close(); // server drop -> reconnect with the *current* set
-    await tick(30);
+    await until(() => FakeWS.instances[1]?.sent.length);
     const ws2 = FakeWS.instances[1]!;
     expect(ws2).toBeDefined();
     expect(JSON.parse(ws2.sent[0]!).assets_ids.sort()).toEqual(["B", "C"]);
