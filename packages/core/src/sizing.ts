@@ -1,4 +1,4 @@
-import { takerFeePerShare } from "./fees";
+import { feeExponentOf, takerFeePerShare } from "./fees";
 import { complementBook, exitDepth, sortAsc } from "./screen/book";
 import type { Level, Settings, Side, WatchCore } from "./types";
 
@@ -10,6 +10,8 @@ export type SizeInput = {
   c: number; // confidence 0..1
   daysLeft: number;
   feeRate: number;
+  /** Gamma feeSchedule.exponent; omit/null = 1. */
+  feeExponent?: number | null;
   crowdC: number; // 0..1
   crowdSide: Side | null;
   settings: Settings;
@@ -49,16 +51,16 @@ export function extremizeP(p: number, k: number): number {
  * All-in price per share filling `usd` of asks cheapest-first: (usd + Σ per-level fee) / shares, the taker fee charged
  * level by level at that level's price. usd <= 0 -> best ask incl. fee. Null if the book cannot absorb it.
  */
-export function allInPrice(asks: Level[], usd: number, feeRate: number): number | null {
+export function allInPrice(asks: Level[], usd: number, feeRate: number, feeExponent = 1): number | null {
   const ls = sortAsc(asks);
   if (!ls.length) return null;
-  if (usd <= 0) return ls[0]!.price + takerFeePerShare(feeRate, ls[0]!.price);
+  if (usd <= 0) return ls[0]!.price + takerFeePerShare(feeRate, ls[0]!.price, feeExponent);
   let left = usd, shares = 0, fees = 0;
   for (const l of ls) {
     const cost = l.price * l.size;
     const take = left <= cost + 1e-9 ? left / l.price : l.size;
     shares += take;
-    fees += take * takerFeePerShare(feeRate, l.price);
+    fees += take * takerFeePerShare(feeRate, l.price, feeExponent);
     left -= Math.min(left, cost);
     if (left <= 1e-9) return (usd + fees) / shares;
   }
@@ -72,7 +74,7 @@ function evalSide(side: Side, a: SizeInput, pHatYes: number): SizeResult | null 
   const pHat = side === "YES" ? pHatYes : 1 - pHatYes;
   const pMid = side === "YES" ? a.pMid : 1 - a.pMid;
   const pPost = a.c * pHat + (1 - a.c) * pMid;
-  const kAt = (usd: number) => allInPrice(asks, usd, feeRate);
+  const kAt = (usd: number) => allInPrice(asks, usd, feeRate, feeExponentOf(a.feeExponent));
   const k0 = kAt(0);
   if (k0 == null) return null;
 

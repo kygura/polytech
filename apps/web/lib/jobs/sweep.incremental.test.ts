@@ -34,8 +34,10 @@ describe("incremental sweep", () => {
     const rows = await d.db.select().from(s.markets);
     expect(rows.every((r) => r.rulesHash?.length === 64 && r.resolutionSource && r.liquidity != null)).toBe(true);
     expect(rows.some((r) => r.resolutionSource === "official_data")).toBe(true); // fixture rules cite "the official data release"
-    expect((await row(feeId)).feeRate).toBe(0.07); // rate stored; exponent 2 is not representable in feeRate (core assumes 1)
+    expect((await row(feeId)).feeRate).toBe(0.07);
+    expect((await row(feeId)).feeExponent).toBe(2); // the curve exponent is stored beside the rate
     expect((await row(freeId)).feeRate).toBe(0);
+    expect((await row(freeId)).feeExponent).toBeNull(); // no schedule: null = 1
     expect((await row(plainId)).negRiskAugmented).toBe(true);
     // gamma-priced markets never asked the CLOB; the rest did (fee-free markets answer without `fd`)
     expect(clobMarket.mock.calls.map((c) => c[0])).not.toContain(feeId);

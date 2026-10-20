@@ -17,8 +17,9 @@ const ex = (c: { name: string }) => sql.raw(`excluded."${c.name}"`);
 
 const statusOf = (m: PmMarket) => (!m.open ? "closed" : m.in_dispute ? "disputed" : !m.accepting_orders ? "not_accepting" : "active");
 
-/** Gamma fee schedule rate (`rate * (p(1-p))^exponent`; core assumes exponent 1, so only the rate is kept); feesEnabled=false is a real 0; no info = null (category fallback). */
+/** Gamma fee schedule rate (`rate * (p(1-p))^exponent`); feesEnabled=false is a real 0; no info = null (category fallback). The exponent is stored beside it (null = 1). */
 const feeOfPm = (m: PmMarket) => m.fee_schedule?.rate ?? (m.fees_enabled === false ? 0 : null);
+const feeExpOfPm = (m: PmMarket) => m.fee_schedule?.exponent ?? null;
 
 /** `prev` = what the db already holds: an unchanged rules hash keeps the stored resolution source instead of re-running the classifier. */
 export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; resolutionSource: string | null }): typeof s.markets.$inferInsert => {
@@ -33,6 +34,7 @@ export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; reso
     endDate: m.end_date ? new Date(m.end_date) : null,
     negRiskGroup: m.neg_risk ? (m.neg_risk_group ?? null) : null,
     feeRate: feeOfPm(m), // null = unknown: the upsert keeps the stored rate, then the capped clob-markets lookup fills it
+    feeExponent: feeExpOfPm(m),
     status: statusOf(m),
     pmId: m.id,
     yesTokenId: m.yes_token_id ?? null,
@@ -51,9 +53,9 @@ const t = s.markets;
 const moved = (c: { name: string }) =>
   sql`(excluded."${sql.raw(c.name)}" is not null and (${sql.raw(`"markets"."${c.name}"`)} is null or abs(excluded."${sql.raw(c.name)}" - ${sql.raw(`"markets"."${c.name}"`)}) > 0.05 * greatest(abs(${sql.raw(`"markets"."${c.name}"`)}), 1)))`;
 const stored = (c: { name: string }) => sql.raw(`"markets"."${c.name}"`);
-// the columns whose change justifies a write. rules is covered by rules_hash. fee_rate compares the coalesced value, tick_size too.
+// the columns whose change justifies a write. rules is covered by rules_hash. fee_rate / fee_exponent compare the coalesced value, tick_size too.
 const SAME = [t.eventId, t.question, t.category, t.tags, t.endDate, t.negRiskGroup, t.status, t.pmId, t.yesTokenId, t.noTokenId, t.rulesHash, t.resolutionSource, t.negRiskAugmented];
-const changed = sql`((${sql.join(SAME.map(stored), sql`, `)}, ${stored(t.tickSize)}, ${stored(t.feeRate)}) is distinct from (${sql.join(SAME.map(ex), sql`, `)}, coalesce(excluded."tick_size", ${stored(t.tickSize)}), coalesce(excluded."fee_rate", ${stored(t.feeRate)})) or ${moved(t.liquidity)} or ${moved(t.vol24h)})`;
+const changed = sql`((${sql.join(SAME.map(stored), sql`, `)}, ${stored(t.tickSize)}, ${stored(t.feeRate)}, ${stored(t.feeExponent)}) is distinct from (${sql.join(SAME.map(ex), sql`, `)}, coalesce(excluded."tick_size", ${stored(t.tickSize)}), coalesce(excluded."fee_rate", ${stored(t.feeRate)}), coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})) or ${moved(t.liquidity)} or ${moved(t.vol24h)})`;
 
 /** Insert-or-update a page of markets; rows whose meaningful columns are unchanged are not written (not returned either). Returns the written condition ids. */
 export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inferInsert)[]): Promise<string[]> {
@@ -68,6 +70,7 @@ export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inf
       liquidity: sql`case when ${moved(t.liquidity)} then excluded."liquidity" else ${stored(t.liquidity)} end`,
       tickSize: sql`coalesce(excluded."tick_size", ${stored(t.tickSize)})`,
       feeRate: sql`coalesce(excluded."fee_rate", ${stored(t.feeRate)})`,
+      feeExponent: sql`coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})`,
     },
     setWhere: changed,
   }).returning({ id: t.conditionId });
@@ -110,7 +113,7 @@ export async function sweepUniverse(d: Deps) {
         const info = await d.pm.clobMarket(c).catch(() => undefined);
         if (!info) return; // 404 / outage: stays unknown, retried next sweep
         feesFetched++;
-        await d.db.update(t).set({ feeRate: info.fee_schedule?.rate ?? 0 }).where(eq(t.conditionId, c));
+        await d.db.update(t).set({ feeRate: info.fee_schedule?.rate ?? 0, feeExponent: info.fee_schedule?.exponent ?? null }).where(eq(t.conditionId, c));
       }));
     }
 

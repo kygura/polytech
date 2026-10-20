@@ -14,7 +14,7 @@ const settings = (mode: VisitorSettings["mode"], l3: Partial<VisitorSettings["li
   ...DEFAULT_VISITOR_SETTINGS, mode, limits: { ...DEFAULT_VISITOR_SETTINGS.limits, ...lim, l3: { ...DEFAULT_VISITOR_SETTINGS.limits.l3, categoryAllowlist: ["politics"], perTradeUsd: 100, ...l3 } },
 });
 const detail = (o: { id?: string; cid?: string; snapAge?: number; research?: "done" | "pending" } = {}): PublicMarketDetail => ({
-  market: { conditionId: o.cid ?? "c1", question: "Will X?", rules: "r", category: "politics", tags: [], eventId: "e1", negRiskGroup: null, endDate: NOW + 30 * 86_400_000, daysLeft: 30, status: "active", tickSize: null, yesTokenId: "y1", noTokenId: "n1", feeRate: 0, negRisk: false },
+  market: { conditionId: o.cid ?? "c1", question: "Will X?", rules: "r", category: "politics", tags: [], eventId: "e1", negRiskGroup: null, endDate: NOW + 30 * 86_400_000, daysLeft: 30, status: "active", tickSize: null, yesTokenId: "y1", noTokenId: "n1", feeRate: 0, feeExponent: 1, negRisk: false },
   snapshot: { ts: NOW - (o.snapAge ?? 60_000), mid: 0.5, bestBid: 0.49, bestAsk: 0.51, depth5cUsd: 500, vol24h: 1000, oi: 1000, top10Share: 0.2, bids: [], asks: [], netFlow: 0 },
   history: [], screen: null,
   thesis: { id: o.id ?? "t1", createdAt: NOW - 3_600_000, expiresAt: NOW + 5 * 86_400_000, side: "YES", pHat: 0.7, c: 0.8, pPost: 0.66, edgeC: 15, catalysts: [], killCriteria: [], thesis: "t", pYes: 0.7, pMidYes: 0.5, capped: false } as unknown as PublicMarketDetail["thesis"],

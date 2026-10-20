@@ -2,7 +2,7 @@ import { applyFill, checkOrder, effectiveMode, feeRateFor, mirror, paperFill, pa
 import { schema as s } from "@pm/db";
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, max } from "drizzle-orm";
 import { currentMode, downgradeOn } from "./autonomy";
-import { DAY, feeOf, toMarket, toSnap, today, withLock, type Deps } from "./deps";
+import { DAY, feeExpOf, feeOf, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { latestSnaps } from "./screen";
 import { takeSnapshots } from "./sweep";
@@ -79,7 +79,7 @@ export function assess(d: Deps, t: ThesisRow, row: MarketRow, snap: SnapRow | un
   const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
   const sz = sizeTrade({
     bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: dt.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY,
-    feeRate: feeOf(m), crowdC: cr.c, crowdSide: cr.side, settings: st,
+    feeRate: feeOf(m), feeExponent: feeExpOf(m), crowdC: cr.c, crowdSide: cr.side, settings: st,
   });
   if (!sz || sz.side !== t.side || sz.sizeUsd <= 0) return { ok: false, failed: ["NO_EDGE_NOW"] };
   const q = qualifies(
@@ -150,7 +150,7 @@ export async function paperBook(d: Deps) {
 
       const chk = checkOrder({ sizeUsd: now1.sizeUsd, marketId: m.conditionId, eventId: eventOf(row), category: row.category ?? "other" }, x, L);
       const tokenId = t.side === "YES" ? row.yesTokenId : row.noTokenId;
-      const f = paperFill(t.side === "YES" ? snap.book.asks : mirror(snap.book.bids), now1.sizeUsd, feeRateFor(m.category, m.feeRate).rate);
+      const f = paperFill(t.side === "YES" ? snap.book.asks : mirror(snap.book.bids), now1.sizeUsd, feeRateFor(m.category, m.feeRate).rate, feeExpOf(m));
       if (!tokenId || !f.complete || f.shares <= 0) { reject("THIN_BOOK"); continue; }
 
       const rules = chk.violations.map((v) => v.rule);

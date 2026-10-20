@@ -12,6 +12,7 @@ export type Market = {
   endDate: number; // epoch ms
   negRiskGroup: string | null;
   feeRate: number | null; // null = unknown, fall back by category
+  feeExponent?: number | null; // Gamma feeSchedule.exponent; null/omitted = 1
   open: boolean;
   acceptingOrders: boolean;
   inDispute: boolean;

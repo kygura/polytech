@@ -6,6 +6,13 @@ describe("fees", () => {
     expect(takerFeePerShare(0.04, 0.5)).toBeCloseTo(0.01, 12);
     expect(takerFeePerShare(0.07, 0.2)).toBeCloseTo(0.0112, 12);
   });
+  it("fee = rate*(p(1-p))^exponent; exponent defaults to 1", () => {
+    expect(takerFeePerShare(0.07, 0.5, 2)).toBeCloseTo(0.07 * 0.0625, 12);
+    expect(takerFeePerShare(0.07, 0.2, 2)).toBeCloseTo(0.07 * 0.16 * 0.16, 12);
+    expect(takerFeePerShare(0.07, 0.2, 1)).toBe(takerFeePerShare(0.07, 0.2));
+    expect(takerFeePerShare(0.04, 0.5, 2)).toBeLessThan(takerFeePerShare(0.04, 0.5));
+    expect(() => takerFeePerShare(0.04, 0.5, NaN)).toThrow(RangeError);
+  });
   it("is zero at the extremes and for rate 0", () => {
     expect(takerFeePerShare(0.04, 0)).toBe(0);
     expect(takerFeePerShare(0.04, 1)).toBe(0);

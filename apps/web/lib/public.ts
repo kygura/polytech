@@ -1,5 +1,5 @@
 import { pickRunner } from "@pm/agents";
-import { feeRateFor } from "@pm/core";
+import { feeExponentOf, feeRateFor } from "@pm/core";
 import { getKv, schema as s, type Db, type Kv } from "@pm/db";
 import { max } from "drizzle-orm";
 import { clientIp } from "./auth";
@@ -59,7 +59,7 @@ export const EVIDENCE_KEYS = ["id", "role", "claim", "quote", "url", "direction"
 export const AGENT_KEYS = ["role", "status", "probability", "confidence"] as const;
 
 export type PublicMarketDetail = {
-  market: Pick<Detail["market"], (typeof MARKET_KEYS)[number]> & { feeRate: number; negRisk: boolean };
+  market: Pick<Detail["market"], (typeof MARKET_KEYS)[number]> & { feeRate: number; feeExponent: number; negRisk: boolean };
   snapshot: Pick<NonNullable<Detail["snapshot"]>, (typeof SNAP_KEYS)[number]> | null;
   history: { ts: number; mid: number | null }[];
   screen: (Pick<NonNullable<Detail["screen"]>, (typeof SCREEN_KEYS)[number]> & { structural: PublicStruct | null }) | null;
@@ -76,7 +76,7 @@ export const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : "");
 export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDetail {
   const m = d.market;
   return {
-    market: { ...pick(m, MARKET_KEYS), feeRate: feeRateFor(m.category ?? "other", m.feeRate).rate, negRisk: m.negRiskGroup != null },
+    market: { ...pick(m, MARKET_KEYS), feeRate: feeRateFor(m.category ?? "other", m.feeRate).rate, feeExponent: feeExponentOf(m.feeExponent), negRisk: m.negRiskGroup != null },
     snapshot: d.snapshot ? pick(d.snapshot, SNAP_KEYS) : null,
     history: d.history.map((h) => ({ ts: h.ts, mid: h.mid })),
     screen: d.screen ? { ...pick(d.screen, SCREEN_KEYS), structural: struct(d.screen.structural as StructDetail | null) } : null,

@@ -5,7 +5,7 @@ import {
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
-import { DAY, addSpend, chunks, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
+import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { memoClear } from "./memo";
 import type { AppSettings } from "./settings";
@@ -80,7 +80,7 @@ export function detectStructural(
   const sm = (r: (typeof rows)[number]): StructuralMarket => {
     const id = r.m.conditionId, bid = touch(id, "bids"), ask = touch(id, "asks");
     return {
-      conditionId: id, question: r.m.question, endDate: r.m.endDate || null, mid: r.snap.mid ?? null, feeRate: feeOf(r.m),
+      conditionId: id, question: r.m.question, endDate: r.m.endDate || null, mid: r.snap.mid ?? null, feeRate: feeOf(r.m), feeExponent: feeExpOf(r.m),
       bestBid: bid?.price ?? null, bidSize: bid?.shares ?? null, bestAsk: ask?.price ?? null, askSize: ask?.shares ?? null,
     };
   };
@@ -112,7 +112,7 @@ export function detectStructural(
     const [hi, lo] = mid(p.a) > mid(p.b) ? [p.a, p.b] : [p.b, p.a]; // sell the dear listing, buy the cheap one
     const bid = touch(hi, "bids"), ask = touch(lo, "asks");
     if (!bid || !ask) continue;
-    const fee = takerFeePerShare(feeOf(by.get(hi)!.m), bid.price) + takerFeePerShare(feeOf(by.get(lo)!.m), ask.price);
+    const fee = takerFeePerShare(feeOf(by.get(hi)!.m), bid.price, feeExpOf(by.get(hi)!.m)) + takerFeePerShare(feeOf(by.get(lo)!.m), ask.price, feeExpOf(by.get(lo)!.m));
     const lockedC = (bid.price - ask.price - fee) * 100;
     if (lockedC <= 0) continue;
     claim([hi, lo], { type: "mirror", lockedC, sum: null, legs: [hi, lo], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
@@ -235,7 +235,7 @@ async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; sn
     if (!t || pYes == null || snap.mid == null || !snap.book) continue;
     const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
     const z = sizeTrade({
-      bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: feeOf(m),
+      bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: feeOf(m), feeExponent: feeExpOf(m),
       crowdC: cr.c, crowdSide: cr.side, settings: d.settings, flow24h: flow.get(m.conditionId) ?? null, extremize: d.settings.extremize,
     });
     if (z && z.sizeUsd > 0) out.set(m.conditionId, { side: z.side, edge: z.e, stake: z.sizeUsd, o: z.rank, contrarian: z.contrarian });

@@ -110,6 +110,14 @@ describe("sizeTrade Rev 7 refinements", () => {
     expect(r.k).toBeCloseTo((100 + 1.92) / 200, 9);
     expect(r.shares).toBeCloseTo(200, 9);
   });
+  it("fee exponent 2 lowers the fee at the mid: k0 = .40 + .04*(.24)^2", () => {
+    expect(allInPrice(base.asks, 0, 0.04, 2)).toBeCloseTo(0.4 + 0.04 * 0.24 * 0.24, 12);
+    const r1 = sizeTrade(base)!, r2 = sizeTrade({ ...base, feeExponent: 2 })!;
+    expect(r2.k).toBeCloseTo(0.4 + 0.04 * 0.24 * 0.24, 12);
+    expect(r2.k).toBeLessThan(r1.k);
+    expect(r2.e).toBeGreaterThan(r1.e);
+    expect(sizeTrade({ ...base, feeExponent: null })!.k).toBeCloseTo(r1.k, 12); // null = 1
+  });
   it("exitFactor", () => {
     expect(exitFactor(1000, 100)).toBe(1);
     expect(exitFactor(50, 100)).toBeCloseTo(0.75, 12);

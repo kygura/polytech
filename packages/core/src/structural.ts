@@ -1,5 +1,5 @@
 // Structural mispricing detection: executable neg-risk overround, sibling-sum inconsistency, ladder monotonicity. Pure.
-import { DEFAULT_FEE_RATE, takerFeePerShare } from "./fees";
+import { DEFAULT_FEE_RATE, feeExponentOf, takerFeePerShare } from "./fees";
 
 export type StructuralKind = "overround" | "monotonicity_violation" | "sibling_inconsistency";
 
@@ -24,8 +24,10 @@ export type StructuralMarket = {
   threshold?: number | null;
   /** Outcome labels (YES first). "Over"/"Under" as outcomes[0] fixes the direction of Over/Under ladders. */
   outcomes?: string[] | null;
-  /** Taker fee rate (rate·p(1−p) per share). Missing → conservative default. */
+  /** Taker fee rate (rate·(p(1−p))^feeExponent per share). Missing → conservative default. */
   feeRate?: number | null;
+  /** Gamma feeSchedule.exponent; missing → 1. */
+  feeExponent?: number | null;
   /** Shares resting at the best ask / bid, when known (min-ticket check on overround baskets). */
   askSize?: number | null;
   bidSize?: number | null;
@@ -180,8 +182,8 @@ export function parseLadderKey(question: string, refYear?: number, ctx: LadderCo
 
 // ───────────── checks ─────────────
 
-const feeOf = (m: Pick<StructuralMarket, "feeRate">, price: number) =>
-  takerFeePerShare(fin(m.feeRate) && m.feeRate >= 0 ? m.feeRate : DEFAULT_FEE_RATE, Math.min(1, Math.max(0, price)));
+const feeOf = (m: Pick<StructuralMarket, "feeRate" | "feeExponent">, price: number) =>
+  takerFeePerShare(fin(m.feeRate) && m.feeRate >= 0 ? m.feeRate : DEFAULT_FEE_RATE, Math.min(1, Math.max(0, price)), feeExponentOf(m.feeExponent));
 
 type Basket = { side: "ask" | "bid"; sum: number; fees: number; gap: number; ids: string[] };
 

@@ -13,6 +13,7 @@ export const markets = pgTable("markets", {
   endDate: ts("end_date"),
   negRiskGroup: text("neg_risk_group"),
   feeRate: dp("fee_rate"), // null = unknown, callers fall back by category
+  feeExponent: dp("fee_exponent"), // Gamma feeSchedule.exponent (fee = rate * (p(1-p))^exponent); null = 1
   status: text("status").notNull().default("active"), // active | disputed | not_accepting | closed | resolved
   pmId: text("pm_id"), // Gamma market id (for single-market lookups)
   yesTokenId: text("yes_token_id"),

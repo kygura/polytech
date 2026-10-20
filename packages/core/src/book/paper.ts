@@ -1,7 +1,7 @@
 import type { BookLevel, Outcome, PaperFillResult, Position } from "./types";
 
-/** Hypothetical buy of `sizeUsd` walking the asks. Fee = feeRate * p(1-p) per share at the VWAP (SPEC k(S)). */
-export function paperFill(asks: BookLevel[], sizeUsd: number, feeRate = 0): PaperFillResult {
+/** Hypothetical buy of `sizeUsd` walking the asks. Fee = feeRate * (p(1-p))^feeExponent per share at the VWAP (SPEC k(S)). */
+export function paperFill(asks: BookLevel[], sizeUsd: number, feeRate = 0, feeExponent = 1): PaperFillResult {
   let left = sizeUsd;
   let shares = 0;
   for (const a of [...asks].sort((x, y) => x.price - y.price)) {
@@ -12,7 +12,7 @@ export function paperFill(asks: BookLevel[], sizeUsd: number, feeRate = 0): Pape
   }
   const filled = sizeUsd - Math.max(left, 0);
   const avgPrice = shares ? filled / shares : 0;
-  return { avgPrice, shares, filled, complete: left <= 1e-9, fee: feeRate * avgPrice * (1 - avgPrice) * shares };
+  return { avgPrice, shares, filled, complete: left <= 1e-9, fee: feeRate * Math.pow(avgPrice * (1 - avgPrice), feeExponent) * shares };
 }
 
 export interface Fill {

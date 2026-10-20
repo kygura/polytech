@@ -132,7 +132,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   return {
     market: {
       conditionId, question: m.question, rules: m.rules, category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
-      endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, tickSize: m.tickSize, status: m.status,
+      endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, tickSize: m.tickSize, status: m.status,
       yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, pinned: !!flag?.pinned, muted: !!flag?.muted,
       liquidity: m.liquidity, vol24h: m.vol24h, resolutionSource: m.resolutionSource,
     },

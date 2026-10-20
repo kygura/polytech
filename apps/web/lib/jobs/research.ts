@@ -5,7 +5,7 @@ import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { categoryConfidence } from "./calib";
-import { DAY, addSpend, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
+import { DAY, addSpend, feeExpOf, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
 import { matchMarkets, listProfiles, type Match } from "./profiles";
 import { latestSnaps, shortlist } from "./screen";
@@ -155,7 +155,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
       const core = sizeTrade({
         bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: j.p_hat, c, daysLeft: (market.endDate - now) / DAY,
-        feeRate: feeOf(market), crowdC: cr.c, crowdSide: cr.side, settings: st,
+        feeRate: feeOf(market), feeExponent: feeExpOf(market), crowdC: cr.c, crowdSide: cr.side, settings: st,
       });
 
       // persist run, evidence, spend
