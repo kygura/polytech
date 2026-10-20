@@ -351,3 +351,10 @@ export const reconciliations = pgTable("reconciliations", {
   usdcExchange: dp("usdc_exchange").notNull(),
   mismatches: jsonb("mismatches").$type<{ key: string; ledger: number; exchange: number }[]>().notNull().default([]),
 });
+
+/** Shared kv for serverless instances (locks, rate limits, freshness marks) when no Upstash store is configured. `value` is JSON; expired rows are ignored and pruned lazily. */
+export const kvStore = pgTable("kv", {
+  key: text("key").primaryKey(),
+  value: jsonb("value"),
+  expiresAt: ts("expires_at"),
+});

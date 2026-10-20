@@ -31,6 +31,7 @@ describe("db (pglite memory)", () => {
     await db.insert(s.marketFlags).values({ conditionId: "c1", pinned: true });
     await db.insert(s.spend).values({ day: "2026-10-15", anthropicUsd: 1.5 });
     await db.insert(s.rrCache).values({ conditionId: "c1", rulesHash: "h", r: 0.9, detail: { k: 1 } });
+    await db.insert(s.kvStore).values({ key: "k", value: { a: 1 } });
     const prop = { thesisId: "t1", conditionId: "c1", tokenId: "tok", side: "BUY", kind: "entry", sizeUsd: 10, shares: 20, limitPrice: 0.5, expectedProfit: 1, priceAtProposal: 0.5, expiresAt: now, approveTokenHash: "a", rejectTokenHash: "r" };
     await db.insert(s.proposals).values(prop);
     await expect(db.insert(s.proposals).values(prop)).rejects.toThrow(); // one pending per thesis
