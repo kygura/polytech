@@ -8,3 +8,5 @@ export * from "./structural";
 export * from "./agent-output";
 export * from "./research-profile";
 export * from "./book/index"; // T2
+export * from "./dsl";
+export * from "./crowd";

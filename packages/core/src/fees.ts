@@ -13,12 +13,13 @@ export const FALLBACK_FEE_RATES: Record<string, number> = {
   crypto: 0.07,
   geopolitics: 0,
 };
-const UNKNOWN_CATEGORY_RATE = 0.04; // conservative: assume fees apply
+/** Conservative rate when neither the market nor its category says: assume fees apply. */
+export const DEFAULT_FEE_RATE = 0.04;
 
 export function feeRateFor(
   category: string,
   marketRate: number | null,
 ): { rate: number; fallback: boolean } {
   if (marketRate != null) return { rate: marketRate, fallback: false };
-  return { rate: FALLBACK_FEE_RATES[category.toLowerCase()] ?? UNKNOWN_CATEGORY_RATE, fallback: true };
+  return { rate: FALLBACK_FEE_RATES[category.toLowerCase()] ?? DEFAULT_FEE_RATE, fallback: true };
 }

@@ -1,7 +1,7 @@
 import { costUsd, modelFor, rulesHash } from "@pm/agents";
 import {
-  ladderViolations, mirrorPairs, negRiskArb, pass1, screen, sortAsc, takerFeePerShare,
-  type Pass1Reason, type Tier,
+  findStructural, mirrorPairs, pass1, screen, sortAsc, takerFeePerShare,
+  type Pass1Reason, type StructuralGroup, type StructuralMarket, type Tier,
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
@@ -39,7 +39,6 @@ export function heuristicR(rules: string): number {
   return clamp01(x);
 }
 
-const stem = (q: string) => q.replace(/\s+(by|before)\s+.*$/i, "").toLowerCase().trim();
 /** Mirror key: longest run of 3+ Capitalized words ("Federal Data Privacy Act"), else the whole question. ponytail: heuristic, misses paraphrases without a named entity. */
 const mirrorKey = (q: string) => {
   const runs = q.replace(/^Will\s+/, "").match(/(?:[A-Z][\w&.-]*\s+){2,}[A-Z][\w&.-]*/g) ?? [];
@@ -55,7 +54,7 @@ export const latestSnaps = async (db: Db, ids?: string[]) =>
       .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts))).map((r) => [r.conditionId, r] as [string, SnapRow]),
   );
 
-/** Neg-risk sums, ladders, mirrors over every open market with a book. First detector to claim a market wins. */
+/** Neg-risk baskets, ladders, mirrors over every open market with a book. First detector to claim a market wins. */
 export function detectStructural(
   rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], capUsd: number, groupSize?: Map<string, number>,
 ): Map<string, StructDetail> {
@@ -64,39 +63,39 @@ export function detectStructural(
   const touch = (id: string, side: "asks" | "bids") => {
     const ls = sortAsc(by.get(id)!.snap.book?.[side] ?? []);
     const l = side === "asks" ? ls[0] : ls.at(-1);
-    return l ? { price: l.price, usd: l.price * l.size } : null;
+    return l ? { price: l.price, usd: l.price * l.size, shares: l.size } : null;
   };
   const size = (ids: string[], side: "asks" | "bids") => Math.min(capUsd, ...ids.map((i) => touch(i, side)?.usd ?? 0));
   const claim = (ids: string[], d: StructDetail) => ids.forEach((i) => out.has(i) || out.set(i, d));
   const mid = (id: string) => by.get(id)!.snap.mid ?? 0;
 
-  const groups = groupBy(rows.filter((r) => r.m.negRiskGroup), (r) => r.m.negRiskGroup!);
-  for (const legs of groups.values()) {
-    if (legs.length < 2 || legs.some((l) => !l.snap.book?.asks.length || !l.snap.book.bids.length)) continue; // incomplete set => no arb claim
-    const arb = negRiskArb(
-      legs.map((l) => ({ conditionId: l.m.conditionId, bids: l.snap.book!.bids, asks: l.snap.book!.asks })),
-      Math.max(...legs.map((l) => feeOf(l.m))),
-    );
-    if (!arb) continue;
-    if (arb.kind === "buy-all" && legs.length !== (groupSize?.get(legs[0]!.m.negRiskGroup!) ?? legs.length)) continue; // buy-all needs every leg: a missing one may be the winner
-    const side = arb.kind === "buy-all" ? "asks" : "bids";
-    claim(arb.legs, {
-      type: "neg-risk-sum", kind: arb.kind, lockedC: arb.edge * 100,
-      sum: arb.legs.reduce((t, i) => t + (touch(i, side)?.price ?? 0), 0), legs: arb.legs, sizeUsd: size(arb.legs, side),
+  const sm = (r: (typeof rows)[number]): StructuralMarket => {
+    const id = r.m.conditionId, bid = touch(id, "bids"), ask = touch(id, "asks");
+    return {
+      conditionId: id, question: r.m.question, endDate: r.m.endDate || null, mid: r.snap.mid ?? null, feeRate: feeOf(r.m),
+      bestBid: bid?.price ?? null, bidSize: bid?.shares ?? null, bestAsk: ask?.price ?? null, askSize: ask?.shares ?? null,
+    };
+  };
+  // a leg missing from the db (filtered universe) may be the winner: the Σasks<1 lock needs the true leg count
+  const groups: StructuralGroup[] = [...groupBy(rows.filter((r) => r.m.negRiskGroup), (r) => r.m.negRiskGroup!)].map(([g, legs]) => ({
+    eventId: g, eventTitle: null, negRisk: true, hasInactiveMarkets: legs.length !== (groupSize?.get(g) ?? legs.length), markets: legs.map(sm),
+  }));
+  groups.push({ eventId: "*", eventTitle: null, negRisk: false, markets: rows.map(sm) }); // ladders are parsed from question text, across events
+  const items = findStructural(groups).filter((it) => it.net > 0);
+  for (const it of items.filter((x) => x.kind !== "monotonicity_violation")) {
+    const side = it.side === "ask" ? "asks" : "bids";
+    claim(it.conditionIds, {
+      type: "neg-risk-sum", kind: it.side === "ask" ? "buy-all" : "sell-all", lockedC: it.net * 100,
+      sum: it.conditionIds.reduce((t, i) => t + (touch(i, side)?.price ?? 0), 0), legs: it.conditionIds, sizeUsd: size(it.conditionIds, side),
     });
   }
-
-  const stems = groupBy(rows.filter((r) => stem(r.m.question) !== r.m.question.toLowerCase().trim() && r.snap.mid != null), (r) => stem(r.m.question));
-  for (const g of stems.values()) {
-    const v = ladderViolations(g.map((r) => ({ conditionId: r.m.conditionId, date: r.m.endDate, p: mid(r.m.conditionId) })), 0.02)
-      .sort((a, b) => b.gap - a.gap)[0];
-    if (!v) continue;
-    const bid = touch(v.earlier, "bids"), ask = touch(v.later, "asks"); // sell the early rung, buy the late one
-    if (!bid || !ask) continue;
-    const fee = takerFeePerShare(feeOf(by.get(v.earlier)!.m), bid.price) + takerFeePerShare(feeOf(by.get(v.later)!.m), ask.price);
-    const lockedC = (bid.price - ask.price - fee) * 100;
-    if (lockedC <= 0) continue;
-    claim([v.earlier, v.later], { type: "ladder", lockedC, sum: null, legs: [v.earlier, v.later], sizeUsd: Math.min(capUsd, bid.usd, ask.usd) });
+  for (const it of items.filter((x) => x.kind === "monotonicity_violation")) {
+    const [a, b] = it.conditionIds as [string, string];
+    // sell the dear rung at its bid, buy the cheap one at its ask: only one orientation crosses
+    const leg = [[a, b], [b, a]].map(([sell, buy]) => ({ sell: sell!, buy: buy!, bid: touch(sell!, "bids"), ask: touch(buy!, "asks") }))
+      .find((x) => x.bid && x.ask && x.bid.price > x.ask.price);
+    if (!leg) continue;
+    claim([leg.sell, leg.buy], { type: "ladder", lockedC: it.net * 100, sum: null, legs: [leg.sell, leg.buy], sizeUsd: Math.min(capUsd, leg.bid!.usd, leg.ask!.usd) });
   }
 
   const key = (id: string) => { const m = by.get(id)!.m; return `${mirrorKey(m.question)} ${new Date(m.endDate).toISOString().slice(0, 10)}`; }; // same entity, different question/date is not a mirror
