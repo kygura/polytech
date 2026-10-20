@@ -8,4 +8,4 @@ export type AgentInput = {
   timeoutMs: number;
   maxTurns?: number;
 };
-export function runAgent(input: AgentInput): Promise<{ output: unknown; usage: { inputTokens: number; outputTokens: number; costUsd: number } }>;
+export function runAgent(input: AgentInput & { signal?: AbortSignal }): Promise<{ output: unknown; usage: { inputTokens: number; outputTokens: number; costUsd: number }; toolCalls: { ts: number; name: string; input: string; ok: boolean }[] }>;

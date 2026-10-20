@@ -403,3 +403,35 @@ export const settingsPut = (r: Pick<Deps, "db">, patch: unknown) => putSettings(
 export async function setFlag(r: Pick<Deps, "db">, conditionId: string, flag: { pinned?: boolean; muted?: boolean }) {
   await r.db.insert(s.marketFlags).values({ conditionId, ...flag }).onConflictDoUpdate({ target: s.marketFlags.conditionId, set: flag });
 }
+
+// ---------------------------------------------------------------- pod detail (live runs view)
+/** One pod: stage, cost totals, agent rows with captured tool calls, evidence, thesis (null until sizing wrote one), per-pod budget knobs. */
+export async function podDetail(r: ReadDeps, podId: string) {
+  const { db } = r;
+  const row = (await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId)).where(eq(s.pods.id, podId)))[0];
+  if (!row) return null;
+  const { p } = row;
+  const [agents, ev, th, st] = await Promise.all([
+    db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId)).orderBy(asc(s.agentRuns.id)),
+    db.select().from(s.evidence).where(eq(s.evidence.podId, podId)).orderBy(asc(s.evidence.id)),
+    db.select().from(s.theses).where(eq(s.theses.podId, podId)).orderBy(desc(s.theses.createdAt)).limit(1),
+    getSettings(db),
+  ]);
+  type U = { inputTokens: number; outputTokens: number; costUsd: number };
+  const u = (a: (typeof agents)[number]) => (a.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }) as U;
+  const t = th[0];
+  return {
+    pod: {
+      id: p.id, conditionId: p.conditionId, question: row.q, status: p.status, stage: p.stage, trigger: p.trigger, profileId: p.profileId, steering: p.steering,
+      startedAt: p.startedAt.getTime(), cancelRequestedAt: p.cancelRequestedAt?.getTime() ?? null, costSandboxS: p.costSandboxS,
+      cost: { inputTokens: agents.reduce((n, a) => n + u(a).inputTokens, 0), outputTokens: agents.reduce((n, a) => n + u(a).outputTokens, 0), costUsd: agents.reduce((n, a) => n + u(a).costUsd, 0) },
+    },
+    agents: agents.map((a) => ({
+      id: a.id, role: a.role, model: a.model, status: a.status, output: a.outputJson, usage: a.usage as U | null, durationS: a.durationS,
+      startedAt: a.startedAt?.getTime() ?? null, finishedAt: a.finishedAt?.getTime() ?? null, toolCalls: a.toolCalls ?? [],
+    })),
+    evidence: ev.map((e) => ({ id: e.id, role: e.agentRole, claim: e.claim, quote: e.quote, url: e.url, direction: e.direction, publishedAt: e.publishedAt?.getTime() ?? null, retrievedAt: e.retrievedAt.getTime() })),
+    thesis: t ? { id: t.id, createdAt: t.createdAt.getTime(), expiresAt: t.expiresAt?.getTime() ?? null, side: t.side as Side, pHat: t.pHat, c: t.c, pPost: t.pPost, edgeC: t.edgeC, sizeUsd: t.sizeUsd, rAnn: t.rAnn, rank: t.rank, catalysts: t.catalysts, killCriteria: t.killCriteria, ...dt(t) } : null,
+    budget: st.budget, // per-pod knobs: sandboxTimeoutMin, exaCallsPerPod, plus the daily caps
+  };
+}

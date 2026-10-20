@@ -6,6 +6,6 @@ import { validated, type AgentRunner } from "./runner";
 export const localRunner = (env: Record<string, string | undefined> = process.env): AgentRunner =>
   validated(async (role, brief, opts) => {
     const t = Date.now();
-    const r = await runAgent(agentInput(role, brief, opts, env.EXA_API_KEY ?? ""));
+    const r = await runAgent({ ...agentInput(role, brief, opts, env.EXA_API_KEY ?? ""), signal: opts.signal });
     return { ...r, durationS: (Date.now() - t) / 1000, sandboxS: 0 };
   });

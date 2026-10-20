@@ -4,9 +4,11 @@ import { withBackoff, type BackoffOpts } from "./backoff";
 import type { AgentRole, Brief } from "./prompts";
 
 /** `system` overrides ROLE_PROMPTS[role] (custom roles); `maxTurns` bounds the agent loop. */
-export type RunOpts = { model: string; timeoutMs: number; exaCallCap: number; hint?: string; system?: string; maxTurns?: number; deadline?: number /* epoch ms: no attempt starts or runs past it */ };
+export type RunOpts = { model: string; timeoutMs: number; exaCallCap: number; hint?: string; system?: string; maxTurns?: number; deadline?: number /* epoch ms: no attempt starts or runs past it */; signal?: AbortSignal /* abort => the run stops and rejects */ };
+/** One tool invocation by an agent: `input` is JSON text (<= 500 chars), `ok` false when the matching tool_result was an error. Runners return at most 200. */
+export type ToolCall = { ts: number; name: string; input: string; ok: boolean };
 export type Usage = { inputTokens: number; outputTokens: number; costUsd: number };
-export type Run = { output: AgentOutput; usage: Usage; durationS: number; sandboxS: number };
+export type Run = { output: AgentOutput; usage: Usage; durationS: number; sandboxS: number; toolCalls?: ToolCall[] };
 export type AgentRunner = (role: AgentRole, brief: Brief, opts: RunOpts) => Promise<Run>;
 /** Implementations return unvalidated output; `validated` parses, retries once, backs off. */
 export type RawRunner = (role: AgentRole, brief: Brief, opts: RunOpts) => Promise<Omit<Run, "output"> & { output: unknown }>;
@@ -16,6 +18,7 @@ export const validated =
   async (role, brief, opts) => {
     let hint = opts.hint;
     for (let attempt = 0; ; attempt++) {
+      if (opts.signal?.aborted) throw new Error("cancelled");
       const left = (opts.deadline ?? Infinity) - Date.now();
       if (left <= 0) throw new Error("TIMEOUT: deadline reached before attempt");
       const r = await withBackoff(() => raw(role, brief, { ...opts, hint, timeoutMs: Math.min(opts.timeoutMs, left) }), { ...backoff, deadline: opts.deadline });
@@ -27,7 +30,17 @@ export const validated =
     }
   };
 
-export const fakeRaw: RawRunner = async (role, brief) => {
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((res, rej) => {
+    const onAbort = () => { clearTimeout(t); rej(new Error("cancelled")); };
+    const t = setTimeout(() => { signal?.removeEventListener("abort", onAbort); res(); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+
+/** PM_FAKE_AGENT_MS slows the fake runner so the Runs view has something to show and cancel (default: instant). */
+export const fakeRaw: RawRunner = async (role, brief, opts) => {
+  const delay = Number(process.env.PM_FAKE_AGENT_MS) || 0;
+  if (delay) await sleep(delay, opts?.signal);
   const h = createHash("sha256").update(role + JSON.stringify(brief)).digest();
   const today = new Date().toISOString().slice(0, 10);
   const hex = h.toString("hex").slice(0, 8);
@@ -49,6 +62,10 @@ export const fakeRaw: RawRunner = async (role, brief) => {
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
     durationS: 0,
     sandboxS: 0,
+    toolCalls: role === "rules" ? [] : [
+      { ts: Date.now(), name: "mcp__exa__search", input: JSON.stringify({ query: `${brief.question} ${role}`.slice(0, 120), numResults: 5 }), ok: true },
+      { ts: Date.now(), name: "mcp__exa__contents", input: JSON.stringify({ urls: [`https://example.com/${role}/${hex}/1`] }), ok: true },
+    ],
   };
 };
 export const fakeRunner = validated(fakeRaw);
