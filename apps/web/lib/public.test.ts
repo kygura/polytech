@@ -113,4 +113,14 @@ describe("proxy: public boundary", () => {
     expect((await proxy(req("/api/cron/scout"))).status).toBe(401);
     delete process.env.CRON_SECRET;
   });
+  it("AUTH_DISABLED=1: everything passes without a session, cron still needs its secret, /api/public stays read-only", async () => {
+    process.env.AUTH_DISABLED = "1";
+    try {
+      for (const p of ["/", "/trade", "/markets", "/api/settings", "/api/public/watchlist"]) expect(passes(await proxy(req(p)))).toBe(true);
+      expect((await proxy(req("/api/public/watchlist", "POST"))).status).toBe(405);
+      expect((await proxy(req("/api/cron/scout"))).status).toBe(401);
+      process.env.AUTH_DISABLED = "0";
+      expect((await proxy(req("/api/settings"))).status).toBe(401); // any other value keeps the login
+    } finally { delete process.env.AUTH_DISABLED; }
+  });
 });

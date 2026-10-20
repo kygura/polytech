@@ -1,4 +1,4 @@
-import { SESSION_COOKIE, bearer, verifySession } from "../../../../../lib/auth";
+import { SESSION_COOKIE, authDisabled, bearer, verifySession } from "../../../../../lib/auth";
 
 // Node, not edge: egress must leave from the pinned function region (vercel.json), not a PoP near the browser.
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ const cookie = (header: string | null, name: string) => header?.split(/;\s*/).fi
 
 async function relay(req: Request, { params }: { params: Promise<{ host: string; path: string[] }> }) {
   const h = req.headers;
-  if (!(await verifySession(cookie(h.get("cookie"), SESSION_COOKIE))) && !(await verifySession(bearer(h.get("authorization"))))) {
+  if (!authDisabled() && !(await verifySession(cookie(h.get("cookie"), SESSION_COOKIE))) && !(await verifySession(bearer(h.get("authorization"))))) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
   const { host, path } = await params;
