@@ -79,7 +79,7 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
 
   return (
     <div ref={ref} className={css.wrap} style={virtual?.height ? { height: virtual.height } : undefined}>
-      <table className={`${css.table} ${virtual ? css.virtual : ""} ${muted ? css.muted : ""}`} aria-label={label} style={virtual ? { minWidth: minTableWidth(columns) } : undefined}
+      <table className={`${css.table} ${virtual ? css.virtual : ""} ${muted ? css.muted : ""}`} aria-label={label} style={virtual ? { minWidth: minTableWidth(columns), ["--row-h" as string]: `${rh}px` } : undefined}
         aria-rowcount={virtual ? rows.length + 1 : undefined}>
         <thead>
           <tr>
@@ -121,10 +121,10 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
   );
 }
 
-/** Market cell: truncated question with full text in title + category tag. */
-export function MarketCell({ question, category, max = 56 }: { question: string; category: string | null; max?: number }) {
+/** Market cell: the question wraps (up to `lines`, full text in the title), category tag after it. `max` caps the width in ch. */
+export function MarketCell({ question, category, max = 56, lines = 2 }: { question: string; category: string | null; max?: number; lines?: number }) {
   return (
-    <span className={`ui ${css.truncate}`} title={question} style={{ display: "inline-block", maxWidth: `${max}ch` }}>
+    <span className={`ui ${css.mcell}`} title={question} style={{ maxWidth: `${max}ch`, WebkitLineClamp: lines }}>
       {question}{category && <span className={css.tag}>{category}</span>}
     </span>
   );

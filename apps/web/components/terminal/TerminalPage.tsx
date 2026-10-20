@@ -8,6 +8,7 @@ import { inInput } from "../../hooks/useGlobalKeys";
 import { usePoll } from "../../hooks/usePoll";
 import { useWallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail, PublicWatchlist } from "../../lib/public";
+import type { ScreenerRow } from "../screener/types";
 import { terminalNav } from "../../lib/terminalPath";
 import { DISCLAIMER } from "../public/PublicShell";
 import { DEFAULT_TICK } from "../public/ticket";
@@ -17,6 +18,7 @@ import { forOutcome, type Outcome, type TradeSide } from "./book";
 import { KeyStats, MarketHero, PriceChart } from "./ChartPane";
 import { KeyLegend } from "./KeyLegend";
 import { MarketList } from "./MarketList";
+import { allQuery, fromScreener, fromWatch, matchWatch, type ListMode, type SortKey } from "./marketQuery";
 import { canSwitch, sellable } from "./rules";
 import { TerminalTicket, type TicketHandle } from "./TerminalTicket";
 import { TopBar } from "./TopBar";
@@ -35,6 +37,9 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   const [picked, setPicked] = useState<string | null>(params.id ?? null); // condition ids are hex: no decoding needed
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<string | null>(null);
+  const [modePick, setMode] = useState<ListMode | null>(null);
+  const [sort, setSort] = useState<SortKey>("-vol24h");
+  const [debounced, setDebounced] = useState("");
   const [cursorId, setCursorId] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [side, setSide] = useState<TradeSide>("BUY");
@@ -61,6 +66,11 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   }, []);
 
   const all = wl.data?.rows ?? [];
+  // No choice yet: the watchlist when it has rows, else every open market (a fresh instance has no shortlist).
+  const mode: ListMode = modePick ?? (wl.data && !all.length ? "all" : "watch");
+  useEffect(() => { const t = setTimeout(() => setDebounced(query), 250); return () => clearTimeout(t); }, [query]);
+  const q = mode === "all" ? allQuery(debounced, sort) : null;
+  const am = usePoll<{ rows: ScreenerRow[]; total: number }>(q == null ? null : `/api/markets?q=${encodeURIComponent(q)}`, 60_000);
   const id = picked;
   const det = usePoll<PublicMarketDetail>(id ? `/api/public/markets/${encodeURIComponent(id)}` : null, 60_000);
   const feed = useMarketFeed(id);
@@ -87,15 +97,16 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   const mark = (t: string) => {
     const info = tokens.get(t);
     if (!info) return null;
-    const yes = info.conditionId === id && feed.data?.mid != null ? feed.data.mid : all.find((r) => r.conditionId === info.conditionId)?.midNow ?? null;
+    const yes = info.conditionId === id && feed.data?.mid != null ? feed.data.mid : rows.find((r) => r.conditionId === info.conditionId)?.yes ?? null;
     return yes == null ? null : info.outcome === "YES" ? yes : 1 - yes;
   };
 
   const cats = useMemo(() => [...new Set(all.map((r) => r.category).filter((c): c is string => !!c))].sort(), [all]);
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return all.filter((r) => (!cat || r.category === cat) && (!q || r.question.toLowerCase().includes(q) || (r.category ?? "").toLowerCase().includes(q)));
-  }, [all, cat, query]);
+  const now = Date.now();
+  const rows = useMemo(() => mode === "watch"
+    ? all.filter((r) => matchWatch(r, query, cat)).map(fromWatch)
+    : (am.data?.rows ?? []).map((r) => fromScreener(r, now)),
+  [mode, all, cat, query, am.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switching drops the ticket's order view: blocked while the wallet prompt is open or an outcome is being looked up.
   const select = (next: string) => {
@@ -110,7 +121,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   useEffect(() => { if (switchable) setLockNote(false); }, [switchable]);
 
   // /trade with no id: latch the first row once (a later watchlist reorder never switches the market silently).
-  const first = all[0]?.conditionId;
+  const first = rows[0]?.conditionId;
   useEffect(() => {
     if (picked != null || !first) return;
     setPicked(first);
@@ -171,16 +182,23 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   };
 
   const viewKey = `${viewFeed?.tokenId ?? ""}|${outcome}`;
-  const meta = viewDetail?.market ?? all.find((r) => r.conditionId === id) ?? null;
+  const listed = rows.find((r) => r.conditionId === id);
+  const meta = viewDetail?.market ?? all.find((r) => r.conditionId === id) ?? (listed ? { ...listed, daysLeft: listed.daysLeft ?? 0 } : null);
   const notFound = det.status === 404;
-  const empty = wl.data?.research === "disabled" ? "Research is paused on this instance. Market data still updates." : "No theses yet. Markets are scanned daily; the first research run is in progress.";
+  const empty = mode === "all" ? "No open markets match. Try fewer words, or keys like cat:politics price:0.2..0.8."
+    : query.trim() || cat ? "No watchlist market matches. Switch to All markets to search everything."
+    : wl.data?.research === "disabled" ? "Research is paused on this instance. Market data still updates." : "No theses yet. Markets are scanned daily; the first research run is in progress.";
+  const listErr = mode === "all"
+    ? am.status === 400 ? "Query not understood. Use words plus keys like cat:politics days:<30 sort:-liq." : am.error ? "Could not load markets. Retrying in 60 s." : null
+    : wl.error ? "Could not load the watchlist. Retrying in 60 s." : null;
 
   return (
     <div className={`term ${fontClass} ${css.grid}`}>
       <TopBar feedStatus={feed.status} feedSource={feed.source} feedAt={feed.data?.at ?? shown.current?.feed.at ?? null} now={Date.now()} balance={clob.balance}
-        query={query} onQuery={setQuery} onSearchFocus={() => setDrawer(true)} onSearchKey={searchKeys} searchRef={searchRef} locked={!switchable} onBlocked={blocked} />
+        query={query} onQuery={setQuery} placeholder={mode === "all" ? "Search all markets · cat:politics price:0.2..0.8" : "Filter watchlist"} onSearchFocus={() => setDrawer(true)} onSearchKey={searchKeys} searchRef={searchRef} locked={!switchable} onBlocked={blocked} />
       <div className={`${css.backdrop} ${drawer ? css.open : ""}`} onClick={() => setDrawer(false)} aria-hidden />
-      <MarketList rows={rows} loading={wl.loading} error={wl.error} empty={empty} cats={cats} cat={cat} onCat={setCat}
+      <MarketList mode={mode} onMode={(m) => { setMode(m); setCursorId(null); }} rows={rows} total={mode === "all" ? am.data?.total ?? null : null}
+        loading={mode === "all" ? am.loading : wl.loading} error={listErr} empty={empty} cats={cats} cat={cat} onCat={setCat} sort={sort} onSort={setSort}
         selectedId={id} cursorId={cursorId} onSelect={select} open={drawer} note={lockNote ? LOCK_NOTE : null} />
 
       <section className={`${css.pane} ${css.chartp} ${dim ? css.dimmed : ""}`} aria-label="market">
@@ -188,7 +206,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
           <MarketHero meta={meta} tick={viewFeed?.tickSize ?? null} yesMid={viewFeed?.mid ?? viewDetail?.snapshot?.mid ?? null} outcome={outcome} onOutcome={pickOutcome} notFound={notFound} />
           <KeyStats book={book} vol24h={viewDetail?.snapshot?.vol24h ?? null} />
         </div>
-        <PriceChart history={viewDetail?.history ?? []} liveMid={viewFeed?.mid ?? null} ownOrders={ownOrders} outcome={outcome} tick={viewFeed?.tickSize ?? DEFAULT_TICK} />
+        <PriceChart conditionId={id} fallback={viewDetail?.history ?? []} liveMid={viewFeed?.mid ?? null} ownOrders={ownOrders} outcome={outcome} />
       </section>
 
       <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}>

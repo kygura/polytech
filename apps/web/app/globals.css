@@ -10,6 +10,9 @@
   --neg: #f0616d;
   --warn: #f5b544;
   --accent: #6ea8fe;
+  --yes: #5b9dff;
+  --no: #ff9142;
+  --on-outcome: #0b0d10;
   --mode-0: #8a919c;
   --mode-1: #6ea8fe;
   --mode-2: #f5b544;
@@ -47,6 +50,9 @@
   --neg: #c6333f;
   --warn: #b06f00;
   --accent: #2563eb;
+  --yes: #1f64d6;
+  --no: #c25400;
+  --on-outcome: #ffffff;
   --mode-0: #5f6773;
   --mode-1: #2563eb;
   --mode-2: #b06f00;

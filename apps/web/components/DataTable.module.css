@@ -9,12 +9,13 @@
 .muted td .pos, .muted td .neg, .muted td .warn { color: var(--muted); }
 .expanded { background: var(--surface); cursor: default; }
 .expanded:hover { background: var(--surface); }
-.truncate { max-width: 56ch; overflow: hidden; text-overflow: ellipsis; }
+.mcell { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 16px; }
 .tag { color: var(--muted); font-size: var(--fs-xs); margin-left: var(--sp-1); }
 
 /* virtual mode: fixed layout, exact 26px rows (separate borders so a 1px rule never changes a row's height), selection bar as an inset shadow */
 .virtual { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .virtual th, .virtual td { overflow: hidden; text-overflow: ellipsis; }
+.virtual td { padding-top: 0; padding-bottom: 0; }
 .virtual td { height: var(--row-h); border-top: 1px solid var(--border); }
 .virtual .row { border-left: 0; }
 .virtual .selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
