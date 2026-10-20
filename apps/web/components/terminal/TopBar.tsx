@@ -1,22 +1,22 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type RefObject } from "react";
-import type { FeedStatus } from "../../hooks/useMarketFeed";
+import type { FeedSource, FeedStatus } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
 import { ConnectButton } from "../public/PublicShell";
 import css from "./terminal.module.css";
 
 /** Text plus dot or spinner, never a dot alone (DESIGN 11.7). `at` = feed.at (server ms). */
-export function FeedBadge({ status, at, now }: { status: FeedStatus; at: number | null; now: number }) {
+export function FeedBadge({ status, at, now, source = "poll" }: { status: FeedStatus; at: number | null; now: number; source?: FeedSource }) {
   const body = status === "loading" ? <><span className={css.spin} aria-hidden />connecting feed…</>
-    : status === "live" ? <><i aria-hidden />live · {at == null ? "—" : hms(at)}</>
+    : status === "live" ? <><i aria-hidden />live · {source} · {at == null ? "—" : hms(at)}</>
     : status === "stale" ? <><i aria-hidden />stale · {at == null ? "—" : `${Math.max(0, Math.round((now - at) / 1000))}s old`}</>
     : <><i aria-hidden />feed error · retrying</>;
   return <span role="status" className={`${css.badge} ${css[status]}`}>{body}</span>;
 }
 
 type Props = {
-  feedStatus: FeedStatus; feedAt: number | null; now: number; balance: number | null;
+  feedStatus: FeedStatus; feedSource: FeedSource; feedAt: number | null; now: number; balance: number | null;
   query: string; onQuery: (q: string) => void; onSearchFocus: () => void; onSearchKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   /** An order is mid-send: the logo link must not navigate; `onBlocked` explains why. */
@@ -34,7 +34,7 @@ function useOperator() {
   return operator;
 }
 
-export function TopBar({ feedStatus, feedAt, now, balance, query, onQuery, onSearchFocus, onSearchKey, searchRef, locked, onBlocked }: Props) {
+export function TopBar({ feedStatus, feedSource, feedAt, now, balance, query, onQuery, onSearchFocus, onSearchKey, searchRef, locked, onBlocked }: Props) {
   const operator = useOperator();
   return (
     <header className={`${css.pane} ${css.top}`}>
@@ -46,7 +46,7 @@ export function TopBar({ feedStatus, feedAt, now, balance, query, onQuery, onSea
           onChange={(e) => onQuery(e.target.value)} onFocus={onSearchFocus} onKeyDown={onSearchKey} />
         <kbd>/</kbd>
       </label>
-      <span className={css.sp}><FeedBadge status={feedStatus} at={feedAt} now={now} /></span>
+      <span className={css.sp}><FeedBadge status={feedStatus} source={feedSource} at={feedAt} now={now} /></span>
       <ConnectButton />
       {balance != null && <span className={`${css.pill} ${css.n}`}><span className={css.dim}>USDC</span> {balance.toFixed(2)}</span>}
     </header>

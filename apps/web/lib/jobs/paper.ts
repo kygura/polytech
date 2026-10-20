@@ -93,7 +93,8 @@ export function assess(d: Deps, t: ThesisRow, row: MarketRow, snap: SnapRow | un
 /** Auto-downgrade inputs shared by paper (L1) and propose (L2). Stale = newest snapshot anywhere (feed down), not one candidate; skipped on a DB with no snapshots yet. `x` must be the book's own exposure. */
 export async function downgradeSignals(d: Deps, x: Exposure, nCands: number) {
   const now = d.now();
-  const last = ((await d.db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)) as [{ ts: Date | null }])[0].ts;
+  const [[a], [b]] = await Promise.all([d.db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots), d.db.select({ ts: max(s.marketLatest.ts) }).from(s.marketLatest)]) as [{ ts: Date | null }[], { ts: Date | null }[]];
+  const last = a?.ts && b?.ts ? (a.ts > b.ts ? a.ts : b.ts) : (a?.ts ?? b?.ts ?? null); // market_latest moves every run; history rows skip unchanged books
   return {
     dailyLossHit: d.settings.limits.dailyLoss > 0 && !(x.dailyRealizedLoss < d.settings.limits.dailyLoss), // 0 = disabled
     bookStaleMs: !last ? 0 : nCands || now - last.getTime() > NO_CAND_STALE_MS ? now - last.getTime() : 0,

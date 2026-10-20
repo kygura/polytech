@@ -38,8 +38,8 @@ export type Freshness = { sweptAt: number | null; snapshotAt: number | null; sta
 export const STALE_MS = 6 * 3_600_000;
 export const KICK_AT = "kick:sweepAt"; // written by the sweep on success (public sweptAt); kickIfStale keeps its own key
 export async function freshness(db: Db, kv: Kv, now: number): Promise<Freshness> {
-  const [sweptAt, snap] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)]);
-  const snapshotAt = snap[0]?.ts?.getTime() ?? null;
+  const [sweptAt, snap, latest] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots), db.select({ ts: max(s.marketLatest.ts) }).from(s.marketLatest)]);
+  const snapshotAt = Math.max(snap[0]?.ts?.getTime() ?? 0, latest[0]?.ts?.getTime() ?? 0) || null; // history rows skip unchanged books; market_latest moves every run
   return { sweptAt, snapshotAt, stale: snapshotAt == null || now - snapshotAt > STALE_MS };
 }
 export type PublicWatchlist = Freshness & { research: "on" | "disabled"; rows: PublicWatchRow[] };

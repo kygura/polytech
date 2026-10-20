@@ -1,12 +1,13 @@
 import { costUsd, modelFor, rulesHash } from "@pm/agents";
 import {
-  findStructural, mirrorPairs, pass1, screen, sortAsc, takerFeePerShare,
-  type Pass1Reason, type StructuralGroup, type StructuralMarket, type Tier,
+  crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
+  type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
-import { desc, eq, inArray, max, sql } from "drizzle-orm";
-import { addSpend, chunks, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
+import { desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
+import { DAY, addSpend, chunks, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
+import { memoClear } from "./memo";
 import type { AppSettings } from "./settings";
 
 /** Function limit is 300s and the reads alone take ~30s: stop issuing LLM batches at 170s, leaving room for ~8.5k row writes. */
@@ -46,17 +47,24 @@ const mirrorKey = (q: string) => {
 };
 
 type SnapRow = typeof s.snapshots.$inferSelect;
-/** Latest snapshot per condition. */
-export const latestSnaps = async (db: Db, ids?: string[]) =>
-  new Map(
-    (await db.selectDistinctOn([s.snapshots.conditionId]).from(s.snapshots)
+/**
+ * Latest snapshot per condition. History rows are skipped while the book is unchanged, so the row's age is the newer of its own ts and
+ * market_latest.ts (written every run, after the history row): "this book, last seen at".
+ */
+export const latestSnaps = async (db: Db, ids?: string[]) => {
+  const [rows, seen] = await Promise.all([
+    db.selectDistinctOn([s.snapshots.conditionId]).from(s.snapshots)
       .where(ids ? inArray(s.snapshots.conditionId, ids) : undefined)
-      .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts))).map((r) => [r.conditionId, r] as [string, SnapRow]),
-  );
+      .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts)),
+    db.select({ c: s.marketLatest.conditionId, ts: s.marketLatest.ts }).from(s.marketLatest).where(ids ? inArray(s.marketLatest.conditionId, ids) : undefined),
+  ]);
+  const at = new Map(seen.map((x) => [x.c, x.ts]));
+  return new Map(rows.map((r) => [r.conditionId, (at.get(r.conditionId)?.getTime() ?? 0) > r.ts.getTime() ? { ...r, ts: at.get(r.conditionId)! } : r] as [string, SnapRow]));
+};
 
-/** Neg-risk baskets, ladders, mirrors over every open market with a book. First detector to claim a market wins. */
+/** Neg-risk baskets, ladders, mirrors over every open market with a book. First detector to claim a market wins. `kinds`, when given, receives the core structural kinds (executable items only) each market is in. */
 export function detectStructural(
-  rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], capUsd: number, groupSize?: Map<string, number>,
+  rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], capUsd: number, groupSize?: Map<string, number>, kinds?: Map<string, StructuralKind[]>,
 ): Map<string, StructDetail> {
   const out = new Map<string, StructDetail>();
   const by = new Map(rows.map((r) => [r.m.conditionId, r]));
@@ -82,6 +90,7 @@ export function detectStructural(
   }));
   groups.push({ eventId: "*", eventTitle: null, negRisk: false, markets: rows.map(sm) }); // ladders are parsed from question text, across events
   const items = findStructural(groups).filter((it) => it.net > 0);
+  if (kinds) for (const [id, ks] of structuralFlagsByMarket(items)) kinds.set(id, ks);
   for (const it of items.filter((x) => x.kind !== "monotonicity_violation")) {
     const side = it.side === "ask" ? "asks" : "bids";
     claim(it.conditionIds, {
@@ -129,7 +138,8 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     const flagged = [...detectStructural(rows, cap)].flatMap(([id, x]) => (x.type === "neg-risk-sum" && x.kind === "buy-all" ? [by(rows, id)] : []));
     for (const m of new Map(flagged.map((m) => [m.negRiskGroup!, m])).values())
       trueSize.set(m.negRiskGroup!, Date.now() - t0 > o.budgetMs ? -1 : await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m.negRiskGroup).length : -1), () => -1));
-    const structural = detectStructural(rows, cap, new Map([...dbSize, ...trueSize]));
+    const kinds = new Map<string, StructuralKind[]>();
+    const structural = detectStructural(rows, cap, new Map([...dbSize, ...trueSize]), kinds);
 
     // pass 1 on everything; R (cached by rules hash) only for survivors and structural legs
     const filtered: Partial<Record<Pass1Reason, number>> = {};
@@ -188,8 +198,19 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     if ("batch" in d.db) await (d.db as unknown as { batch(q: unknown[]): Promise<unknown> }).batch(parts.map((c) => d.db.insert(s.screens).values(c)));
     else await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
 
+    // market_latest carries the screen output for the DSL / screener: priority, structural kinds, opportunity (sized live theses). Derived data: a failure here must not lose the screens above.
+    let latest = true;
+    try {
+      await writeLatest(d, rows, out, kinds, now);
+    } catch (e) {
+      latest = false;
+      console.warn("screen: market_latest write failed:", String((e as Error)?.message ?? e).slice(0, 160));
+    }
+    memoClear("watch:");
+
     const list = await shortlist(d.db, 20);
     const res = {
+      marketLatest: latest,
       universe: rows.length, screened: out.length, passed: alive.size, filtered,
       structural: { negRisk: [...structural.values()].filter((x) => x.type === "neg-risk-sum").length, ladder: [...structural.values()].filter((x) => x.type === "ladder").length, mirror: [...structural.values()].filter((x) => x.type === "mirror").length },
       shortlist: { "small-cap": list.filter((x) => x.tier === "small-cap").length, size: list.filter((x) => x.tier === "size").length },
@@ -197,6 +218,45 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     publish("screen.done", res);
     return res;
   });
+}
+
+type Opportunity = NonNullable<(typeof s.marketLatest.$inferInsert)["opportunity"]>;
+
+/** Sizing of every live thesis against the stored book (both sides, fees per level, exit depth, 24h flow, extremize). Only rows that would trade (stake > 0). */
+async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], now: number) {
+  const th = await d.db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt));
+  const latest = new Map<string, (typeof th)[number]>();
+  for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
+  if (!latest.size) return new Map<string, Opportunity>();
+  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest)).map((r) => [r.c, r.f]));
+  const out = new Map<string, Opportunity>();
+  for (const { m, snap } of rows) {
+    const t = latest.get(m.conditionId), pYes = (t?.detail as { pYes?: number } | null | undefined)?.pYes;
+    if (!t || pYes == null || snap.mid == null || !snap.book) continue;
+    const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
+    const z = sizeTrade({
+      bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: feeOf(m),
+      crowdC: cr.c, crowdSide: cr.side, settings: d.settings, flow24h: flow.get(m.conditionId) ?? null, extremize: d.settings.extremize,
+    });
+    if (z && z.sizeUsd > 0) out.set(m.conditionId, { side: z.side, edge: z.e, stake: z.sizeUsd, o: z.rank, contrarian: z.contrarian });
+  }
+  return out;
+}
+
+/** priority / structural / opportunity onto existing market_latest rows; rows that were set before and are not in this screen are cleared. */
+async function writeLatest(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], out: (typeof s.screens.$inferInsert)[], kinds: Map<string, StructuralKind[]>, now: number) {
+  const ml = s.marketLatest, opp = await opportunities(d, rows, now);
+  const pr = new Map(out.map((x) => [x.conditionId, x.priority ?? null]));
+  const have = await d.db.select({ c: ml.conditionId, p: ml.priority, st: ml.structural, o: ml.opportunity }).from(ml);
+  const upd: (typeof ml.$inferInsert)[] = [], clear: string[] = [];
+  for (const h of have) {
+    const hit = pr.has(h.c) || opp.has(h.c);
+    if (hit) upd.push({ conditionId: h.c, priority: pr.get(h.c) ?? null, structural: kinds.get(h.c) ?? [], opportunity: opp.get(h.c) ?? null });
+    else if (h.p != null || h.st != null || h.o != null) clear.push(h.c);
+  }
+  for (const c of chunks(upd, 500))
+    await d.db.insert(ml).values(c).onConflictDoUpdate({ target: ml.conditionId, set: { priority: sql`excluded."priority"`, structural: sql`excluded."structural"`, opportunity: sql`excluded."opportunity"` } });
+  for (const c of chunks(clear, 5000)) await d.db.update(ml).set({ priority: null, structural: null, opportunity: null }).where(inArray(ml.conditionId, c));
 }
 
 /** Rows of the most recent screen run. */

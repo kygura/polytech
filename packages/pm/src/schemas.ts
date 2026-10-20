@@ -40,7 +40,7 @@ const RawEventLite = z.looseObject({
   tags: list(RawTag),
 });
 const RawMarket = z.looseObject({
-  id: str, question: str, conditionId: str, slug: str, description: str, category: str, groupItemTitle: str,
+  id: str, question: str, conditionId: str, slug: str, description: str, resolutionSource: str, category: str, groupItemTitle: str,
   startDate: str, endDate: str, endDateIso: str, closedTime: str, outcomes: arr, outcomePrices: arr, clobTokenIds: arr,
   volume: num, volumeNum: num, volume24hr: num, liquidity: num, liquidityNum: num, liquidityClob: num,
   lastTradePrice: num, bestBid: num, bestAsk: num, spread: num, orderPriceMinTickSize: num, orderMinSize: num,
@@ -80,6 +80,8 @@ export type Market = {
   slug?: string;
   question: string;
   rules?: string;
+  /** Gamma `resolutionSource` (free text or URL); the rules text usually repeats it */
+  resolution_source?: string;
   category?: string;
   tags: string[];
   start_date?: string; // ISO
@@ -179,6 +181,7 @@ export function normMarket(raw: unknown, parent?: z.output<typeof RawEventLite>)
     slug: m.slug,
     question: m.question,
     rules: m.description,
+    resolution_source: m.resolutionSource || undefined,
     category: m.category ?? tags.find((t) => CATEGORIES.includes(t)) ?? tags[0],
     tags,
     start_date: toIso(m.startDate),

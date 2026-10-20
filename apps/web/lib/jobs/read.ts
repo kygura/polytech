@@ -5,6 +5,7 @@ import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
+import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
 import { getSettings, putSettings } from "./settings";
@@ -45,9 +46,13 @@ const KEY: Record<WatchSort, (r: WatchlistRow) => number | null> = {
   rank: (r) => r.rank, edge: (r) => r.edgeC, r_ann: (r) => r.rAnn, days: (r) => (r.daysLeft == null ? null : -r.daysLeft), // days: soonest first
 };
 
-export async function watchlist(r: ReadDeps, tab: "small-cap" | "size", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[]>;
-export async function watchlist(r: ReadDeps, tab: "structural", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<StructuralRow[]>;
-export async function watchlist(r: ReadDeps, tab: Tier | "structural", sort: WatchSort = "rank", o: { includeMuted?: boolean; limit?: number } = {}): Promise<WatchlistRow[] | StructuralRow[]> {
+export function watchlist(r: ReadDeps, tab: "small-cap" | "size", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[]>;
+export function watchlist(r: ReadDeps, tab: "structural", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<StructuralRow[]>;
+export function watchlist(r: ReadDeps, tab: Tier | "structural", sort: WatchSort = "rank", o: { includeMuted?: boolean; limit?: number } = {}): Promise<WatchlistRow[] | StructuralRow[]> {
+  // the structural tab only moves with a screen run or a pin/mute flip (both call memoClear): a 10 s cache absorbs polling and shares one in-flight read
+  return tab === "structural" ? memo(`watch:structural:${sort}:${!!o.includeMuted}:${o.limit ?? ""}`, 10_000, () => watchlistRead(r, tab, sort, o)) : watchlistRead(r, tab, sort, o);
+}
+async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchSort, o: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[] | StructuralRow[]> {
   const { db } = r, now = r.now(), limit = o.limit ?? 100;
   const screens = await latestScreens(db);
   const ids = screens.map((x) => x.conditionId);
@@ -106,7 +111,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
   const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
   if (!m) return null;
-  const [snap, ths, flag, scr, hist, pos, pods] = await Promise.all([
+  const [snap, ths, flag, scr, hist, pos, pods, latest] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
     db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
     db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
@@ -114,6 +119,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.select({ ts: s.snapshots.ts, mid: s.snapshots.mid }).from(s.snapshots).where(eq(s.snapshots.conditionId, conditionId)).orderBy(desc(s.snapshots.ts)).limit(500),
     db.select().from(s.positions).where(and(eq(s.positions.conditionId, conditionId), eq(s.positions.paper, true))).orderBy(desc(s.positions.id)),
     db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
+    db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
   ]);
   const t = ths[0] ?? null;
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
@@ -128,7 +134,10 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
       conditionId, question: m.question, rules: m.rules, category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
       endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, tickSize: m.tickSize, status: m.status,
       yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, pinned: !!flag?.pinned, muted: !!flag?.muted,
+      liquidity: m.liquidity, vol24h: m.vol24h, resolutionSource: m.resolutionSource,
     },
+    /** DESIGN 12.6 Metrics + badges: the market_latest row (null until the snapshot job has written it). Times are epoch ms. */
+    latest: latest && { ...latest, ts: latest.ts.getTime(), midChangedAt: latest.midChangedAt?.getTime() ?? null, lastTradeTs: latest.lastTradeTs?.getTime() ?? null },
     snapshot: snap && { ts: snap.ts.getTime(), mid: snap.mid, bestBid: snap.bestBid, bestAsk: snap.bestAsk, depth5cUsd: snap.depth5cUsd, vol24h: snap.vol24h, oi: snap.oi, top10Share: snap.top10Share, bids: snap.book?.bids ?? [], asks: snap.book?.asks ?? [], netFlow: snap.book?.netFlow ?? 0 },
     history: hist.map((h) => ({ ts: h.ts.getTime(), mid: h.mid })).reverse(),
     screen: scr && { ts: scr.ts.getTime(), R: scr.r, I: scr.i, L: scr.l, T: scr.t, C: scr.c, priority: scr.priority, tier: scr.tier, structural: scr.structuralDetail },
@@ -402,6 +411,7 @@ export const settingsPut = (r: Pick<Deps, "db">, patch: unknown) => putSettings(
 
 export async function setFlag(r: Pick<Deps, "db">, conditionId: string, flag: { pinned?: boolean; muted?: boolean }) {
   await r.db.insert(s.marketFlags).values({ conditionId, ...flag }).onConflictDoUpdate({ target: s.marketFlags.conditionId, set: flag });
+  memoClear("watch:");
 }
 
 // ---------------------------------------------------------------- pod detail (live runs view)

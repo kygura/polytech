@@ -27,7 +27,7 @@ export async function requestCancel(d: Pick<Deps, "db" | "now">, podId: string):
 }
 
 const id = (p: string) => `${p}_${crypto.randomUUID().slice(0, 12)}`;
-const catalystMs = (cs: string[]) => cs.map((c) => Date.parse(c.slice(0, 10))).filter(Number.isFinite);
+export const catalystMs = (cs: string[]) => cs.map((c) => Date.parse(c.slice(0, 10))).filter(Number.isFinite);
 
 type RunPatch = Partial<typeof s.agentRuns.$inferInsert> & { status: string };
 const patchOf = (a: AgentResult): RunPatch =>

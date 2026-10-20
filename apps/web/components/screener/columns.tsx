@@ -15,7 +15,7 @@ export const hoursSince = (iso: string | null, now: number) => (iso ? Math.max(0
 export const ageLabel = (h: number | null) => (h == null ? "—" : h < STALE_TRADE_H ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`);
 export const daysLeft = (iso: string | null, now: number) => (iso ? (Date.parse(iso) - now) / 86_400_000 : null);
 
-const SRC: Record<string, string> = { official_data: "off", scheduled_event: "sch", media_report: "med", subjective: "sub", unknown: "unk" };
+export const SRC: Record<string, string> = { official_data: "off", scheduled_event: "sch", media_report: "med", subjective: "sub", unknown: "unk" };
 const dash = <span className="muted">{"—"}</span>;
 
 type Ctx = { now: number; researching: ReadonlySet<string> };

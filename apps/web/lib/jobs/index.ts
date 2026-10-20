@@ -3,6 +3,8 @@ export * from "./events";
 export * from "./settings";
 export * from "./autonomy";
 export * from "./sweep";
+export * from "./monitor";
+export * from "./memo";
 export * from "./screen";
 export * from "./research";
 export * from "./profiles";

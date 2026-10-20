@@ -4,7 +4,8 @@ import { z } from "zod";
 // Live /trade feed for one market (YES token). Client-safe: zod + a type import only.
 // Delivery = short-interval poll of this cached endpoint (CDN s-maxage collapses the upstream calls across instances).
 export const FEED_POLL_MS = 3_000;
-const DEPTH = 15, TAPE = 50;
+export const FEED_DEPTH = 15;
+const DEPTH = FEED_DEPTH, TAPE = 50;
 const Level = z.object({ price: z.number(), size: z.number() });
 export const MarketFeedSchema = z.object({
   tokenId: z.string(),

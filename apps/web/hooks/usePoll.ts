@@ -17,9 +17,11 @@ export async function fetchOnce<T>(url: string | null, get: typeof fetch = fetch
   }
 }
 
-/** GET `url` as JSON every `ms`. Paused while the tab is hidden, refetched when it shows again. Keeps the last good data on error. `url` null = nothing to poll yet. */
+/** GET `url` as JSON every `ms`. Paused while the tab is hidden, refetched when it shows again. Keeps the last good data on error. `url` null = nothing to poll yet. A new `ms` applies from the next tick; it does not reset the data. */
 export function usePoll<T>(url: string | null, ms: number): Poll<T> {
   const [s, set] = useState<State<T>>(init);
+  const every = useRef(ms);
+  every.current = ms;
   const seq = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -30,9 +32,9 @@ export function usePoll<T>(url: string | null, ms: number): Poll<T> {
     const next = (await fetchOnce<T>(url))!;
     if (n !== seq.current) return; // superseded by a newer load or unmounted
     const visible = document.visibilityState === "visible";
-    if (visible) timer.current = setTimeout(load, ms);
-    set((p) => ({ ...p, ...next, loading: false, nextAt: visible ? Date.now() + ms : null }));
-  }, [url, ms]);
+    if (visible) timer.current = setTimeout(load, every.current);
+    set((p) => ({ ...p, ...next, loading: false, nextAt: visible ? Date.now() + every.current : null }));
+  }, [url]);
 
   useEffect(() => {
     set(init<T>());

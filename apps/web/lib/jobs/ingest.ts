@@ -9,5 +9,5 @@ export async function ingestMarket(d: Deps, pmId: string) {
   const { conditionId, feeRate: _keep, ...set } = toMarketRow(m); // fee stays as stored; null = category fallback
   await d.db.insert(s.markets).values(toMarketRow(m)).onConflictDoUpdate({ target: s.markets.conditionId, set });
   const snap = await takeSnapshots(d, [conditionId]);
-  return { conditionId, hasBook: snap.snapshots > 0 };
+  return { conditionId, hasBook: snap.markets > snap.noBook };
 }
