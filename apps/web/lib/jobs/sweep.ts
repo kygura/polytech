@@ -1,11 +1,11 @@
 import { depthWithin, midOf } from "@pm/core";
-import { insertSnapshots, schema as s } from "@pm/db";
+import { insertSnapshots, pruneSnapshots, schema as s } from "@pm/db";
 import type { Market as PmMarket } from "@pm/pm";
 import { and, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
-import { watchlistIds } from "./screen";
+import { shortlist, watchlistIds } from "./screen";
 
 const MAX_FEE_FETCHES = 200;
 const WALK_BUDGET_MS = 150_000; // the cron route allows 300 s: walk <= 150 s (+ one page), fees <= FEE_DEADLINE_MS, then closing
@@ -199,6 +199,18 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
     });
   }
   for (const c of chunks(rows, 200)) await insertSnapshots(d.db, c);
+  // retention rides full sweeps only (ids undefined); a prune failure must not lose the published snapshot result
+  if (!ids) try {
+    // watched = shortlist (priority>0 or pinned) + live theses + open positions; unwatched markets keep only their latest row
+    const [sl, th, pos] = await Promise.all([
+      shortlist(d.db, 20),
+      d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(sql`${s.theses.expiresAt} > ${new Date(now)}`),
+      d.db.selectDistinct({ c: s.positions.conditionId }).from(s.positions).where(isNull(s.positions.closedAt)),
+    ]);
+    await pruneSnapshots(d.db, [...new Set([...sl.map((x) => x.conditionId), ...th.map((x) => x.c), ...pos.map((x) => x.c)])], now);
+  } catch (e) {
+    console.warn("snapshot: prune failed:", String(e).slice(0, 120));
+  }
   const out = { markets: mkts.length, snapshots: rows.length, noBook: mkts.length - rows.length };
   publish("snapshot.done", out);
   return out;

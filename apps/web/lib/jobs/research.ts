@@ -2,7 +2,7 @@ import { AnthropicOutageError, PodFailedError, PodTimeoutError, costUsd, disable
 import { canStartPod, crowd, shouldReResearch, sizeTrade, type ResearchProfile, type Steering } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { categoryConfidence } from "./calib";
 import { DAY, addSpend, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
@@ -161,7 +161,7 @@ export async function researchShortlist(d: Deps, opts: { limit?: number; deadlin
     for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
 
     const snaps = await latestSnaps(db, [...latest.keys()]);
-    const mk = new Map((await db.select().from(s.markets)).map((m) => [m.conditionId, m]));
+    const mk = new Map((await db.select({ conditionId: s.markets.conditionId, status: s.markets.status, endDate: s.markets.endDate }).from(s.markets).where(inArray(s.markets.conditionId, [...latest.keys()]))).map((m) => [m.conditionId, m]));
     const todo: { id: string; trigger: Trigger }[] = [];
     for (const [cid, t] of latest) {
       const m = mk.get(cid), snap = snaps.get(cid), pm0 = (t.detail as { pMidYes?: number } | null)?.pMidYes;

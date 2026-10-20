@@ -115,11 +115,11 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
   it("snapshots keep the chain alive when oi/trades 403 (books-only, enrichment null)", async () => {
     const boom = async () => { throw new Error("GET /oi -> 403 <!DOCTYPE html>"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const before = (await d.db.select().from(s.snapshots)).length;
+    const before = Math.max(0, ...(await d.db.select({ id: s.snapshots.id }).from(s.snapshots)).map((x) => x.id));
     const out = (await snapshotBooks({ ...d, pm: { ...pm, oi: boom, trades: boom, holders: boom } as unknown as typeof pm }, "all")) as { snapshots: number };
     warn.mockRestore();
     expect(out.snapshots).toBeGreaterThan(0);
-    const fresh = (await d.db.select().from(s.snapshots)).slice(before);
+    const fresh = (await d.db.select().from(s.snapshots)).filter((x) => x.id > before);
     expect(fresh).toHaveLength(out.snapshots);
     expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.lastTradeTs === null && x.book?.flowUnknown === true)).toBe(true);
     const bug = async () => { throw new TypeError("x is undefined"); };

@@ -34,7 +34,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const run = researchMarket(d, id, "manual", opts);
   after(() => run.catch((e) => console.error("research failed", id, e)));
   // Skips (LOCKED, NO_BOOK, budget, RESEARCH_DISABLED) resolve within moments; a real pod runs for minutes. Wait briefly so a skip reaches the caller instead of vanishing.
-  const early = await Promise.race([run.catch(() => undefined), new Promise<undefined>((r) => setTimeout(r, SKIP_WINDOW_MS))]);
+  const early = await Promise.race([run.catch((e: unknown) => ({ failed: e })), new Promise<undefined>((r) => setTimeout(r, SKIP_WINDOW_MS))]);
+  if (early && "failed" in early) return json({ error: `research failed: ${early.failed instanceof Error ? early.failed.message : String(early.failed)}` }, 500);
   if (early && "skipped" in early) return json({ error: `research not started: ${early.reason}`, reason: early.reason }, 409);
   return json({ started: true, conditionId: id }, 202);
 }
