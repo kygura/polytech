@@ -106,3 +106,34 @@ export function clientIp(headers: Headers): string {
 export function loginRateLimit(kv: Kv, ip: string) {
   return kv.rateLimit(`login:${ip}`, ip === "unknown" ? 50 : LOGIN_LIMIT, LOGIN_WINDOW_MS);
 }
+
+/** Exponential lockout on failed logins per IP: lock after LOCK_THRESHOLD consecutive failures, 15 min doubling per further failure, capped at 24 h. */
+export const LOCK_THRESHOLD = 5;
+const LOCK_BASE_MS = 15 * 60 * 1000;
+export const LOCK_CAP_MS = 24 * 60 * 60 * 1000;
+
+/** Lock duration once `failures` consecutive failures are recorded (0 below the threshold). */
+export function lockMs(failures: number): number {
+  return failures < LOCK_THRESHOLD ? 0 : Math.min(LOCK_BASE_MS * 2 ** (failures - LOCK_THRESHOLD), LOCK_CAP_MS);
+}
+
+type LoginFailures = { n: number; until: number };
+const failKey = (ip: string) => `login:fail:${ip}`;
+
+/** Milliseconds left on this IP's lockout; 0 when not locked. */
+export async function loginLockRemainingMs(kv: Kv, ip: string, now = Date.now()): Promise<number> {
+  const s = await kv.get<LoginFailures>(failKey(ip));
+  return s && s.until > now ? s.until - now : 0;
+}
+
+/** Records one failed attempt. The streak is forgotten LOCK_CAP_MS after its lock ends (so a 24 h lock never outlives its own record). */
+export async function recordLoginFailure(kv: Kv, ip: string, now = Date.now()): Promise<void> {
+  const n = ((await kv.get<LoginFailures>(failKey(ip)))?.n ?? 0) + 1;
+  const lock = lockMs(n);
+  await kv.set(failKey(ip), { n, until: now + lock }, lock + LOCK_CAP_MS);
+}
+
+/** A successful login resets the streak. */
+export async function clearLoginFailures(kv: Kv, ip: string): Promise<void> {
+  await kv.set(failKey(ip), { n: 0, until: 0 }, LOCK_CAP_MS);
+}

@@ -124,8 +124,9 @@ describe("settings", () => {
 
 describe("sendEntry ledger", () => {
   const entry = () => entryOf(decide(input("L4"))[0]!, NOW);
+  const fx = () => fakeExchange({ now: () => new Date(NOW) });
   it("sends once; a second call never resends", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     const r = await sendEntry(ex, e, "auto", s, NOW);
     expect(r.status).toBe("sent");
     expect((await ex.openOrders()).length).toBe(1);
@@ -133,7 +134,7 @@ describe("sendEntry ledger", () => {
     expect((await ex.openOrders()).length).toBe(1);
   });
   it("place throws -> unknown, ledger written before place, never resent", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     let seen: string | undefined;
     ex.place = async () => { seen = loadLedger(s).t1?.status; throw new Error("socket hang up"); };
     const r = await sendEntry(ex, e, "auto", s, NOW);
@@ -147,7 +148,7 @@ describe("sendEntry ledger", () => {
     expect(decide(input("L4", { ledger: loadLedger(s) }))[0]).toMatchObject({ kind: "skip", reason: "DUPLICATE" });
   });
   it("rejected -> failed; kill before place -> failed, nothing sent; corrupt ledger throws", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     expect((await sendEntry(ex, e, "auto", s, NOW, () => false)).error).toBe("KILLED");
     expect((await ex.openOrders()).length).toBe(0);
     const s2 = store();

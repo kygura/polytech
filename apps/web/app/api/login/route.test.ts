@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 // Next's own .env loader (dotenv + dotenv-expand), resolved through next.
@@ -58,4 +58,58 @@ it("escaped hash read without expansion (e.g. Vercel dashboard) also works", asy
 it("argon2 verify error is 500 (corrupt but well-prefixed hash)", async () => {
   process.env.APP_PASSWORD_HASH = "$argon2id$garbage";
   expect((await login("hunter2")).status).toBe(500);
+});
+
+describe("exponential lockout", () => {
+  const MIN = 60_000;
+  let n = 0;
+  const fresh = () => `10.2.0.${++n}`; // own bucket per test: the kv is a shared singleton
+  const attempt = (ip: string, password: string) =>
+    POST(new Request("http://x/api/login", { method: "POST", headers: { "x-forwarded-for": ip }, body: JSON.stringify({ password }) }));
+  const wait = (ms: number) => vi.setSystemTime(Date.now() + ms);
+  beforeEach(() => {
+    process.env.APP_PASSWORD_HASH = raw;
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("locks after 5 consecutive failures, even the right password is refused until the lock ends", async () => {
+    const ip = fresh();
+    for (let i = 0; i < 5; i++) expect((await attempt(ip, "nope")).status).toBe(401);
+    const locked = await attempt(ip, "hunter2");
+    expect(locked.status).toBe(429);
+    expect(locked.headers.get("Retry-After")).toBe("900");
+    wait(15 * MIN + 1000);
+    expect((await attempt(ip, "hunter2")).status).toBe(200);
+  });
+
+  it("Retry-After is the remaining lock time", async () => {
+    const ip = fresh();
+    for (let i = 0; i < 5; i++) await attempt(ip, "nope");
+    wait(4 * MIN);
+    expect((await attempt(ip, "hunter2")).headers.get("Retry-After")).toBe("660");
+  });
+
+  it("doubles per further failure and caps at 24 h", async () => {
+    const ip = fresh();
+    for (let i = 0; i < 5; i++) await attempt(ip, "nope");
+    const want = [15, 30, 60, 120, 240, 480, 960, 1440, 1440].map((m) => String(m * 60));
+    for (const s of want) {
+      const r = await attempt(ip, "nope");
+      expect(r.status).toBe(429);
+      expect(r.headers.get("Retry-After")).toBe(s);
+      wait(Number(s) * 1000 + 1000);
+      expect((await attempt(ip, "nope")).status).toBe(401); // next failure after the lock ends
+    }
+  });
+
+  it("a success resets the failure streak", async () => {
+    const ip = fresh();
+    for (let i = 0; i < 4; i++) await attempt(ip, "nope");
+    expect((await attempt(ip, "hunter2")).status).toBe(200);
+    wait(16 * MIN);
+    for (let i = 0; i < 4; i++) expect((await attempt(ip, "nope")).status).toBe(401);
+    expect((await attempt(ip, "nope")).status).toBe(401); // 5th failure of the new streak locks
+    expect((await attempt(ip, "hunter2")).status).toBe(429);
+  });
 });
