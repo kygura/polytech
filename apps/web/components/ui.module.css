@@ -76,6 +76,7 @@
 }
 .drawer::backdrop { background: var(--backdrop); }
 .drawerHead { display: flex; justify-content: space-between; align-items: center; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); font-weight: 600; }
+.drawerActions { display: flex; align-items: center; gap: var(--sp-3); font-weight: 400; }
 .drawerBody { padding: var(--sp-3); overflow: auto; max-height: calc(100vh - 40px); }
 
 .hits { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }

@@ -14,7 +14,7 @@ export function CalibrationView({ data, filters, categories, models }: { data: C
   const router = useRouter();
   const go = (patch: Partial<Filters>) => {
     const q = new URLSearchParams(Object.entries({ ...filters, ...patch }).filter(([, v]) => v));
-    router.push(`/calibration${q.size ? `?${q}` : ""}`);
+    router.push(`/journal${q.size ? `?${q}` : ""}`);
   };
   const o = data.overall;
   return (

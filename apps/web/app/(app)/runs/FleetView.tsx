@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AgentRunTable, type AgentRun } from "../../../components/AgentRunTable";
@@ -31,6 +32,7 @@ export function FleetView({ data, now }: { data: Fleet; now: number }) {
         <PodTable pods={pods} now={t} selected={selected} onSelect={setSelected} isNew={isNew}
           renderExpanded={(p) => (
             <>
+              <p style={{ margin: "0 0 var(--sp-2)" }}><Link href={`/runs/${p.id}`}>Open run {"→"}</Link></p>
               {p.steeringQuestion && <p className="ui muted" style={{ whiteSpace: "pre-wrap", margin: "0 0 var(--sp-2)" }}><b>steering</b> {p.steeringQuestion}</p>}
               {steeringLine(p.steering) && <p className="muted" style={{ margin: "0 0 var(--sp-2)" }}>{steeringLine(p.steering)}</p>}
               <AgentRunTable agents={p.agents} onView={setOutput} />

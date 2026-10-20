@@ -40,6 +40,8 @@
 .top { grid-area: top; flex-direction: row; align-items: center; gap: var(--t-sp-6); padding: 0 var(--t-sp-5); overflow: visible; }
 .logo { font: 600 13px var(--t-font-num); white-space: nowrap; color: var(--t-text) !important; text-decoration: none !important; }
 .logo i { font-style: normal; color: var(--t-focus); }
+.opLink { font: 400 var(--t-fs-sm) / var(--t-lh-sm) var(--t-font-ui); white-space: nowrap; color: var(--t-dim) !important; text-decoration: none !important; margin-left: calc(-1 * var(--t-sp-4)); }
+.opLink:hover { color: var(--t-text) !important; }
 .search { width: 340px; height: 30px; border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--t-dim); background: var(--t-pane-2); }
 .search:focus-within { border-color: var(--t-focus); box-shadow: 0 0 0 3px var(--t-focus-bg); }
 .search input { flex: 1; min-width: 0; color: var(--t-text); font: inherit; outline: none; }
