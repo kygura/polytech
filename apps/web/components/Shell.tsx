@@ -152,7 +152,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
           </details>
           <button type="button" ref={findBtn} className={css.search} onClick={() => setFinding(true)} aria-label="Search markets (/)" title="Search markets (/)">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg>
-            <span className={css.searchText}>Search markets</span>
+            <span className={css.searchText}>Search<span className={css.searchMore}> markets</span></span>
             <kbd aria-hidden>/</kbd>
           </button>
           <div className={css.right}>

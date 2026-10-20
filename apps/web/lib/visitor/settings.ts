@@ -1,6 +1,6 @@
 // Visitor autonomy settings: one localStorage key, validated with the core AppSettings field schemas (same bounds as the operator's).
 // A corrupt or missing value falls back to the defaults (mode manual): a bad blob can never switch the loop on.
-import { AppSettingsSchema, DEFAULT_APP_SETTINGS, type AppSettings } from "@pm/core";
+import { AppSettingsSchema, DEFAULT_APP_SETTINGS } from "@pm/core";
 import { z } from "zod";
 
 export const SETTINGS_KEY = "polytech.visitor.settings";
@@ -36,6 +36,3 @@ export function saveVisitorSettings(v: unknown, s?: SettingsStore): VisitorSetti
   store(s).setItem(SETTINGS_KEY, JSON.stringify(out));
   return out;
 }
-
-/** The full core settings sizeTrade / pass1 / checkOrder expect. */
-export const toAppSettings = (v: VisitorSettings): AppSettings => ({ ...DEFAULT_APP_SETTINGS, bankroll: v.bankroll, kelly: v.kelly, limits: v.limits });

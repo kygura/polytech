@@ -12,8 +12,8 @@ export function ModeSelector({ mode, enabledModes, reasons, onChange }: { mode: 
         const n = m.slice(1), en = enabledModes.includes(m), sel = m === mode, why = reasons[m] ?? "";
         return (
           <button key={m} type="button" role="radio" aria-checked={sel} disabled={!en} title={en ? undefined : why}
-            // Disabled and not current: no inline colour, so the global :disabled opacity applies.
-            style={sel ? { background: `var(--mode-${n})`, color: "var(--on-focus)", boxShadow: "none" } : en ? { color: `var(--mode-${n})` } : undefined}
+            // The mode colour marks the selected one only. The rest read in --muted (>= 4.5:1); a disabled one keeps full opacity (the global :disabled .5 would drop it to ~2.5:1) and says why in its title, with the not-allowed cursor.
+            style={sel ? { background: `var(--mode-${n})`, color: "var(--on-focus)", boxShadow: "none" } : { color: "var(--muted)", ...(en ? {} : { opacity: 1 }) }}
             aria-label={`Set mode ${m} ${MODE_NAME[m]}${sel ? " (current)" : ""}${en ? "" : `, disabled: ${why}`}`}
             onClick={() => !sel && onChange(m)}>
             {m} {MODE_NAME[m]}

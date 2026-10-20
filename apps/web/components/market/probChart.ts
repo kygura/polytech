@@ -163,6 +163,7 @@ function stepLabel(s: Step, range: Range, ts: number): string {
 
 /** Axis labels for [t0,t1] drawn over `width` px: first and last always, aligned ticks between them, dropped when closer than `minGap` px.
  * A step finer than the range's own is used when the span is too short to hold two ticks (a few hours of snapshots on 1D, say). */
+const EDGE_GAP = 6; // the last label stops this far short of the plot edge, clear of the y-axis labels that start 8px beyond it
 export function xTicks(t0: number, t1: number, range: Range, width: number, minGap = 56): XTick[] {
   if (!(t1 > t0) || width <= 0) return [];
   let i = BASE[range];
@@ -171,12 +172,13 @@ export function xTicks(t0: number, t1: number, range: Range, width: number, minG
   const step = LADDER[i]!, sx = linear(t0, t1, 0, width);
   const at = (ts: number): XTick => {
     const label = stepLabel(step, range, ts), half = (label.length * 6.6) / 2; // 11px mono ~ 6.6px a glyph
-    return { ts, label, x: Math.min(width - half, Math.max(half, sx(ts))) };
+    return { ts, label, x: Math.min(width - half - EDGE_GAP, Math.max(half, sx(ts))) };
   };
   const first = at(t0), last = at(t1), mid: XTick[] = [];
   for (const ts of ticksOf(step, t0, t1)) {
     const t = at(ts), prev = mid.at(-1) ?? first;
-    if (t.x - prev.x >= minGap && last.x - t.x >= minGap) mid.push(t);
+    // a day tick and the last point on that same day both read "Oct 20": keep one
+    if (t.x - prev.x >= minGap && last.x - t.x >= minGap && t.label !== prev.label && t.label !== last.label) mid.push(t);
   }
   return [first, ...mid, last];
 }
@@ -197,6 +199,9 @@ export function tagLayout(yYes: number | null, yNo: number | null, prefer: Outco
   if (yes && no && Math.abs(yYes - yNo) < h) return prefer === "NO" ? { yes: false, no: true } : { yes: true, no: false };
   return { yes, no };
 }
+
+/** A y-axis label at `y` is hidden when a price tag centred at one of `tagYs` would sit on it (tag 18px tall, label ~10px, 2px air). */
+export const yLabelClear = (y: number, tagYs: readonly (number | null)[], gap = 16): boolean => tagYs.every((t) => t == null || Math.abs(y - t) >= gap);
 
 export type OwnOrder = { price: number; side: "BUY" | "SELL"; outcome: Outcome; shares?: number };
 /** An order's price in YES space (a NO order at 41¢ sits at 59¢ on the YES line). */

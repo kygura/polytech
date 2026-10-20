@@ -29,11 +29,13 @@
 .menuList a:hover { background: var(--surface-2); }
 
 /* the search trigger is a fake input that opens MarketSearch */
-.search { flex: 0 1 260px; min-width: 40px; height: 30px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-md); color: var(--muted); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); text-align: left; }
+.search { flex: 0 1 260px; min-width: 116px; height: 30px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-md); color: var(--muted); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); text-align: left; }
 .search:hover:not(:disabled) { background: var(--surface-2); border-color: var(--muted); }
 .search svg { flex: none; }
 .searchText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search kbd { flex: none; }
+/* 1280–1419 the header is tight: the trigger keeps icon + "Search" + kbd instead of a truncated placeholder */
+@media (max-width: 1419px) { .searchMore { display: none; } }
 
 .right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
 .themeBtn { width: 28px; height: 28px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); font-size: var(--fs-lg); line-height: 1; }
@@ -68,7 +70,7 @@
 @media (max-width: 1279px) {
   .g3 { display: none; }
   .more { display: block; }
-  .search { flex: none; width: 30px; padding: 0; justify-content: center; }
+  .search { flex: none; width: 30px; min-width: 0; padding: 0; justify-content: center; }
   .searchText, .search kbd, .chipNet, .balance { display: none; }
 }
 /* under 1100: one ≡ menu with all nine items; the header keeps wordmark · menu · mode · kill. Nothing is designed below 960. */

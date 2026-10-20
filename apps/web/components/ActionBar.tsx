@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { inInput } from "../hooks/useGlobalKeys";
+import { chordKey, inInput } from "../hooks/useGlobalKeys";
 import { Button } from "./ui";
 import { ResearchRunning } from "./ResearchRunning";
 import { SteerDrawer, type SteerProfile } from "./SteerDrawer";
@@ -58,7 +58,7 @@ export function ActionBar({ conditionId, pinned: pinnedProp, muted: mutedProp, r
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
+      if (inInput(e) || chordKey(e) || e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
       if (e.key === "S" && !running && !researchDisabled) { e.preventDefault(); setSteer(true); }
       else if (e.shiftKey) return;
       else if (e.key === "r") void research();

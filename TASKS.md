@@ -12,16 +12,19 @@ Destination: SPEC.md "Rev 8" done list passes.
 - No login anywhere, no visitor mode, one shell (owner, 2026-10-20).
 - Design direction left to planner: merge both looks into one system on the terminal palette, Inter + JetBrains Mono, dark default with light toggle.
 - `/trade/[id]` is the single market page; `/markets/[id]` redirects there; operator research content becomes a tab set on it.
+- Root cause of "nothing works" in dev: RSC pages and route handlers loaded separate module instances, so the PGlite/kv singletons split (writes invisible to pages, corrupted data dir). Singletons moved to globalThis.
+- Gamma keyset needs include_tag=true for categories; the inline scout chain must not call the "use workflow" function directly.
+- Verification: route audit (29 findings, docs/rev8-audit.md), code review (9), design drift (8) → one fix loop; typecheck, tests and next build green.
 
 ## Tasks
 | # | Task | Deps | Role / model | State |
 |---|---|---|---|---|
-| A1 | Bug audit of every route + API (docs/rev8-audit.md) | — | worker / sonnet | running |
-| A2 | DESIGN.md §13 brief | — | designer / fable | running |
-| A3 | Remove login/auth (web + TUI) | — | worker / sonnet | running |
-| B1 | Unified tokens + fonts + single AppShell, fold /trade into it, delete visitor surface | A2 A3 | ui-impl / sonnet | frontier |
-| C1 | YES/NO chart + merged market page (/trade/[id], research tabs, list search, wrapped titles) | B1 | ui-impl / sonnet | blocked |
-| C2 | Markets explorer (/markets) redesign | B1 | ui-impl / sonnet | blocked |
-| C3 | Restyle remaining pages to primitives | B1 | ui-impl / sonnet | blocked |
-| C4 | Logic bug fixes from audit (non-UI) | A1 | worker / sonnet | blocked |
-| V | Verification gate: typecheck, test, build, Playwright sweep, review, drift check | all | reviewer / fable | blocked |
+| A1 | Bug audit of every route + API (docs/rev8-audit.md) | — | worker / sonnet | done |
+| A2 | DESIGN.md §13 brief | — | designer / fable | done |
+| A3 | Remove login/auth (web + TUI) | — | worker / sonnet | done |
+| B1 | Unified tokens + fonts + single AppShell, fold /trade into it, delete visitor surface | A2 A3 | ui-impl / sonnet | done |
+| C1 | YES/NO chart + merged market page (/trade/[id], research tabs, list search, wrapped titles) | B1 | ui-impl / sonnet | done |
+| C2 | Markets explorer (/markets) redesign | B1 | ui-impl / sonnet | done |
+| C3 | Restyle remaining pages to primitives | B1 | ui-impl / sonnet | done |
+| C4 | Logic bug fixes from audit (non-UI) | A1 | worker / sonnet | done |
+| V | Verification gate: typecheck, test, build, Playwright sweep, review, drift check | all | reviewer / fable | done (1 fix loop) |

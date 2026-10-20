@@ -125,6 +125,13 @@ export function TerminalPage() {
     return y == null ? null : info.outcome === "YES" ? y : 1 - y;
   };
 
+  // Ids this component wrote to the URL whose params.id has not come back yet. Rapid A then B delivers params.id = A after picked is B; that echo is ours, not an outside navigation.
+  const wrote = useRef<string[]>([]);
+  const writeUrl = (to: string) => {
+    if (to !== params.id) wrote.current.push(to);
+    router.replace(`/trade/${to}${location.search}`, { scroll: false });
+  };
+
   // Switching drops the ticket's order view: blocked while the wallet prompt is open or an outcome is being looked up.
   const select = (next: string) => {
     if (!switchable) { blocked(); return; }
@@ -134,7 +141,7 @@ export function TerminalPage() {
     setDrawer(false);
     setLadderCursor(-1);
     store.set(LAST_KEY, next);
-    router.replace(`/trade/${next}${location.search}`, { scroll: false });
+    writeUrl(next);
   };
   useEffect(() => { if (switchable) setLockNote(false); }, [switchable]);
 
@@ -145,16 +152,18 @@ export function TerminalPage() {
     const last = store.get(LAST_KEY);
     const at = last && isMarketId(last) ? last : first;
     setPicked(at);
-    router.replace(`/trade/${at}${location.search}`, { scroll: false });
-  }, [picked, first, router]);
+    writeUrl(at);
+  }, [picked, first, router]); // eslint-disable-line react-hooks/exhaustive-deps -- writeUrl only reads refs and params.id
   useEffect(() => { if (picked) store.set(LAST_KEY, picked); }, [picked]);
   // URL changed from outside (g t or the logo -> /trade, a typed /trade/<id>): keep the market, or switch only when allowed.
   useEffect(() => {
     const at = params.id ?? null;
+    const echo = at ? wrote.current.indexOf(at) : -1;
+    if (echo >= 0) { wrote.current.splice(0, echo + 1); return; }
     if (!picked || at === picked) return;
     if (at && switchable) { setPicked(at); setCursorId(at); return; }
     if (!switchable) blocked();
-    router.replace(`/trade/${picked}${location.search}`, { scroll: false });
+    writeUrl(picked);
   }, [params.id]); // eslint-disable-line react-hooks/exhaustive-deps -- only a URL change triggers this
 
   const moveCursor = useCallback((d: number) => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ariaSummary, axisFor, cents, cleanPoints, extent, FULL_AXIS, fitAxis, lineStats, linear, mergeLive, nearestIndex, orderLabel,
-  stepRange, tagLayout, timeLabel, valueAt, xDomain, xTicks, yesPrice,
+  stepRange, tagLayout, timeLabel, valueAt, xDomain, xTicks, yesPrice, yLabelClear,
 } from "./probChart";
 
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime(); // local time, TZ independent
@@ -137,6 +137,12 @@ describe("xTicks", () => {
     expect(w.some((x) => x.label === "Oct 5")).toBe(true); // Oct 5 2026 is a Monday
     expect(w.some((x) => x.label === "Oct 6")).toBe(false);
   });
+  it("no label twice: a day tick on the last point's day is dropped (1M, market 3.5 days old)", () => {
+    const t = xTicks(at(2026, 10, 17, 3), at(2026, 10, 20, 22, 43), "1m", W);
+    const labels = t.map((x) => x.label);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.at(-1)).toBe("Oct 20");
+  });
   it("finer step when the span is too short for the range's own (2h of snapshots on 1D)", () => {
     const t = xTicks(at(2026, 10, 20, 12, 3), at(2026, 10, 20, 14, 7), "1d", W);
     expect(t.length).toBeGreaterThanOrEqual(3);
@@ -145,6 +151,7 @@ describe("xTicks", () => {
   it("labels stay inside the plot and degenerate input gives none", () => {
     const t = xTicks(at(2026, 10, 19), at(2026, 10, 20), "1d", 300);
     expect(t.every((x) => x.x >= 0 && x.x <= 300)).toBe(true);
+    expect(t.at(-1)!.x + (t.at(-1)!.label.length * 6.6) / 2).toBeLessThanOrEqual(300 - 6); // the last label stays clear of the y-axis labels beyond the plot
     expect(xTicks(5, 5, "1d", 300)).toEqual([]);
     expect(xTicks(0, 5, "1d", 0)).toEqual([]);
   });
@@ -168,6 +175,11 @@ describe("overlays", () => {
     expect(tagLayout(100, 140, "NO")).toEqual({ yes: true, no: true });
     expect(tagLayout(100, null, "NO")).toEqual({ yes: true, no: false });
     expect(tagLayout(null, null, "YES")).toEqual({ yes: false, no: false });
+  });
+  it("yLabelClear: a y label under a price tag yields, others stay", () => {
+    expect(yLabelClear(10, [14, null])).toBe(false);
+    expect(yLabelClear(10, [30, 200])).toBe(true);
+    expect(yLabelClear(10, [null, null])).toBe(true);
   });
   it("own orders live in YES space and read in the chart's outcome", () => {
     expect(yesPrice({ price: 0.41, outcome: "YES" })).toBe(0.41);

@@ -25,6 +25,8 @@ export const filterInput = () => document.querySelector<HTMLInputElement>("input
 // A `g` waiting for its second key. Module state so page-scope handlers (the /trade single keys) can ignore the key that completes a chord, whatever order the window listeners run in.
 let pendingG = 0;
 export const chordPending = () => pendingG > 0 && Date.now() - pendingG < CHORD_MS;
+/** True for a key a page handler must skip: the one completing a `g` chord. Covers both listener orders (the Shell ran first and prevented it, or it has not run yet and `g` is still pending). */
+export const chordKey = (e: Pick<KeyboardEvent, "defaultPrevented">) => e.defaultPrevented || chordPending();
 
 /** g+<key> nav, `/` focus the view's filter or open market search, Esc blur, `?` sheet, `t` theme. Ignored while an input is focused or a dialog is open. `onAlerts` enables `g n`; `onPending` reports a pending `g` (800 ms). */
 export function useGlobalKeys({ onHelp, onTheme, onSearch, onAlerts, onPending }: { onHelp: () => void; onTheme: () => void; onSearch?: () => void; onAlerts?: () => void; onPending?: (pending: boolean) => void }) {
@@ -45,10 +47,10 @@ export function useGlobalKeys({ onHelp, onTheme, onSearch, onAlerts, onPending }
       if (g) {
         settle();
         const c = chordTarget(e.key, !!onAlerts);
+        if (e.key.length === 1) e.preventDefault(); // every printable key that completes a chord (even `g b`) is consumed: page keys bail on defaultPrevented
         if (c) {
           if ("alerts" in c) onAlerts!();
           else router.push(c.path);
-          e.preventDefault();
           return;
         }
       }

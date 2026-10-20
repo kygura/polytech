@@ -16,7 +16,7 @@ import { ScheduleForm } from "../../../components/research/ScheduleForm";
 import { SteeringForm } from "../../../components/research/SteeringForm";
 import { blocker, buildInput, fromProfile, mapIssues, newDraft, scope, toFilter, toProfile, type Draft, type Profile } from "../../../components/research/steering";
 import ui from "../../../components/ui.module.css";
-import { inInput } from "../../../hooks/useGlobalKeys";
+import { chordKey, inInput } from "../../../hooks/useGlobalKeys";
 import cx from "./research.module.css";
 
 const API = "/api/research/profiles";
@@ -145,7 +145,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
   h.current = { runPreview, run, nav, key };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (inInput(e) || chordKey(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "n") { e.preventDefault(); h.current.nav(NEW_ID); }
       else if (e.key === "p" && h.current.key) void h.current.runPreview();
       else if (e.key === "x") void h.current.run();

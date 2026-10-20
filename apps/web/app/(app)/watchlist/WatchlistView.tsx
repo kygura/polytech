@@ -16,7 +16,7 @@ import { STALE_MS, StaleBanner } from "../../../components/StaleBanner";
 import { Flat, MarketTitle } from "../../../components/pageParts";
 import { Button, Panel, Tabs } from "../../../components/ui";
 import { hms, truncate } from "../../../components/fmt";
-import { inInput } from "../../../hooks/useGlobalKeys";
+import { chordKey, inInput } from "../../../hooks/useGlobalKeys";
 import type { StructuralRow, WatchlistRow } from "../../../lib/jobs/read";
 import pg from "../../../components/page.module.css";
 import css from "./watchlist.module.css";
@@ -42,7 +42,7 @@ const WATCH_COLS: Column<WRow>[] = [
   { id: "payoff", header: "Payoff", align: "r", cell: (r) => <NumCell value={r.payoff} fmt="x" /> },
   { id: "days", header: "Days", align: "r", sortable: true, cell: (r) => <NumCell value={r.daysLeft} fmt="int" /> },
   { id: "catalyst", header: "Catalyst", align: "l", cell: (r) => r.nextCatalyst ? <span title={r.nextCatalyst}>{truncate(r.nextCatalyst.slice(5), 24)}</span> : <span className="muted">{"—"}</span> },
-  { id: "c", header: "c", align: "r", cell: (r) => r.c == null ? <span className="muted">{"—"}</span> : <span className={r.capped ? "warn" : undefined} title={r.capped ? "disagreement cap tripped" : undefined}>{r.c.toFixed(2)}{r.capped ? "*" : ""}</span> },
+  { id: "c", header: "Conf", title: "confidence c", align: "r", cell: (r) => r.c == null ? <span className="muted">{"—"}</span> : <span className={r.capped ? "warn" : undefined} style={{ position: "relative" }} title={r.capped ? "disagreement cap tripped" : undefined}>{r.c.toFixed(2)}{r.capped && <span style={{ position: "absolute", left: "100%" }}>*</span>}</span> }, // the cap mark hangs outside so every value ends on the same edge
 ];
 const WATCH_KEY: Record<string, (r: WRow) => number | null> = {
   rank: (r) => r.n, edge: (r) => r.edgeC, size: (r) => r.sizeUsd, ep: (r) => r.expectedProfit, r_ann: (r) => r.rAnn, days: (r) => r.daysLeft,
@@ -100,7 +100,7 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
   // p / m / r act on the selected row.
   useEffect(() => {
     const h = async (e: KeyboardEvent) => {
-      if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey || !selected || tab === "alerts") return;
+      if (inInput(e) || chordKey(e) || e.metaKey || e.ctrlKey || e.altKey || !selected || tab === "alerts") return;
       const row = rows.find((r) => r.conditionId === selected);
       if (!row) return;
       if (e.key === "p" || e.key === "m") {

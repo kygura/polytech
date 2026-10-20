@@ -41,7 +41,7 @@ export function BottomTabs(p: Props) {
     { id: "orders", label: "Orders", count: n.orders, kbd: "3" }, { id: "rules", label: "Rules", kbd: "4" },
   ];
   return (
-    <Panel className={`${css.bottom} ${p.expanded ? css.expanded : ""}`} label="Market tabs"
+    <Panel className={css.bottom} label="Market tabs"
       title={<Tabs items={items} active={p.tab} onChange={(t) => p.onTab(t as BottomTab)} panelId={PANEL} label="Market tabs" />}
       right={<Button variant="ghost" size="sm" onClick={p.onExpand} aria-pressed={p.expanded} title={p.expanded ? "Restore (e)" : "Expand over the chart (e)"}>{p.expanded ? "⤡ Restore" : "⤢"}<kbd>e</kbd></Button>}>
       <div role="tabpanel" id={PANEL} aria-labelledby={`${PANEL}-tab-${p.tab}`} className={css.tabBody}>

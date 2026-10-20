@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
-import { inInput } from "../../hooks/useGlobalKeys";
+import { chordKey, inInput } from "../../hooks/useGlobalKeys";
 import { DEFAULT_RANGE, RANGES, type HistoryResult } from "../../lib/history";
 import {
   ariaSummary, axisFor, cents, cleanPoints, extent, lineStats, linear, mergeLive, nearestIndex, orderLabel, stepRange, tagLayout,
-  timeLabel, valueAt, xDomain, xTicks, yesPrice, type AxisMode, type HistPt, type Outcome, type OwnOrder, type Range,
+  timeLabel, valueAt, xDomain, xTicks, yesPrice, yLabelClear, type AxisMode, type HistPt, type Outcome, type OwnOrder, type Range,
 } from "./probChart";
 import css from "./probChart.module.css";
 
@@ -143,7 +143,7 @@ export function ProbChart({ conditionId, liveMid = null, pHat = null, markers = 
   useEffect(() => {
     if (!keys) return;
     const k = (e: globalThis.KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || inInput(e) || document.querySelector("dialog[open]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || inInput(e) || chordKey(e) || document.querySelector("dialog[open]")) return;
       if (e.key === "[" || e.key === "]") {
         e.preventDefault();
         const n = stepRange(cur.current.range, e.key === "]" ? 1 : -1);
@@ -204,6 +204,7 @@ export function ProbChart({ conditionId, liveMid = null, pHat = null, markers = 
     const last = vis.at(-1)!, lx = x(last.ts);
     const yYes = y(last.mid * 100), yNo = y((1 - last.mid) * 100);
     const tags = tagLayout(showYes ? yYes : null, showNo ? yNo : null, outcome ?? "YES");
+    const tagYs = [tags.yes ? clampY(yYes) : null, tags.no ? clampY(yNo) : null];
     const ctx = outcome ?? "YES";
     const dim = h.loading && h.stale;
     const hv = hover && vis[hover.i] ? vis[hover.i]! : null;
@@ -221,7 +222,7 @@ export function ProbChart({ conditionId, liveMid = null, pHat = null, markers = 
           {ax.ticks.map((v) => (
             <g key={v}>
               <line className={css.grid} x1={0} x2={plotW} y1={y(v)} y2={y(v)} />
-              <text className={css.ylab} x={plotW + 8} y={y(v) + 4}>{v}%</text>
+              {yLabelClear(y(v), tagYs) && <text className={css.ylab} x={plotW + 8} y={y(v) + 4}>{v}%</text>}
             </g>
           ))}
           {xt.map((t) => <text key={t.ts} className={css.xlab} x={t.x} y={H - 6} textAnchor="middle">{t.label}</text>)}

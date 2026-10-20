@@ -39,10 +39,11 @@
 
 .liveYes { fill: var(--yes); }
 .liveNo { fill: var(--no); }
-.ring { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: ring 1.5s ease-out infinite; }
-.ringYes { stroke: var(--yes); }
-.ringNo { stroke: var(--no); }
-@keyframes ring { from { transform: scale(1); opacity: .7; } to { transform: scale(3.2); opacity: 0; } }
+/* Halo: a filled tint of the line's own colour, so it reads as a glow on both themes (a stroked ring faded to a dark smudge on light). */
+.ring { stroke: none; transform-box: fill-box; transform-origin: center; animation: ring 1.5s ease-out infinite; }
+.ringYes { fill: color-mix(in srgb, var(--yes) 45%, transparent); }
+.ringNo { fill: color-mix(in srgb, var(--no) 45%, transparent); }
+@keyframes ring { from { transform: scale(1); opacity: 1; } to { transform: scale(3.2); opacity: 0; } }
 
 .tagYes { fill: var(--yes); }
 .tagNo { fill: var(--no); }

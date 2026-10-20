@@ -45,24 +45,6 @@
   --input-h: 28px; --input-h-lg: 36px; --btn-h: 28px; --btn-h-lg: 40px; --legend-h: 24px;
   --tint-ms: 600ms;
 
-  /* Old terminal names (--t-*), aliased so terminal.module.css and ChartPane keep compiling. Delete once rewritten (C1). */
-  --t-bg: var(--bg); --t-pane: var(--surface); --t-pane-2: var(--surface-2); --t-line: var(--border); --t-line-2: var(--border-2);
-  --t-text: var(--text); --t-dim: var(--muted); --t-faint: var(--faint);
-  --t-yes: var(--yes); --t-yes-bg: var(--yes-bg); --t-on-yes: var(--on-yes);
-  --t-no: var(--no); --t-no-bg: var(--no-bg); --t-on-no: var(--on-no);
-  --t-up: var(--up); --t-up-bg: var(--up-bg); --t-down: var(--down); --t-down-bg: var(--down-bg);
-  --t-bid: var(--bid); --t-bid-bg: var(--bid-bg); --t-ask: var(--ask); --t-ask-bg: var(--ask-bg);
-  --t-focus: var(--focus); --t-focus-bg: var(--focus-bg); --t-tint: var(--tint);
-  --t-warn: var(--warn); --t-warn-bg: var(--warn-bg); --t-shadow: var(--shadow);
-  --t-font-ui: var(--font-ui); --t-font-num: var(--font-mono);
-  --t-fs-xs: var(--fs-xs); --t-lh-xs: var(--lh-xs); --t-fs-sm: var(--fs-sm); --t-lh-sm: var(--lh-sm);
-  --t-fs-md: var(--fs-md); --t-lh-md: var(--lh-md); --t-fs-lg: var(--fs-lg); --t-lh-lg: var(--lh-lg);
-  --t-fs-xl: var(--fs-2xl); --t-lh-xl: var(--lh-2xl);
-  --t-sp-1: var(--sp-0); --t-sp-2: var(--sp-1); --t-sp-3: var(--gap); --t-sp-4: var(--sp-2); --t-sp-5: var(--sp-3); --t-sp-6: var(--sp-4);
-  --t-r-sm: var(--r-sm); --t-r-md: var(--r-md); --t-r-lg: var(--r-lg);
-  --t-top-h: var(--top-h); --t-ph-h: var(--ph-h); --t-row-h: var(--row-h); --t-ladder-h: var(--row-dense); --t-tape-h: var(--row-dense);
-  --t-input-h: var(--input-h-lg); --t-btn-h: var(--btn-h-lg); --t-legend-h: var(--legend-h); --t-tint-ms: var(--tint-ms);
-
   color-scheme: dark;
 }
 
@@ -123,6 +105,7 @@ input, select, textarea {
   height: var(--input-h);
 }
 textarea { height: auto; padding: var(--sp-1) var(--sp-2); }
+select[multiple] { height: auto; padding: var(--sp-1) var(--sp-2); min-width: 200px; } /* a list box is as tall as its `size` rows, not one input */
 input[type="checkbox"], input[type="radio"] { height: auto; padding: 0; }
 input[type="number"] { text-align: right; font-family: var(--font-mono); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-bg); }
