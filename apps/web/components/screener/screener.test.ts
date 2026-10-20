@@ -229,8 +229,8 @@ describe("virtual window", () => {
 });
 
 describe("columns", () => {
-  it("default set is the DESIGN 13.5 order (no 24h change: the rows carry no d24c yet) and all ids exist", () => {
-    expect(DEFAULT_COLS).toEqual(["flags", "market", "yes", "no", "prob", "sprd", "liq", "vol24", "days", "prio", "edge"]);
+  it("default set is the DESIGN 13.5 order and all ids exist", () => {
+    expect(DEFAULT_COLS).toEqual(["flags", "market", "yes", "no", "prob", "d24", "sprd", "liq", "vol24", "days", "prio", "edge"]);
     const ids = COLUMNS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(DEFAULT_COLS.every((c) => ids.includes(c))).toBe(true);

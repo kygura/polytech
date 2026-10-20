@@ -11,6 +11,7 @@ export type ScreenerRow = {
   priority: number | null; structural: string[] | null;
   opportunity: { side: string; edge: number; stake: number; o: number; contrarian: boolean } | null;
   pinned: boolean; muted: boolean;
+  d24c: number | null; // YES mid change over 24h, cents (null until a snapshot is 24h old)
   thesis: { id: string; side: string; edgeC: number; pPost: number; expired: boolean } | null;
 };
 

@@ -7,6 +7,7 @@ import { NumCell } from "../NumCell";
 import { PricePill } from "../ui";
 import ui from "../ui.module.css";
 import css from "./screener.module.css";
+import { changeLabel } from "../terminal/marketList";
 import type { ScreenerRow } from "./types";
 
 export const STALE_TRADE_H = 48; // `Z` badge threshold
@@ -79,6 +80,7 @@ export const COLUMNS: ColDef[] = [
   { id: "yes", label: "YES¢", width: "64px", align: "r", sortField: "price", title: "YES price, mid", cell: (r) => (r.mid == null ? dash : <PricePill outcome="YES" price={r.mid} />) },
   { id: "no", label: "NO¢", width: "64px", align: "r", title: "NO price, 1 − YES mid", cell: (r) => (r.mid == null ? dash : <PricePill outcome="NO" price={1 - r.mid} />) },
   { id: "prob", label: "P", width: "96px", align: "l", title: "YES / NO probability split", cell: (r) => <ProbBar mid={r.mid} /> },
+  { id: "d24", label: "24h", width: "52px", align: "r", title: "YES price change over 24h, cents", cell: (r) => { const ch = changeLabel(r.d24c); return <span className={ch.dir === "up" || ch.dir === "down" ? ch.dir : "muted"}>{ch.text}</span>; } },
   num("mid", "Mid", "56px", undefined, (r) => r.mid, "p"),
   num("sprd", "Sprd", "52px", "spread", (r) => (r.spread == null ? null : r.spread * 100), "cents", { title: "spread, cents" }),
   num("liq", "Liq", "64px", "liquidity", (r) => r.liquidity, "usd"),
@@ -108,7 +110,7 @@ export const COLUMNS: ColDef[] = [
   { id: "cat", label: "Cat", width: "96px", align: "l", cell: (r) => r.category ?? dash },
 ];
 
-export const DEFAULT_COLS = ["flags", "market", "yes", "no", "prob", "sprd", "liq", "vol24", "days", "prio", "edge"];
+export const DEFAULT_COLS = ["flags", "market", "yes", "no", "prob", "d24", "sprd", "liq", "vol24", "days", "prio", "edge"];
 /** Rev 7 default set: a saved copy of exactly this is the old default, not a choice, so it moves to the new default. */
 const OLD_DEFAULT = "flags,market,mid,sprd,liq,vol24,d2,days,stale,top1,src,prio,opp,edge";
 export const COL_LABEL = new Map(COLUMNS.map((c) => [c.id, c.label]));
