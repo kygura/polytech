@@ -19,6 +19,80 @@ export const markets = pgTable("markets", {
   noTokenId: text("no_token_id"),
   vol24h: dp("vol_24h"),
   tickSize: dp("tick_size"), // null = unknown, callers fall back to 0.01
+  liquidity: dp("liquidity"),
+  rulesHash: text("rules_hash"),
+  resolutionSource: text("resolution_source"), // official_data | scheduled_event | media_report | subjective | unknown
+  negRiskAugmented: boolean("neg_risk_augmented").notNull().default(false),
+});
+
+/** One row per market, updated in place by the snapshot job. */
+export const marketLatest = pgTable("market_latest", {
+  conditionId: text("condition_id").primaryKey(),
+  ts: ts("ts").notNull().defaultNow(),
+  mid: dp("mid"),
+  bestBid: dp("best_bid"),
+  bestAsk: dp("best_ask"),
+  spread: dp("spread"),
+  depth1c: dp("depth_1c"),
+  depth2c: dp("depth_2c"),
+  depth5c: dp("depth_5c"),
+  exitDepth: dp("exit_depth"),
+  capacity: dp("capacity"),
+  bookHash: text("book_hash"),
+  midChangedAt: ts("mid_changed_at"),
+  holderCount: integer("holder_count"),
+  holderHhi: dp("holder_hhi"),
+  top1Share: dp("top1_share"),
+  top5Share: dp("top5_share"),
+  flow24h: dp("flow_24h"),
+  tradeMedian: dp("trade_median"),
+  largeTrade24h: boolean("large_trade_24h"),
+  lastTradeTs: ts("last_trade_ts"),
+  priority: dp("priority"), // latest screen score
+  structural: jsonb("structural").$type<string[]>(), // structural kinds this market is in
+  opportunity: jsonb("opportunity").$type<{ side: string; edge: number; stake: number; o: number; contrarian: boolean } | null>(),
+});
+
+export const views = pgTable("views", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  query: text("query").notNull(),
+  columns: jsonb("columns").$type<string[]>().notNull().default([]),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
+export const alerts = pgTable("alerts", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  conditionId: text("condition_id"),
+  kind: text("kind").notNull(), // mid_move | catalyst_passed | new_candidate | structural | run_failed
+  message: text("message").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>(),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  ackedAt: ts("acked_at"),
+}, (t) => [index("alerts_acked_created").on(t.ackedAt, t.createdAt)]); // dedupe in code: same kind + market not re-raised within 6 h
+
+/** Per-thesis calibration row; filled by the calibrate job. */
+export const journal = pgTable("journal", {
+  thesisId: text("thesis_id").primaryKey(),
+  conditionId: text("condition_id").notNull(),
+  category: text("category"),
+  model: text("model"),
+  pHat: dp("p_hat"),
+  pPre: dp("p_pre"), // mean of blind agent estimates
+  midAt: dp("mid_at"),
+  liquidityAt: dp("liquidity_at"),
+  r: dp("r"),
+  side: text("side"),
+  stake: dp("stake"),
+  result: text("result"),
+  resolvedAt: ts("resolved_at"),
+  brierModel: dp("brier_model"),
+  brierMarket: dp("brier_market"),
+  brierPre: dp("brier_pre"),
+  logLoss: dp("log_loss"),
+  drift24h: dp("drift_24h"),
+  drift7d: dp("drift_7d"),
+  paperPnl: dp("paper_pnl"),
 });
 
 export const snapshots = pgTable("snapshots", {
@@ -56,11 +130,13 @@ export const pods = pgTable("pods", {
   id: text("id").primaryKey(),
   conditionId: text("condition_id").notNull(),
   startedAt: ts("started_at").notNull().defaultNow(),
-  status: text("status").notNull().default("running"),
+  status: text("status").notNull().default("running"), // running | ... | cancelled
   trigger: text("trigger").notNull(),
   costSandboxS: dp("cost_sandbox_s").notNull().default(0),
   profileId: text("profile_id"), // research_profiles.id; null = screener / ad-hoc
   steering: jsonb("steering").$type<Record<string, unknown>>(), // resolved steering that ran
+  cancelRequestedAt: ts("cancel_requested_at"),
+  stage: text("stage"), // rules | agents | judge | sizing | done
 });
 
 export const researchProfiles = pgTable("research_profiles", {
@@ -80,10 +156,13 @@ export const agentRuns = pgTable("agent_runs", {
   podId: text("pod_id").notNull(),
   role: text("role").notNull(),
   model: text("model").notNull(),
-  status: text("status").notNull(),
+  status: text("status").notNull(), // running | ok | ... | cancelled
   outputJson: jsonb("output_json"),
   usage: jsonb("usage"),
   durationS: dp("duration_s"),
+  startedAt: ts("started_at"),
+  finishedAt: ts("finished_at"),
+  toolCalls: jsonb("tool_calls").$type<{ ts: number; name: string; input: string; ok: boolean }[]>(), // input <= 500 chars, capped at 200 entries
 });
 
 export const evidence = pgTable("evidence", {
