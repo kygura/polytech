@@ -1,5 +1,10 @@
 import { Skeleton } from "../../components/Skeleton";
+import { Panel } from "../../components/ui";
 
 export default function Loading() {
-  return <Skeleton rows={8} />;
+  return (
+    <Panel label="loading">
+      <Skeleton rows={8} />
+    </Panel>
+  );
 }

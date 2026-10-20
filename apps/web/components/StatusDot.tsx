@@ -1,7 +1,7 @@
 import css from "./ui.module.css";
 
 export type DotStatus = "queued" | "running" | "done" | "failed" | "judging";
-const COLOR: Record<DotStatus, string> = { queued: "var(--muted)", running: "var(--accent)", judging: "var(--accent)", done: "var(--pos)", failed: "var(--neg)" };
+const COLOR: Record<DotStatus, string> = { queued: "var(--muted)", running: "var(--focus)", judging: "var(--focus)", done: "var(--up)", failed: "var(--down)" };
 
 /** Dot + text. `label={false}` = dot only (PodTable agents cell); status then lives in title/aria-label. */
 export function StatusDot({ status, label }: { status: DotStatus; label?: string | false }) {

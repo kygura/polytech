@@ -1,6 +1,6 @@
 import { gateParts, type Gate } from "./live";
 import { MeterBar } from "./MeterBar";
-import css from "./panels.module.css";
+import { Panel, Table } from "./ui";
 
 export type { Gate };
 const CRITERIA: Record<Gate["gate"], string> = {
@@ -13,25 +13,23 @@ const progress = (detail: string) => { const m = /(\d+)\/(\d+)/.exec(detail); re
 
 export function GatePanel({ gates }: { gates: Gate[] }) {
   return (
-    <section className="pane">
-      <h2>Gates <span className="muted" style={{ fontWeight: 400, fontSize: "var(--fs-sm)" }}>advisory; skipping is logged</span></h2>
-      <table aria-label="gates">
+    <Panel title="Gates" right="advisory; skipping is logged">
+      <Table label="gates">
         <thead><tr><th scope="col">Gate</th><th scope="col">Criteria</th><th scope="col" style={{ width: "20%" }}>Progress</th><th scope="col">Status</th></tr></thead>
         <tbody>
           {gates.map((g) => {
             const x = gateParts(g), p = x ?? progress(g.detail);
             return (
-              <tr key={g.gate} className={g.met ? "pos" : "muted"}>
+              <tr key={g.gate} className={g.met ? "up" : "muted"}>
                 <td>{g.gate.replace("->", "→")}</td>
                 <td className="ui" style={{ whiteSpace: "normal" }}>{CRITERIA[g.gate]}</td>
                 <td>{p && <MeterBar value={p.value} max={p.max} warnAt={2} />}</td>
-                <td>{x ? x.parts.map((c, i) => <span key={i}>{i ? <span className="muted"> · </span> : null}<span className={c.met ? "pos" : "muted"}>{c.text}</span></span>) : g.detail} {g.met ? "✓" : ""}</td>
+                <td>{x ? x.parts.map((c, i) => <span key={i}>{i ? <span className="muted"> · </span> : null}<span className={c.met ? "up" : "muted"}>{c.text}</span></span>) : g.detail} {g.met ? "✓" : ""}</td>
               </tr>
             );
           })}
         </tbody>
-      </table>
-      <p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Gates are advisory; skipping is logged.</p>
-    </section>
+      </Table>
+    </Panel>
   );
 }

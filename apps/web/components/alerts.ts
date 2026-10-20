@@ -40,7 +40,7 @@ export function alertHref(a: Pick<Alert, "kind" | "conditionId" | "data">): stri
     const pod = a.data?.podId;
     return typeof pod === "string" && pod ? `/runs/${encodeURIComponent(pod)}` : null;
   }
-  return a.conditionId ? `/markets/${encodeURIComponent(a.conditionId)}` : null;
+  return a.conditionId ? `/trade/${encodeURIComponent(a.conditionId)}` : null;
 }
 
 export type ListAct = "open" | "ack" | "ackAll" | null;

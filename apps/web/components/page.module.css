@@ -1,0 +1,26 @@
+/* Document-page parts shared by Watchlist, Runs, Research, Journal, Portfolio, Autonomy, Settings (DESIGN 13.6). */
+.stack { display: grid; gap: var(--sp-3); align-content: start; }
+/* ErrorBar / StaleBanner carry their own bottom margin; the grid gap already spaces them. */
+.stack > [role="alert"], .stack > [role="status"] { margin-bottom: calc(-1 * var(--sp-3)); }
+
+/* DataTable inside a Panel: the Panel draws the border. */
+.flat > div { border: 0; border-radius: 0; background: none; }
+
+/* Market question in a list: wraps to two lines (.row2 .q clamps), full text in the tooltip. */
+.title { color: var(--text); display: block; max-width: 56ch; }
+.title:hover { color: var(--focus); }
+
+/* KPI strip (Runs budget, Journal, Portfolio): muted label over an --fs-xl mono value. */
+.kpis { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-6); margin: 0; padding: var(--sp-3); }
+.kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi dt { color: var(--muted); font: 400 var(--fs-sm) / var(--lh-sm) var(--font-ui); white-space: nowrap; }
+.kpi dd { margin: 0; font: 600 var(--fs-xl) / var(--lh-xl) var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kpi > span[role="meter"] { margin-top: var(--sp-1); }
+.note dd { font: 400 var(--fs-sm) / var(--lh-sm) var(--font-mono); color: var(--muted); }
+
+.line { margin: 0; padding: var(--sp-2) var(--sp-3); font-family: var(--font-ui); }
+.hint { margin: 0; color: var(--muted); font-family: var(--font-ui); }
+.mcell { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+/* Settings: one Panel per group, balanced columns on wide screens. */
+.cols { columns: 440px 3; column-gap: var(--sp-3); }
+.cols > * { break-inside: avoid; margin-bottom: var(--sp-3); }

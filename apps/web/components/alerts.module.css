@@ -7,9 +7,9 @@ dialog.rail > :last-child { flex: 1; min-height: 0; max-height: none; padding: 0
 
 .list { list-style: none; margin: 0; padding: 0; outline-offset: -2px; }
 .item { display: grid; grid-template-columns: 16px 1fr auto; gap: var(--sp-2); align-items: start; min-height: 44px; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); border-left: 2px solid transparent; cursor: pointer; }
-.item[aria-selected="true"] { border-left-color: var(--accent); background: var(--surface-2); }
+.item[aria-selected="true"] { border-left-color: var(--focus); background: var(--surface-2); }
 .state { line-height: var(--lh-sm); font-size: var(--fs-sm); }
-.unacked .state { color: var(--accent); }
+.unacked .state { color: var(--focus); }
 .acked .state { color: var(--faint); }
 .body { display: flex; flex-direction: column; min-width: 0; }
 .l1 { display: flex; gap: var(--sp-2); align-items: baseline; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); }

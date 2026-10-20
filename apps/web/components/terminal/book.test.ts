@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketFeed } from "../../hooks/useMarketFeed";
-import { cents, changedSizes, forOutcome, nudge } from "./book";
+import { cents, changedSizes, displayYes, feedDisplay, forOutcome, isWide, nudge } from "./book";
 
 const feed: MarketFeed = {
   tokenId: "y", tickSize: 0.001, minOrderSize: 5, mid: 0.412, last: 0.41, at: 0, trades: [],
@@ -30,5 +30,15 @@ describe("terminal book helpers", () => {
     expect(nudge("SELL", 0.4125, -10, 0.001)).toBe(0.403);
     expect(nudge("BUY", 0.002, -10, 0.001)).toBe(0.001);
     expect(nudge("BUY", 0.99, 5, 0.01)).toBe(0.99);
+  });
+  it("wide book (> 10¢) shows the last trade, not the midpoint; a tight book shows the mid", () => {
+    expect(displayYes({ bid: 0.01, ask: 0.82, mid: 0.415, last: 0.055 })).toBe(0.055);
+    expect(displayYes({ bid: 0.01, ask: 0.11, mid: 0.06, last: 0.05 })).toBe(0.06); // exactly 10¢ is still tight
+    expect(displayYes({ bid: 0.4, ask: 0.42, mid: 0.41, last: 0.3 })).toBe(0.41);
+    expect(displayYes({ bid: 0.01, ask: 0.82, mid: 0.415, last: null })).toBe(0.415); // no trade to show: the mid is all there is
+    expect(displayYes({ bid: null, ask: null, mid: null, last: 0.2 })).toBe(0.2);
+    expect(isWide(0.01, 0.82)).toBe(true);
+    expect(isWide(0.4, 0.42)).toBe(false);
+    expect(feedDisplay({ ...feed, bids: [{ price: 0.01, size: 1 }], asks: [{ price: 0.82, size: 1 }], mid: 0.415, last: 0.055 })).toBe(0.055);
   });
 });

@@ -1,7 +1,11 @@
 import { parseQuery } from "@pm/core";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { describe, expect, it } from "vitest";
-import { compileFilter } from "./markets";
+import { schema as s } from "@pm/db";
+import { beforeAll, describe, expect, it } from "vitest";
+import { dbReady } from "./deps";
+import { change24h, compileFilter, listMarkets, topCategories } from "./markets";
+
+process.env.PGLITE_DIR = "memory://";
 
 const NOW = Date.UTC(2026, 9, 20);
 const compile = (q: string) => {
@@ -47,5 +51,52 @@ describe("compileFilter", () => {
     expect(c.where.sql).toContain(`->>'o'`);
     expect(c.where.sql).toContain(`->>'edge'`);
     expect(c.where.params).toEqual(expect.arrayContaining(["official_data", "overround", 0.01, 0.03]));
+  });
+});
+
+describe("d24c and /trade list ordering", () => {
+  beforeAll(async () => { await dbReady(); }, 60_000); // first use migrates the in-memory PGlite
+  const H = 3_600_000, at = (hAgo: number) => new Date(NOW - hAgo * H);
+  const mk = (id: string, category: string | null) => ({ conditionId: id, question: `Question ${id}`, category, status: "active" });
+  const seed = async () => {
+    const db = await dbReady();
+    await db.insert(s.markets).values([mk("0xa", "politics"), mk("0xb", "politics"), mk("0xc", "sports"), mk("0xd", null)]).onConflictDoNothing();
+    await db.insert(s.marketLatest).values([
+      { conditionId: "0xa", mid: 0.46 }, { conditionId: "0xb", mid: 0.3 }, { conditionId: "0xc", mid: 0.2 }, { conditionId: "0xd", mid: 0.5 },
+    ]).onConflictDoNothing();
+    await db.insert(s.snapshots).values([
+      { conditionId: "0xa", ts: at(30), mid: 0.4 }, { conditionId: "0xa", ts: at(25), mid: 0.45 }, { conditionId: "0xa", ts: at(2), mid: 0.9 }, // 0.45 is the mid 24 h ago
+      { conditionId: "0xb", ts: at(5), mid: 0.1 },  // nothing older than 24 h
+      { conditionId: "0xc", ts: at(48), mid: 0.25 }, // old row still stands: the book did not change since
+    ]);
+    return db;
+  };
+
+  it("d24c = mid now - the newest snapshot mid at or before 24 h ago, in cents; null when there is none that old", async () => {
+    const db = await seed();
+    const before = await change24h(db, ["0xa", "0xb", "0xc", "0xd"], NOW);
+    expect([...before.entries()].sort()).toEqual([["0xa", 0.45], ["0xc", 0.25]]);
+    const { rows } = await listMarkets(db, { sort: [{ field: "price", dir: "desc" }] }, NOW);
+    const d = Object.fromEntries(rows.map((r) => [r.conditionId, r.d24c]));
+    expect(d["0xa"]).toBeCloseTo(1, 6);   // 0.46 - 0.45
+    expect(d["0xc"]).toBeCloseTo(-5, 6);  // 0.20 - 0.25
+    expect(d["0xb"]).toBeNull();
+    expect(d["0xd"]).toBeNull();
+    expect(await change24h(db, [], NOW)).toEqual(new Map());
+  });
+
+  it("text search runs over every tracked market; watchFirst puts pinned rows ahead of the sort", async () => {
+    const db = await seed();
+    await db.insert(s.marketFlags).values({ conditionId: "0xd", pinned: true }).onConflictDoNothing();
+    const f = { text: "question", sort: [{ field: "price" as const, dir: "asc" as const }] };
+    expect((await listMarkets(db, f, NOW)).rows.map((r) => r.conditionId)).toEqual(["0xc", "0xb", "0xa", "0xd"]);
+    expect((await listMarkets(db, f, NOW, { watchFirst: true })).rows.map((r) => r.conditionId)).toEqual(["0xd", "0xc", "0xb", "0xa"]);
+    expect((await listMarkets(db, { text: "nomatch" }, NOW)).rows).toEqual([]);
+  });
+
+  it("topCategories counts active markets by category and skips null", async () => {
+    const db = await seed();
+    expect((await topCategories(db, 8)).slice(0, 2)).toEqual([{ category: "politics", n: 2 }, { category: "sports", n: 1 }]);
+    expect(await topCategories(db, 1)).toEqual([{ category: "politics", n: 2 }]);
   });
 });

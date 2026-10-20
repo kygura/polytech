@@ -87,9 +87,11 @@ export const SHORTCUTS: ShortcutScope[] = [
     ["↑ / ↓", "in Limit ± 1 tick (Shift ± 10), in Shares ± min order (Shift × 10)"], ["Tab", "next ticket field"],
     ["Enter", "in a ticket field: review; on review: sign and place (⌘Enter / Ctrl+Enter also signs)"],
     ["l", "order book: ↑↓ move, Enter copies the price, Esc back"], ["Shift T", "focus the ticket"],
-    ["p / o", "Positions / Open orders"], ["x", "cancel the focused open order, or the ticket's order"],
+    ["1 2 3 4", "bottom tabs: Research / Positions / Orders / Rules"], ["e", "expand the bottom pane over the chart"],
+    ["[ / ]", "chart range back / forward"], ["f", "chart axis: 0–100 / Fit"],
+    ["p / m / r", "pin / mute / re-research this market"], ["Shift S", "steer & research"],
+    ["x", "cancel the focused open order, or the ticket's order"],
   ] },
-  { scope: "Market page", path: /^\/markets\/[^/]/, keys: [["p / m / r / s", "pin / mute / re-research / steer & research"]] },
   { scope: "Research", path: /^\/research/, keys: [["n / p / x", "new / preview / run now"]] },
 ];
 export const shortcutsFor = (path: string) => SHORTCUTS.filter((s) => !s.path || s.path.test(path));

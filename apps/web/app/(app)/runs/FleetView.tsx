@@ -3,6 +3,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BudgetStrip } from "../../../components/BudgetStrip";
 import { EmptyState } from "../../../components/EmptyState";
+import { Flat } from "../../../components/pageParts";
+import { Panel } from "../../../components/ui";
+import pg from "../../../components/page.module.css";
 import { PodTable, orderPods, type Fleet } from "../../../components/PodTable";
 import { useSse } from "../../../hooks/useSse";
 
@@ -21,11 +24,14 @@ export function FleetView({ data, now }: { data: Fleet; now: number }) {
 
   const pods = orderPods(data.pods);
   return (
-    <>
-      <BudgetStrip budget={data.budget} />
-      {pods.length ? (
-        <PodTable pods={pods} now={t} selected={selected} onSelect={setSelected} onOpen={(p) => router.push(`/runs/${p.id}`)} isNew={isNew} />
-      ) : <EmptyState text="No runs yet. Press r on a market." />}
-    </>
+    <div className={pg.stack}>
+      <div className="page-h"><h1>Runs</h1></div>
+      <Panel title="Budget today"><BudgetStrip budget={data.budget} /></Panel>
+      <Panel title="Pods" right={<span className="n">{pods.length}</span>}>
+        {pods.length ? (
+          <Flat><PodTable pods={pods} now={t} selected={selected} onSelect={setSelected} onOpen={(pod) => router.push(`/runs/${pod.id}`)} isNew={isNew} /></Flat>
+        ) : <EmptyState text="No runs yet. Press r on a market." />}
+      </Panel>
+    </div>
   );
 }

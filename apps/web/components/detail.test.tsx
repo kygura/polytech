@@ -1,22 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { backTarget, listOf } from "./BackLink";
-import { HeaderBadges, structuralReason } from "./MarketHeader";
+import { HeaderBadges, structuralReason } from "./terminal/MarketHeader";
 import { MetricsGrid } from "./MetricsGrid";
-import { stepRange } from "./PriceHistoryPane";
-import { Segmented } from "./Segmented";
+import { Segmented } from "./ui";
 
 const NOW = 1_800_000_000_000, H = 3_600_000;
 const attr = (html: string, k: string) => [...html.matchAll(new RegExp(`${k}="([^"]*)"`, "g"))].map((m) => m[1]);
-
-describe("range keys", () => {
-  it("] steps forward, [ back, clamped at both ends", () => {
-    expect(stepRange("1m", 1)).toBe("all");
-    expect(stepRange("all", 1)).toBe("all");
-    expect(stepRange("1d", -1)).toBe("1d");
-    expect(stepRange("1w", -1)).toBe("1d");
-  });
-});
 
 describe("Segmented", () => {
   it("is a radiogroup with one tab stop on the selected option", () => {

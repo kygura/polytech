@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MeterBar } from "../MeterBar";
+import { Button, Panel } from "../ui";
 import { StatusDot } from "../StatusDot";
 import { dotStatus } from "../PodTable";
 import { hms } from "../fmt";
@@ -25,9 +26,9 @@ export function CostMeter({ costUsd, tools, budget }: { costUsd: number; tools: 
   const over = costRatio(costUsd, b?.usd) >= 1;
   return (
     <span className={css.cost} title={b?.basis ?? "no per-pod budget configured"}>
-      <span className={over ? "neg" : undefined}>{usd2(costUsd)}{b && ` / ${usd2(b.usd)}`}</span>
+      <span className={`n ${over ? "down" : ""}`}>{usd2(costUsd)}{b && ` / ${usd2(b.usd)}`}</span>
       {b && <span className={css.bar}><MeterBar value={costUsd} max={b.usd} /></span>}
-      <span className="muted">{"Σ"} {tools} tools</span>
+      <span className="muted n">{"Σ"} {tools} tools</span>
     </span>
   );
 }
@@ -41,21 +42,23 @@ type Props = {
 export function RunHeader({ pod, elapsed, costUsd, tools, budget, cancelling, onCancel }: Props) {
   const live = isLive(pod.status);
   return (
-    <section className={`pane ${css.head}`} aria-label="run">
-      <div className={css.line}>
-        <StatusDot status={dotStatus(pod.status)} label={pod.status} />
-        <Link href={`/markets/${pod.conditionId}`} className={css.q} title={pod.question ?? pod.conditionId}>{pod.question ?? pod.conditionId}</Link>
-        <span className="muted" title={pod.id}>pod {pod.id.slice(0, 8)}</span>
-        <span className="muted" suppressHydrationWarning>started {hms(pod.startedAt)}</span>
-        <span className="muted" aria-live="off">elapsed {clock(elapsed)}</span>
-        <span className={css.grow} />
-        {live && <button type="button" className={css.cancel} disabled={cancelling} onClick={onCancel}>{cancelling ? "cancelling…" : "[x] Cancel"}</button>}
+    <>
+      <div className="page-h">
+        <Link href="/runs" className={css.back}>{"←"} Runs</Link>
+        <h1><Link href={`/trade/${encodeURIComponent(pod.conditionId)}`} title={pod.question ?? pod.conditionId}>{pod.question ?? pod.conditionId}</Link></h1>
+        {live && <div className="r"><Button variant="danger" disabled={cancelling} onClick={onCancel}>{cancelling ? "cancelling…" : <>Cancel run <kbd>x</kbd></>}</Button></div>}
       </div>
-      <div className={css.line}>
-        <StageStepper stage={pod.stage} status={pod.status} />
-        <span className={css.grow} />
-        <CostMeter costUsd={costUsd} tools={tools} budget={budget} />
-      </div>
-    </section>
+      <Panel title={<StatusDot status={dotStatus(pod.status)} label={pod.status} />} label="run" right={<>
+        <span title={pod.id}>pod <span className="n">{pod.id.slice(0, 8)}</span></span>
+        <span suppressHydrationWarning>started <span className="n">{hms(pod.startedAt)}</span></span>
+        <span aria-live="off">elapsed <span className="n">{clock(elapsed)}</span></span>
+      </>}>
+        <div className={css.head}>
+          <StageStepper stage={pod.stage} status={pod.status} />
+          <span className={css.grow} />
+          <CostMeter costUsd={costUsd} tools={tools} budget={budget} />
+        </div>
+      </Panel>
+    </>
   );
 }

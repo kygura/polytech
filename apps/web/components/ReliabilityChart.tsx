@@ -28,7 +28,7 @@ export function ReliabilityChart({ bins, height = 320 }: { bins: Bin[]; height?:
         <line className={css.axis} x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={y(0)} />
         <line x1={x(0)} y1={y(0)} x2={x(1)} y2={y(1)} stroke="var(--faint)" strokeDasharray="4 4" />
         {pts.map((b, i) => (
-          <circle key={i} cx={x(b.meanPredicted)} cy={y(b.observed)} r={r(b.n)} fill="var(--accent)" fillOpacity={0.7} stroke="var(--accent)"
+          <circle key={i} cx={x(b.meanPredicted)} cy={y(b.observed)} r={r(b.n)} fill="var(--focus)" fillOpacity={0.7} stroke="var(--focus)"
             onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             <title>{`p̂ ${b.meanPredicted.toFixed(2)} · observed ${b.observed.toFixed(2)} · n=${b.n}`}</title>
           </circle>

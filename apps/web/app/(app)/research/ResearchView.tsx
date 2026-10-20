@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { EmptyState } from "../../../components/EmptyState";
 import { ErrorBar } from "../../../components/ErrorBar";
 import { FormGroup } from "../../../components/FormGroup";
+import { Flat } from "../../../components/pageParts";
+import { Button, Panel } from "../../../components/ui";
+import pg from "../../../components/page.module.css";
 import { hm } from "../../../components/fmt";
 import { FilterForm } from "../../../components/research/FilterForm";
 import { PreviewPane, type Match, type PreviewState } from "../../../components/research/PreviewPane";
@@ -88,7 +91,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     setErrors({}); setList((l) => [...l.filter((x) => x.id !== p.id), p].sort(byName));
     loaded.current = { key: p.id, at: p.updatedAt };
     if (isNew) { skipReset.current = p.id; router.replace(`/research?p=${p.id}`, { scroll: false }); }
-    setSaved(d); setDraft(d); setStatus({ tone: "pos", text: `saved ${hm(Date.now())}` });
+    setSaved(d); setDraft(d); setStatus({ tone: "up", text: `saved ${hm(Date.now())}` });
     router.refresh();
   };
 
@@ -108,7 +111,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     setBusy(false);
     if (res?.r.status !== 202) { setFail({ text: `Run failed: ${why(res)}`, retry: run }); return; }
     const n = (res.j?.queued ?? []).length;
-    setStatus(n ? { tone: "pos", text: `Queued ${n} market${n === 1 ? "" : "s"}`, fleet: true } : { tone: "muted", text: "0 markets matched — nothing queued" });
+    setStatus(n ? { tone: "up", text: `Queued ${n} market${n === 1 ? "" : "s"}`, fleet: true } : { tone: "muted", text: "0 markets matched — nothing queued" });
     router.refresh();
   };
 
@@ -165,43 +168,48 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
   const set = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
   const unplaced = Object.entries(errors).filter(([k]) => k === "" || !/^(name|everyMin|filter\.|steering\.)/.test(k)).map(([, v]) => v);
 
+  const empty = !rows.length;
   return (
-    <>
-      <div className={cx.head}>
+    <div className={pg.stack}>
+      <div className="page-h">
         <h1>Research</h1>
-        <button type="button" onClick={() => nav(NEW_ID)}>+ New profile<span className={cx.hint}>n</span></button>
+        <div className="r"><Button variant="primary" onClick={() => nav(NEW_ID)}>+ New profile <kbd>n</kbd></Button></div>
       </div>
       {researchDisabled && (
         <div className={`${ui.bar} ${ui.barWarn}`} role="status"><span className="warn">Research is disabled on this server. Profiles can be edited but nothing will run.</span></div>
       )}
       {fail && <ErrorBar message={fail.text} onRetry={fail.retry && (() => { setFail(null); fail.retry!(); })} onDismiss={() => setFail(null)} />}
+      {empty ? (
+        <Panel title="Profiles" label="profiles">
+          <EmptyState text="No research profiles yet" action={<Button onClick={() => nav(NEW_ID)}>Create profile</Button>} />
+          <p className={pg.line} style={{ color: "var(--muted)", paddingTop: 0 }}>Profiles pick which markets to research and how. The screener shortlist keeps running either way.</p>
+        </Panel>
+      ) : (
       <div className={cx.split}>
-        <section className={`pane ${cx.list}`} aria-label="profiles">
-          {rows.length
-            ? <ProfileTable profiles={rows} selected={key} onSelect={nav} onToggle={toggle} lockedId={dirty ? key : null} matchCounts={counts} onOpen={() => document.querySelector<HTMLInputElement>('[aria-label="profile name"]')?.focus()} />
-            : <EmptyState text="No research profiles yet." action={<button type="button" onClick={() => nav(NEW_ID)}>Create profile</button>} />}
-        </section>
+        <Panel title="Profiles" label="profiles" right={<span className="n">{list.length}</span>} className={cx.list}>
+          <Flat><ProfileTable profiles={rows} selected={key} onSelect={nav} onToggle={toggle} lockedId={dirty ? key : null} matchCounts={counts} onOpen={() => document.querySelector<HTMLInputElement>('[aria-label="profile name"]')?.focus()} /></Flat>
+        </Panel>
         <div className={cx.work} ref={editor} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); void save(); } }}>
           {!key ? (
-            <p className="muted ui">Profiles pick which markets to research and how. The screener shortlist keeps running either way.</p>
+            <p className={pg.hint}>Profiles pick which markets to research and how. The screener shortlist keeps running either way.</p>
           ) : (
             <>
               {pending && (
                 <div className={`${ui.bar} ${ui.barWarn}`} role="alert">
                   <span className="warn">Discard unsaved changes?</span>
-                  <button type="button" onClick={() => { const id = pending.id; setDraft(saved); setErrors({}); id ? go(id) : setPending(null); }}>Discard</button>
-                  <button type="button" onClick={() => setPending(null)}>Keep editing</button>
+                  <Button size="sm" onClick={() => { const id = pending.id; setDraft(saved); setErrors({}); id ? go(id) : setPending(null); }}>Discard</Button>
+                  <Button size="sm" onClick={() => setPending(null)}>Keep editing</Button>
                 </div>
               )}
               {stale && (
                 <div className={`${ui.bar} ${ui.barWarn}`} role="alert">
                   <span className="warn">Changed elsewhere — reload</span>
-                  <button type="button" onClick={() => { const d = current ? fromProfile(current) : newDraft(); loaded.current.at = current?.updatedAt ?? null; setSaved(d); setDraft(d); setStale(false); }}>Reload</button>
+                  <Button size="sm" onClick={() => { const d = current ? fromProfile(current) : newDraft(); loaded.current.at = current?.updatedAt ?? null; setSaved(d); setDraft(d); setStale(false); }}>Reload</Button>
                 </div>
               )}
               <ProfileToolbar key={key} name={draft.name} enabled={draft.enabled} nameError={errors.name} dirty={dirty} isNew={isNew} blocker={blocker(draft)} busy={busy} runDisabled={researchDisabled} status={status}
                 onName={(name) => set({ name })} onEnabled={(enabled) => set({ enabled })} onPreview={runPreview} onRun={run} onSave={save} onDelete={remove} />
-              {unplaced.map((m, i) => <p key={i} className="neg" role="alert">{m}</p>)}
+              {unplaced.map((m, i) => <ErrorBar key={i} message={m} />)}
               <FormGroup title="Filter" dirty={!same(draft.filter, saved.filter)}>
                 <FilterForm value={draft.filter} onChange={(filter) => set({ filter })} errors={scope(errors, "filter.")} categories={categories} />
               </FormGroup>
@@ -216,6 +224,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
           )}
         </div>
       </div>
-    </>
+      )}
+    </div>
   );
 }

@@ -11,13 +11,14 @@ const Q = z.object({
   filter: z.string().max(10_000).optional(), // FilterSchema JSON
   limit: z.coerce.number().int().min(1).max(1000).optional(),
   offset: z.coerce.number().int().min(0).optional(),
+  watchFirst: z.enum(["0", "1"]).optional(), // 1 = pinned and live-thesis rows ahead of the sort (/trade list)
 });
 
 // Auth: proxy.ts guards every /api route that is not explicitly public.
 export async function GET(req: Request) {
   const p = parse(Q, Object.fromEntries(new URL(req.url).searchParams));
   if (p.res) return p.res;
-  const { q, filter: raw, limit, offset } = p.data;
+  const { q, filter: raw, limit, offset, watchFirst } = p.data;
   if (q !== undefined && raw !== undefined) return json({ error: "pass q or filter, not both" }, 400);
   let filter: Filter;
   if (raw !== undefined) {
@@ -30,5 +31,5 @@ export async function GET(req: Request) {
     filter = r.filter;
   }
   const r = await getRead();
-  return json({ ...(await listMarkets(r.db, filter, r.now(), { limit, offset })), query: formatQuery(filter) });
+  return json({ ...(await listMarkets(r.db, filter, r.now(), { limit, offset, watchFirst: watchFirst === "1" })), query: formatQuery(filter) });
 }

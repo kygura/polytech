@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Drawer } from "../Drawer";
 import { ErrorBar } from "../ErrorBar";
@@ -14,6 +13,7 @@ import { ResultCard } from "./ResultCard";
 import { RunHeader } from "./RunHeader";
 import { blindMean, byRole, elapsedS, isLive } from "./runs";
 import panels from "../panels.module.css";
+import pg from "../page.module.css";
 import css from "./runs.module.css";
 
 export type PodDetail = NonNullable<Awaited<ReturnType<typeof read.podDetail>>>;
@@ -80,8 +80,7 @@ export function RunDetail({ initial, now }: { initial: PodDetail; now: number })
   const elapsed = elapsedS(d.pod, agents, t);
 
   return (
-    <div className={css.stack}>
-      <Link href="/runs" className={css.back}>{"←"} Runs</Link>
+    <div className={pg.stack}>
       <RunHeader pod={d.pod} elapsed={elapsed} costUsd={d.pod.cost.costUsd} tools={tools} budget={d.budget} cancelling={cancelling} onCancel={askCancel} />
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
       {d.pod.status === "failed" && <ErrorBar message={`Run failed at stage ${d.pod.stage ?? "start"}${failedAgent ? ` (${failedAgent.role}${typeof agentErr === "string" ? `: ${agentErr}` : ""})` : ""}`} />}

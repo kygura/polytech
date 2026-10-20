@@ -20,11 +20,12 @@ describe("g-chord map (DESIGN 13.7)", () => {
   });
   it("sheet: Global first, view scopes only on their view", () => {
     expect(shortcutsFor("/paper")[0]!.scope).toBe("Global");
-    expect(shortcutsFor("/paper").map((s) => s.scope)).not.toContain("Market page");
     expect(shortcutsFor("/paper").map((s) => s.scope)).not.toContain("Trade");
     expect(shortcutsFor("/trade").map((s) => s.scope)).toEqual(["Global", "Lists", "Alerts drawer", "Trade"]);
     expect(shortcutsFor("/trade/0xabc").map((s) => s.scope)).toContain("Trade");
-    expect(shortcutsFor("/markets/0xabc").map((s) => s.scope)).toContain("Market page");
-    expect(shortcutsFor("/markets").map((s) => s.scope)).not.toContain("Market page");
+    expect(shortcutsFor("/markets/0xabc").map((s) => s.scope)).not.toContain("Market page"); // that route redirects to /trade/[id]
+    const trade = SHORTCUTS.find((s) => s.scope === "Trade")!.keys.map(([k]) => k);
+    expect(trade).toEqual(expect.arrayContaining(["1 2 3 4", "e", "[ / ]", "f", "p / m / r", "Shift S"]));
+    expect(trade).not.toContain("p / o");
   });
 });

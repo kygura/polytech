@@ -13,7 +13,8 @@ import { ModeSelector } from "../../../components/ModeSelector";
 import { RiskLimits } from "../../../components/RiskLimits";
 import { killError, postKill, type Proposal, type Recon, type SetView } from "../../../components/live";
 import type { read } from "../../../lib/jobs";
-import css from "../../../components/panels.module.css";
+import pg from "../../../components/page.module.css";
+import { Panel } from "../../../components/ui";
 
 export type Autonomy = Awaited<ReturnType<typeof read.autonomy>> & { liveOpenOrders?: number; recon?: Recon | null };
 type Proposals = { pending: Proposal[]; recent: Proposal[]; sets?: { pending: SetView[]; recent: SetView[] } };
@@ -70,23 +71,25 @@ export function AutonomyView({ data, proposals }: { data: Autonomy; proposals: P
   const flagged = sets.recent.filter((s) => s.state === "flagged");
 
   return (
-    <div className={css.stack}>
+    <div className={pg.stack}>
+      <div className="page-h">
+        <h1>Autonomy</h1>
+        <div className="r">
+          <ModeSelector mode={data.mode} enabledModes={enabled} reasons={{ L2: EX_WHY, L3: EX_WHY, L4: EX_WHY }} onChange={setMode} />
+        </div>
+      </div>
+      {!ex && <p className={pg.hint} style={{ marginTop: "calc(-1 * var(--sp-2))" }}>{EX_WHY}</p>}
+      {err && <ErrorBar message={err} onDismiss={() => setErr(null)} />}
       {killErr && <ErrorBar message={killErr} onRetry={() => void kill()} onDismiss={() => setKillErr(null)} />}
       {flagged.length > 0 && <div id="flagged">{flagged.map((s) => <FlaggedSetBar key={s.id} set={s} onAck={ack} />)}</div>}
-      <section className="pane">
-        <h2>Mode</h2>
-        <ModeSelector mode={data.mode} enabledModes={enabled} reasons={{ L2: EX_WHY, L3: EX_WHY, L4: EX_WHY }}
-          note={ex ? null : EX_WHY} onChange={setMode} />
-        {err && <p className={`neg ${css.line}`} role="alert" style={{ margin: 0 }}>{err}</p>}
-      </section>
       <ApprovalsPane mode={data.mode} pending={pending} recent={proposals.recent} sets={setsShown} l3={data.limits.l3} recon={data.recon} onDecide={decide} />
       <CategoryOverrides rows={data.categories} mode={data.mode} onChange={setOverride} />
       <RiskLimits limits={data.limits} usage={data.usage} />
       <GatePanel gates={data.gates} />
-      <section>
+      <Panel title="Kill switch" pad>
         <KillSwitchButton mode={data.mode} liveOpenOrders={data.liveOpenOrders ?? 0} onKill={kill} wide />
-        <p className="muted ui" style={{ margin: "var(--sp-1) 0 0" }}>Drops to L0 and cancels all open orders. Immediate. No undo. Logged to autonomy_events.</p>
-      </section>
+        <p className={pg.hint} style={{ margin: "var(--sp-2) 0 0" }}>Drops to L0 and cancels all open orders. Immediate. No undo. Logged to autonomy_events.</p>
+      </Panel>
       <EventLog events={data.events} />
     </div>
   );

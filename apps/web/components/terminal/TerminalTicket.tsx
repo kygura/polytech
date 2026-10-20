@@ -239,7 +239,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
 
         <div className={css.fld}>
           <label htmlFor="tk-shares"><span>Shares</span><span>
-            {loaded && n != null && p01 != null && <>= <span className={css.n} style={{ color: "var(--t-text)" }}>{usd(n * roundTick(side, p01, tick))}</span> · </>}
+            {loaded && n != null && p01 != null && <>= <span className={css.n} style={{ color: "var(--text)" }}>{usd(n * roundTick(side, p01, tick))}</span> · </>}
             Balance {c.balance == null ? "—" : usd(c.balance)}
           </span></label>
           <div className={`${css.inp} ${!editable ? css.dis : ""} ${loaded && shares !== "" && shareErr ? css.err : ""}`}>
