@@ -46,6 +46,14 @@ export function fixtureCall(host: Host, path: string, { params: p = {}, body }: 
   }
   if (host === "clob") {
     if (path === "/books") return tokenReqs().flatMap((t) => books()[t] ?? []);
+    if (path === "/book") return books()[String(p.token_id)] ?? notFound(path);
+    if (path.startsWith("/clob-markets/")) {
+      const cond = decodeURIComponent(path.slice(14));
+      const toks = Object.values(books()).filter((b: any) => b.market === cond);
+      if (!toks.length) return notFound(path);
+      const fee = load("fees")[toks[0].asset_id];
+      return { c: cond, t: toks.map((b: any) => ({ t: b.asset_id, o: b.asset_id === toks[0].asset_id ? "Yes" : "No" })), mos: Number(toks[0].min_order_size), mts: Number(toks[0].tick_size), ao: true, ...(fee ? { fd: { r: fee / 1e4, e: 1, to: true } } : {}) };
+    }
     if (path === "/midpoints") return Object.fromEntries(tokenReqs().flatMap((t) => (books()[t] ? [[t, mid(books()[t]).toFixed(4)]] : [])));
     if (path === "/spreads") return Object.fromEntries(tokenReqs().flatMap((t) => { const b = books()[t]; return b ? [[t, (Number(b.asks.at(-1).price) - Number(b.bids.at(-1).price)).toFixed(4)]] : []; }));
     if (path === "/last-trades-prices") return tokenReqs().flatMap((t) => (books()[t] ? [{ token_id: t, price: mid(books()[t]).toFixed(2), side: "BUY" }] : []));
@@ -54,10 +62,16 @@ export function fixtureCall(host: Host, path: string, { params: p = {}, body }: 
     if (path === "/tick-size") return { minimum_tick_size: String(books()[String(p.token_id)]?.tick_size ?? notFound(path)) };
   }
   if (host === "data") {
-    const conds = csv(p.market);
-    if (path === "/holders") return conds.flatMap((c) => load("holders")[c] ?? []);
-    if (path === "/oi") return Object.entries(load("oi") as Record<string, number>).filter(([c]) => !conds.length || conds.includes(c)).map(([market, value]) => ({ market, value }));
-    if (path === "/trades") return (load("trades") as any[]).filter((t) => !conds.length || conds.includes(t.conditionId)).slice(Number(p.offset ?? 0), Number(p.offset ?? 0) + Number(p.limit ?? 100));
+    // v2 shape: {data: [...]} (rows stay camelCase here; the normalizers accept both spellings)
+    const conds = csv(p.condition ?? p.market);
+    if (path === "/v2/holders") return { data: conds.flatMap((c) => load("holders")[c] ?? []) };
+    if (path === "/v2/oi") return { data: Object.entries(load("oi") as Record<string, number>).filter(([c]) => !conds.length || conds.includes(c)).map(([condition_id, value]) => ({ condition_id, value })) };
+    if (path === "/v2/trades") {
+      const rows = (load("trades") as any[]).filter((t) => !conds.length || conds.includes(t.conditionId));
+      const start = dec(p.cursor), limit = Number(p.limit ?? 100);
+      const page = rows.slice(start, start + limit);
+      return { data: page, pagination: start + limit < rows.length ? { has_more: true, next_cursor: enc(start + limit) } : { has_more: false, next_cursor: null } };
+    }
   }
   return notFound(`${host} ${path}`);
 }

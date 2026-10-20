@@ -163,7 +163,10 @@ describe("fixture client", () => {
     expect((await pm.holders([l2.condition_id]))[0]!.holders.length).toBeGreaterThan(0);
     expect((await pm.trades({ market: [l2.condition_id] })).length).toBeGreaterThan(0);
     expect(Object.keys(await pm.oi([l2.condition_id]))).toEqual([l2.condition_id]);
-    expect((await pm.pricesHistory({ token: l2.yes_token_id! })).length).toBeGreaterThan(10);
+    expect((await pm.pricesHistory({ token: l2.yes_token_id!, interval: "1w" })).length).toBeGreaterThan(10);
+    expect((await pm.clobMarket(l2.condition_id))!.tokens.map((t) => t.token_id)).toContain(l2.yes_token_id);
+    expect((await pm.book(l2.yes_token_id!))!.token_id).toBe(l2.yes_token_id);
+    expect(await pm.book("no-such-token")).toBeUndefined();
     expect(await pm.feeRateBps(l2.yes_token_id!)).toBe(700);
     expect(await pm.tickSize(l2.yes_token_id!)).toBe(0.01);
     expect(Object.keys(await pm.spreads([l2.yes_token_id!]))).toHaveLength(1);
@@ -174,7 +177,7 @@ describe("fixture client", () => {
   });
   it("network failures after retries are marked like HTTP failures", async () => {
     const pm = createPm({ fixtures: false, fetch: (async () => { throw new TypeError("fetch failed"); }) as never, sleep: async () => {} });
-    await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/oi -> network fetch failed/);
+    await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/v2\/oi -> network fetch failed/);
   });
 });
 

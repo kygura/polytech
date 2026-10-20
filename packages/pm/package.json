@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./exchange": "./src/exchange.ts"
+    "./exchange": "./src/exchange.ts",
+    "./ws": "./src/ws.ts"
   },
   "scripts": {
     "test": "vitest run",
