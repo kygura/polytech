@@ -1,7 +1,7 @@
 import { formatQuery, parseQuery, type Filter } from "@pm/core";
 import { describe, expect, it } from "vitest";
 import { HEADER_H, minTableWidth, scrollTopForRow, virtualWindow } from "../virtual";
-import { ageLabel, usdShort, buildColumns, cleanCols, COLUMNS, daysLeft, DEFAULT_COLS } from "./columns";
+import { ageLabel, usdShort, buildColumns, cleanCols, COLUMNS, daysLeft, DEFAULT_COLS, pickCols } from "./columns";
 import { acceptHint, applySuggestion, classify, defaultQuery, errorAt, hintContext, hintItems, nextSorts, pagedQuery, setSortInQuery } from "./dsl";
 import { addChip, fmtBound, parseBound, removeChip, setBound, toggleValue, triGet, triSet } from "./filter";
 
@@ -239,6 +239,13 @@ describe("columns", () => {
   it("every non-flex column has a width (fixed layout)", () => {
     for (const c of COLUMNS) expect(Boolean(c.width) || c.id === "market").toBe(true);
     expect(buildColumns(["market", "mid"], { now: 0, researching: new Set() }).map((c) => c.id)).toEqual(["market", "mid"]);
+  });
+  it("pickCols: a saved view's columns beat localStorage, which beats the defaults", () => {
+    const ls = JSON.stringify(["liq", "mid"]);
+    expect(pickCols(["prio", "mid"], ls)).toEqual(["prio", "mid"]);
+    expect(pickCols([], ls)).toEqual(["liq", "mid"]);
+    expect(pickCols(undefined, "{bad")).toEqual(DEFAULT_COLS);
+    expect(pickCols(undefined, null)).toEqual(DEFAULT_COLS);
   });
   it("cleanCols drops unknown and repeated ids, empty -> default", () => {
     expect(cleanCols(["mid", "nope", "mid", "liq"])).toEqual(["mid", "liq"]);

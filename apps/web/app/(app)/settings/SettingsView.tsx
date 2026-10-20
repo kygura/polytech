@@ -82,7 +82,7 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
       </Field>
     );
   };
-  const group = (g: Group, children: ReactNode) => <FormGroup key={g} id={g === "Calibration" ? "calibration" : undefined} title={g} dirty={dirty(g)} onSave={() => save(g)}>{children}</FormGroup>;
+  const group = (g: Group, children: ReactNode) => <FormGroup key={g} id={g === "Calibration" || g === "Budget" ? g.toLowerCase() : undefined} title={g} dirty={dirty(g)} onSave={() => save(g)}>{children}</FormGroup>;
 
   return (
     <>

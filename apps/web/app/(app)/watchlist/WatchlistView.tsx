@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertsList } from "../../../components/AlertsList";
 import { alertHref, type Alert } from "../../../components/alerts";
 import { ErrorBar } from "../../../components/ErrorBar";
@@ -74,12 +74,16 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
   const [showAcked, setShowAcked] = useState(false);
   const [alertsTick, setAlertsTick] = useState(0);
   useSse((e) => { if (e.type === "alert.created" || e.type === "alert.acked") setAlertsTick((n) => n + 1); });
+  const alertList = useRef<HTMLUListElement>(null);
   const alerts = useAlerts({ enabled: true, showAcked: tab === "alerts" && showAcked, refreshKey: alertsTick });
   const openAlert = useCallback((a: Alert) => {
     if (a.ackedAt == null) void alerts.ack(a.id);
     const href = alertHref(a);
     if (href) router.push(href);
   }, [alerts, router]);
+  // Keys j/k/Enter/a/A act on the list while it has focus (as in the drawer): focus it when the tab opens and rows arrive.
+  const alertRows = alerts.rows.length;
+  useEffect(() => { if (tab === "alerts" && alertRows) alertList.current?.focus(); }, [tab, alertRows > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   const stale = lastSnapshotAt == null || now - lastSnapshotAt > STALE_MS;
   const q = filter.trim().toLowerCase();
 
@@ -113,7 +117,7 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
     <div style={{ maxWidth: 720 }}>
       {alerts.error && <ErrorBar message={alerts.error} onRetry={() => { alerts.clearError(); void alerts.reload(); }} onDismiss={alerts.clearError} />}
       {alerts.loaded || alerts.rows.length
-        ? <section className="pane"><AlertsList rows={alerts.rows} emptyText={showAcked ? "Nothing acked yet." : "No alerts."} onAck={(id) => void alerts.ack(id)} onAckAll={() => void alerts.ack()} onOpen={openAlert} /></section>
+        ? <section className="pane"><AlertsList rows={alerts.rows} listRef={alertList} emptyText={showAcked ? "Nothing acked yet." : "No alerts."} onAck={(id) => void alerts.ack(id)} onAckAll={() => void alerts.ack()} onOpen={openAlert} /></section>
         : !alerts.error && <p className="muted ui">Loading…</p>}
     </div>
   ) : tab === "structural" ? (
@@ -133,7 +137,8 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
         {tab === "alerts" ? (
           <div className={css.right}>
             <label className={css.check}><input type="checkbox" checked={showAcked} onChange={(e) => setShowAcked(e.target.checked)} /> show acked</label>
-            <span className="muted" title="the same list as the right-hand drawer">drawer <kbd>g</kbd> <kbd>n</kbd></span>
+            {alerts.unacked > 0 && <button type="button" onClick={() => void alerts.ack()}>ack all (A)</button>}
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("pm:alerts-open"))} title="the same list as the right-hand drawer (g n)">open drawer</button>
           </div>
         ) : (
           <div className={css.right}>

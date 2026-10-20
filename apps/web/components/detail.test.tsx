@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { backTarget } from "./BackLink";
+import { backTarget, listOf } from "./BackLink";
 import { HeaderBadges, structuralReason } from "./MarketHeader";
 import { MetricsGrid } from "./MetricsGrid";
 import { stepRange } from "./PriceHistoryPane";
@@ -68,12 +68,12 @@ describe("MetricsGrid", () => {
   });
 });
 
-describe("backTarget", () => {
-  it("watchlist referrer goes back to the watchlist, everything else to the screener", () => {
-    expect(backTarget("https://x.test/watchlist?tab=size", "https://x.test")).toBe("/watchlist");
-    expect(backTarget("https://x.test/markets?q=a", "https://x.test")).toBe("/markets");
-    expect(backTarget("https://evil.test/watchlist", "https://x.test")).toBe("/markets");
-    expect(backTarget("", "https://x.test")).toBe("/markets");
-    expect(backTarget("https://x.test/watchlistx", "https://x.test")).toBe("/markets");
+describe("BackLink helpers", () => {
+  it("only an exact list route is remembered; unknown stored values fall back to the screener", () => {
+    expect(["/markets", "/watchlist", "/runs", "/journal", "/runs/abc", "/markets/0x1", "/settings"].map(listOf)).toEqual(["/markets", "/watchlist", "/runs", "/journal", null, null, null]);
+    expect(backTarget("/watchlist")).toBe("/watchlist");
+    expect(backTarget("/runs")).toBe("/runs");
+    expect(backTarget("https://evil.test/watchlist")).toBe("/markets");
+    expect(backTarget(null)).toBe("/markets");
   });
 });

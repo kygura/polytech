@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SseStatus } from "../components/SseIndicator";
 
-export const SSE_EVENTS = ["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.stage", "pod.agent", "pod.failed", "pod.done", "pod.cancelled", "thesis.created", "mode.changed", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated", "alert.created", "alert.acked"] as const;
+export const SSE_EVENTS = ["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.stage", "pod.agent", "pod.failed", "pod.done", "pod.cancelled", "thesis.created", "mode.changed", "paper.fill", "paper.close", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated", "alert.created", "alert.acked"] as const;
 export type SseEvent = { type: (typeof SSE_EVENTS)[number]; payload: Record<string, unknown>; ts: number };
 
 /** One EventSource on /api/stream. `onEvent` receives typed events; ping keeps the status live. */

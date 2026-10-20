@@ -9,7 +9,7 @@ import { Skeleton } from "../Skeleton";
 import { STALE_MS } from "../StaleBanner";
 import { CHORD_MS } from "../../hooks/useGlobalKeys";
 import ui from "../ui.module.css";
-import { buildColumns, cleanCols, colOfField, DEFAULT_COLS, sortFieldOf } from "./columns";
+import { buildColumns, cleanCols, colOfField, DEFAULT_COLS, pickCols, sortFieldOf } from "./columns";
 import { DEFAULT_SORT, nextSorts, pagedQuery, setSortInQuery } from "./dsl";
 import { FilterPanel } from "./FilterPanel";
 import { ColsMenu, ConfirmSheet, NameSheet, ViewMenu } from "./menus";
@@ -73,11 +73,8 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   useEffect(() => {
     setNow(Date.now());
     if (store.get("pm.screener.panel") === "0") setPanel(false);
-    try {
-      const saved = store.get(`pm.cols.${initial.viewId}`);
-      if (saved) setCols(cleanCols(JSON.parse(saved)));
-    } catch { /* corrupt entry: keep the view's columns */ }
-  }, [initial.viewId]);
+    setCols(pickCols(initialViews.find((v) => v.id === initial.viewId)?.columns, store.get(`pm.cols.${initial.viewId}`))); // a saved view's columns win over localStorage
+  }, [initial.viewId]); // eslint-disable-line react-hooks/exhaustive-deps -- initialViews changes on every refresh; only a view switch resets columns
 
   // valid parse -> fetch after 250 ms (invalid parse fetches nothing; the last good rows stay, dimmed)
   useEffect(() => {
@@ -155,10 +152,7 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   }
 
   const applyCols = (v: SavedView | undefined, id: string) => {
-    const saved = store.get(`pm.cols.${id}`);
-    let c: string[] | null = v?.columns.length ? cleanCols(v.columns) : null;
-    if (!c && saved) try { c = cleanCols(JSON.parse(saved)); } catch { /* ignore */ }
-    setCols(c ?? DEFAULT_COLS);
+    setCols(pickCols(v?.columns, store.get(`pm.cols.${id}`)));
   };
   const pick = (id: string) => {
     const v = views.find((x) => x.id === id);

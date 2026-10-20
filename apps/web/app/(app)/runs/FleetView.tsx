@@ -10,8 +10,8 @@ export function FleetView({ data, now }: { data: Fleet; now: number }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
   const [t, setT] = useState(now);
-  // The shell refreshes on pod.started/done/failed; agent-level progress needs pod.agent too.
-  useSse((e) => { if (e.type === "pod.agent") router.refresh(); });
+  // Any pod.* event (stage, agent, cancelled, ...) moves a row; the shell's debounced refresh only covers lifecycle events.
+  useSse((e) => { if (e.type.startsWith("pod.")) router.refresh(); });
   useEffect(() => { const id = setInterval(() => setT(Date.now()), 1000); return () => clearInterval(id); }, []);
   // Ids present at mount; anything later is "new" and gets the one allowed flash.
   const seen = useRef<Set<string> | null>(null);

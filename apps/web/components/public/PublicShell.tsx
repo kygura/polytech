@@ -2,14 +2,15 @@
 // Visitor shell (DESIGN 10.1): no operator state, no /api/autonomy, no EventSource. Owns the wallet provider.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useClob } from "../../hooks/useClob";
 import { useGlobalKeys } from "../../hooks/useGlobalKeys";
+import { useOperator } from "../../hooks/useOperator";
 import { useTheme } from "../../hooks/useTheme";
 import { useWallet, useWalletConnection, WalletContext } from "../../hooks/useWallet";
 import { Drawer } from "../Drawer";
 import { isTerminal, terminalNav } from "../../lib/terminalPath";
-import { TERMINAL_SHORTCUTS } from "../terminal/shortcuts";
+import { terminalShortcuts } from "../terminal/shortcuts";
 import shell from "../Shell.module.css";
 import ui from "../ui.module.css";
 import css from "./public.module.css";
@@ -31,9 +32,10 @@ export function PublicShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const sheet = useRef<HTMLDialogElement>(null);
   const { toggle } = useTheme();
-  useGlobalKeys({ onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []), onTheme: toggle, go: GO, canGo });
-
   const terminal = isTerminal(path); // the terminal (DESIGN 11) brings its own top bar and disclaimer
+  const operator = useOperator(terminal);
+  const go = useMemo(() => (operator ? { ...GO, o: "/markets" } : GO), [operator]); // g o only for an operator session
+  useGlobalKeys({ onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []), onTheme: toggle, go, canGo });
   return (
       <WalletContext.Provider value={{ ...wallet, clob }}>
         {terminal ? children : <>
@@ -54,7 +56,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
         </>}
         <dialog ref={sheet} className={shell.sheet} aria-label="keyboard shortcuts">
           <h2>Shortcuts</h2>
-          <table><tbody>{(terminal ? TERMINAL_SHORTCUTS : SHORTCUTS).map(([k, d]) => <tr key={k}><th scope="row">{k}</th><td className="ui muted">{d}</td></tr>)}</tbody></table>
+          <table><tbody>{(terminal ? terminalShortcuts(operator) : SHORTCUTS).map(([k, d]) => <tr key={k}><th scope="row">{k}</th><td className="ui muted">{d}</td></tr>)}</tbody></table>
           <p className="muted ui" style={{ margin: "var(--sp-2) 0 0" }}>Esc closes</p>
         </dialog>
       </WalletContext.Provider>

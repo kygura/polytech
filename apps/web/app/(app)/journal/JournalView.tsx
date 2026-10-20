@@ -56,41 +56,38 @@ export function JournalView({ data, filters, categories, models, extremize }: { 
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
         </label>
       </div>
-      {s.resolved === 0 ? <EmptyState text="No resolved theses yet. Edge is measured forward; rows appear as markets resolve." /> : (
-        <>
-          <KpiStrip s={s} hist={hist} />
-          <div className={css.half} style={{ marginBottom: "var(--sp-3)" }}>
-            <section className="pane">
-              <h2>Reliability</h2>
-              <div className={`body ${j.wm}`}>
-                <Mark n={s.resolved} />
-                <ReliabilityChart bins={bins} />
-                {s.brierModel != null && s.brierMarket != null && <p className={css.line} style={{ margin: 0 }}>
-                  Brier {s.brierModel.toFixed(3)} {"·"} log loss {s.logLoss == null ? "—" : s.logLoss.toFixed(2)} {"·"} n {s.resolved} {"·"} market Brier {s.brierMarket.toFixed(3)} {"·"} Δ <Delta ours={s.brierModel} market={s.brierMarket} />
-                </p>}
-              </div>
-            </section>
-            <section className="pane">
-              <h2>Paper P&amp;L</h2>
-              <div className={`body ${j.wm}`}><Mark n={s.resolved} /><PnlCurve series={s.pnlSeries} /></div>
-            </section>
+      {s.resolved === 0 && <EmptyState text="No resolved theses yet. Edge is measured forward; rows appear as markets resolve." />}
+      <KpiStrip s={s} hist={hist} />
+      <div className={css.half} style={{ marginBottom: "var(--sp-3)" }}>
+        <section className="pane">
+          <h2>Reliability</h2>
+          <div className={`body ${j.wm}`}>
+            <Mark n={s.resolved} />
+            <ReliabilityChart bins={bins} />
+            {s.brierModel != null && s.brierMarket != null && <p className={css.line} style={{ margin: 0 }}>
+              Brier {s.brierModel.toFixed(3)} {"·"} log loss {s.logLoss == null ? "—" : s.logLoss.toFixed(2)} {"·"} n {s.resolved} {"·"} market Brier {s.brierMarket.toFixed(3)} {"·"} Δ <Delta ours={s.brierModel} market={s.brierMarket} />
+            </p>}
           </div>
-          <div className={css.half} style={{ marginBottom: "var(--sp-3)" }}>
-            <section className="pane">
-              <h2>Brier {"·"} model vs market vs pre-reveal <span className={j.legend}>{"—"} model {" ╌ "} market {" ⋯ "} pre-reveal</span></h2>
-              <div className={`body ${j.wm}`}>
-                <Mark n={s.resolved} />
-                {rolling.length ? <BrierCompareChart points={rolling} /> : <EmptyState text={`Rolling Brier needs ${ROLLING} resolved theses (n=${s.resolved}).`} />}
-              </div>
-            </section>
-            <section className="pane">
-              <h2>Drift toward p̂ <span className={j.legend}>24h / 7d, ¢</span></h2>
-              <div className={`body ${j.wm}`}><Mark n={s.resolved} /><DriftHistogram hist={hist} /></div>
-            </section>
+        </section>
+        <section className="pane">
+          <h2>Paper P&amp;L</h2>
+          <div className={`body ${j.wm}`}><Mark n={s.resolved} /><PnlCurve series={s.pnlSeries} /></div>
+        </section>
+      </div>
+      <div className={css.half} style={{ marginBottom: "var(--sp-3)" }}>
+        <section className="pane">
+          <h2>Brier {"·"} model vs market vs pre-reveal <span className={j.legend}>{"—"} model {" ╌ "} market {" ⋯ "} pre-reveal</span></h2>
+          <div className={`body ${j.wm}`}>
+            <Mark n={s.resolved} />
+            {rolling.length ? <BrierCompareChart points={rolling} /> : <EmptyState text={`Rolling Brier needs ${ROLLING} resolved theses (n=${s.resolved}).`} />}
           </div>
-          <BreakdownTable rows={groups} label={groupLabel} minN={filters.minN} />
-        </>
-      )}
+        </section>
+        <section className="pane">
+          <h2>Drift toward p̂ <span className={j.legend}>24h / 7d, ¢</span></h2>
+          <div className={`body ${j.wm}`}><Mark n={s.resolved} /><DriftHistogram hist={hist} /></div>
+        </section>
+      </div>
+      <BreakdownTable rows={groups} label={groupLabel} minN={filters.minN} />
       {suggested && (
         <p className={`${ui.bar} ${ui.barWarn}`} style={{ marginTop: "var(--sp-3)" }} role="status">
           <span>Refit suggested from n={suggested.n}: extremize {extremize.toFixed(2)} {"→"} {suggested.extremize.toFixed(2)} {"·"} <Link href="/settings#calibration">apply in Settings {"→"}</Link></span>

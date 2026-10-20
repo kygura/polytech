@@ -97,6 +97,13 @@ export function cleanCols(ids: unknown): string[] {
   return out.length ? out : DEFAULT_COLS;
 }
 
+/** Column ids for a view: its own saved columns win, then the localStorage entry (JSON text), then the defaults. */
+export function pickCols(viewCols: unknown, saved: string | null): string[] {
+  if (Array.isArray(viewCols) && viewCols.length) return cleanCols(viewCols);
+  if (saved) try { return cleanCols(JSON.parse(saved)); } catch { /* corrupt entry */ }
+  return DEFAULT_COLS;
+}
+
 export const sortFieldOf = (colId: string) => BY_ID.get(colId)?.sortField;
 export const colOfField = (field: SortField, ids: string[]) => ids.find((id) => BY_ID.get(id)?.sortField === field);
 

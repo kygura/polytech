@@ -221,7 +221,7 @@ describe("GET /api/status", () => {
     await db.insert(S.spend).values({ day: new Date(NOW).toISOString().slice(0, 10), anthropicUsd: 1.5 });
     await db.insert(S.alerts).values({ kind: "mid_move", message: "x" });
     const r = await (await h.status.GET()).json();
-    expect(r).toEqual({ activeRuns: 1, spendToday: { usd: 1.5, capUsd: 50 }, lastSnapshotAt: NOW, lastSweepAt: null, unackedAlerts: 1, mode: "L0" });
+    expect(r).toEqual({ activeRuns: [{ id: "pod1", stage: null, question: expect.any(String) }], activeRunCount: 1, spendToday: { usd: 1.5, capUsd: 50 }, lastSnapshotAt: NOW, lastSweepAt: null, unackedAlerts: 1, mode: "L0" });
   });
 });
 
@@ -237,6 +237,6 @@ describe("GET /api/session + proxy", () => {
   const via = async (path: string) => (await h.proxy.proxy(new (await import("next/server")).NextRequest(`http://x${path}`))).status;
   it("proxy: /api/session public, every new route still requires auth", async () => {
     expect(await via("/api/session")).toBe(200);
-    for (const p of ["/api/markets", "/api/views", "/api/alerts", "/api/alerts/1/ack", "/api/alerts/ack-all", "/api/journal", "/api/status"]) expect(await via(p), p).toBe(401);
+    for (const p of ["/api/markets", "/api/views", "/api/alerts", "/api/alerts/1/ack", "/api/alerts/ack-all", "/api/journal", "/api/status", "/api/pods/pod_x", "/api/pods/pod_x/cancel", "/api/markets/0xabc/history"]) expect(await via(p), p).toBe(401);
   });
 });

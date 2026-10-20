@@ -7,6 +7,9 @@ describe("status bar helpers", () => {
     expect(a).toMatchObject({ runs: 2, spendUsd: 4.12, capUsd: 25, snapshotAt: 1000, sweepAt: null, unacked: 3 });
     const b = parseStatus({ activeRuns: [{ id: "abcdef0123456789", stage: "debate", question: "Will X?" }], spendTodayUsd: 1, dailyCapUsd: 2, lastSnapshotAt: "1970-01-01T00:00:01.000Z" });
     expect(b).toMatchObject({ runs: 1, pods: ["abcdef01 · debate · Will X?"], spendUsd: 1, capUsd: 2, snapshotAt: 1000, unacked: 0 });
+    // server shape: capped list + true count; tooltip lines come from the list
+    const c = parseStatus({ activeRuns: [{ id: "abcdef0123456789", stage: "agents", question: "Will X?" }, { id: "99", stage: null, question: null }], activeRunCount: 12 });
+    expect(c).toMatchObject({ runs: 12, pods: ["abcdef01 · agents · Will X?", "99 · ? · "] });
     expect(parseStatus(null)).toBeNull();
     expect(parseStatus({ error: "x" })).toMatchObject({ runs: 0, spendUsd: null });
   });

@@ -8,11 +8,13 @@ import { publish } from "./events";
 import { calibration, type ReadDeps } from "./read";
 import { getSettings } from "./settings";
 
-// ---------------------------------------------------------------- status bar (cheap: counts, one max, two single-row reads)
+// ---------------------------------------------------------------- status bar (cheap: counts, one max, a few single-row reads)
 export async function status(r: ReadDeps) {
   const { db } = r, now = r.now();
-  const [[runs], [snap], [sp], [un], st, mode, sweptAt] = await Promise.all([
+  const [[runs], live, [snap], [sp], [un], st, mode, sweptAt] = await Promise.all([
     db.select({ n: count() }).from(s.pods).where(eq(s.pods.status, "running")),
+    db.select({ id: s.pods.id, stage: s.pods.stage, question: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId))
+      .where(eq(s.pods.status, "running")).orderBy(desc(s.pods.startedAt)).limit(10),
     db.select({ t: max(s.marketLatest.ts) }).from(s.marketLatest),
     db.select({ usd: s.spend.anthropicUsd }).from(s.spend).where(eq(s.spend.day, today(now))),
     db.select({ n: count() }).from(s.alerts).where(isNull(s.alerts.ackedAt)),
@@ -21,7 +23,8 @@ export async function status(r: ReadDeps) {
     getKv().get<number>(KICK_AT),
   ]);
   return {
-    activeRuns: runs?.n ?? 0,
+    activeRuns: live, // newest 10 live pods for the status bar tooltip
+    activeRunCount: runs?.n ?? 0,
     spendToday: { usd: sp?.usd ?? 0, capUsd: st.budget.dailySpendCapUsd },
     lastSnapshotAt: snap?.t?.getTime() ?? null,
     lastSweepAt: sweptAt ?? null,
@@ -62,5 +65,5 @@ export async function journalView(r: ReadDeps, o: { category?: string; model?: s
     .orderBy(desc(sql`coalesce(${s.theses.createdAt}, ${s.journal.resolvedAt})`));
   const jr: JournalRow[] = rows.map(({ j }) => ({ ...j, model: j.model ?? "unknown", pHat: j.pHat!, side: j.side === "NO" ? "NO" : "YES", result: j.result === "YES" || j.result === "NO" ? j.result : null }));
   const [cal, st] = await Promise.all([calibration(r, { category: o.category, model: o.model, sinceDays: o.days }), getSettings(db)]);
-  return { summary: summarize(jr), rows: jr.slice(0, 200), bins: cal.bins, suggested: st.suggested };
+  return { summary: summarize(jr), rows: jr.slice(0, 5000) /* the client computes rolling Brier / drift / breakdown from these: no 200-row cap */, bins: cal.bins, suggested: st.suggested };
 }

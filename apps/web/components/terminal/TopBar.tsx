@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState, type RefObject } from "react";
+import type { RefObject } from "react";
+import { useOperator } from "../../hooks/useOperator";
 import type { FeedSource, FeedStatus } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
 import { ConnectButton } from "../public/PublicShell";
@@ -22,17 +23,6 @@ type Props = {
   /** An order is mid-send: the logo link must not navigate; `onBlocked` explains why. */
   locked: boolean; onBlocked: () => void;
 };
-
-/** DESIGN 12.1.4: `GET /api/session` once on mount; the `← Operator` link renders only for an operator session. Any failure = anonymous. */
-function useOperator() {
-  const [operator, setOperator] = useState(false);
-  useEffect(() => {
-    let live = true;
-    fetch("/api/session").then((r) => (r.ok ? r.json() : null)).then((j) => { if (live && j?.operator === true) setOperator(true); }).catch(() => {});
-    return () => { live = false; };
-  }, []);
-  return operator;
-}
 
 export function TopBar({ feedStatus, feedSource, feedAt, now, balance, query, onQuery, onSearchFocus, onSearchKey, searchRef, locked, onBlocked }: Props) {
   const operator = useOperator();

@@ -20,14 +20,14 @@ const ms = (v: unknown): number | null => {
 };
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** GET /api/status -> OpStatus. `activeRuns` may be a count or a `{id, stage, question}[]` list; timestamps may be epoch ms or ISO. Anything unusable -> null. */
+/** GET /api/status -> OpStatus. `activeRuns` may be a count or a `{id, stage, question}[]` list (then `activeRunCount`, when present, is the true total); timestamps may be epoch ms or ISO. Anything unusable -> null. */
 export function parseStatus(raw: unknown): OpStatus | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const list = Array.isArray(r.activeRuns) ? (r.activeRuns as Record<string, unknown>[]) : null;
   const spend = (r.spendToday ?? {}) as Record<string, unknown>;
   return {
-    runs: list ? list.length : (num(r.activeRuns) ?? 0),
+    runs: num(r.activeRunCount) ?? (list ? list.length : (num(r.activeRuns) ?? 0)),
     pods: (list ?? []).map((p) => `${String(p.id ?? "").slice(0, 8)} · ${p.stage ?? "?"} · ${p.question ?? ""}`),
     spendUsd: num(spend.usd) ?? num(r.spendTodayUsd),
     capUsd: num(spend.capUsd) ?? num(r.dailyCapUsd),

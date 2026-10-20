@@ -8,11 +8,13 @@ import { useOpStatus } from "../hooks/useOpStatus";
 import { useSse, type SseEvent } from "../hooks/useSse";
 import { AlertsDrawer } from "./AlertsDrawer";
 import { ApprovalsBadge } from "./ApprovalsBadge";
+import { rememberList } from "./BackLink";
 import { ErrorBar } from "./ErrorBar";
 import { killError, postKill, type Recon } from "./live";
 import { useTheme } from "../hooks/useTheme";
 import { KillSwitchButton } from "./KillSwitchButton";
 import { MarketSearch } from "./MarketSearch";
+import { probeUrl } from "./probe";
 import { ModeBadge } from "./ModeBadge";
 import { STALE_MS, StaleBanner } from "./StaleBanner";
 import { StatusBar } from "./StatusBar";
@@ -20,11 +22,9 @@ import css from "./Shell.module.css";
 
 // DESIGN 12.1.2: label, href, `g` chord. Trade leaves the operator shell (route group change): a plain <a>, not a client-side Link.
 const NAV = [["Screener", "/markets", "m"], ["Watchlist", "/watchlist", "w"], ["Trade", "/trade", "t"], ["Runs", "/runs", "f"], ["Research", "/research", "r"], ["Journal", "/journal", "j"], ["Book", "/paper", "p"], ["Autonomy", "/autonomy", "a"], ["Settings", "/settings", "s"]] as const;
-// Views whose GET lives under another name; the refresh probe must hit the real one.
-const PROBE: Record<string, string> = { "/runs": "/api/fleet", "/journal": "/api/calibration" };
 // Events that move the status bar (DESIGN 12.1.5).
-const BAR_ON = new Set<SseEvent["type"]>(["pod.started", "pod.failed", "pod.done", "snapshot.done", "sweep.done", "alert.created", "alert.acked"]);
-const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.failed", "pod.done", "thesis.created", "paper.fill", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
+const BAR_ON = new Set<SseEvent["type"]>(["pod.started", "pod.stage", "pod.failed", "pod.done", "pod.cancelled", "snapshot.done", "sweep.done", "alert.created", "alert.acked"]);
+const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.stage", "pod.failed", "pod.done", "pod.cancelled", "thesis.created", "paper.fill", "paper.close", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
 const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done", "set.updated"]);
 type Status = { pendingCount?: number; flaggedSets?: number; liveOpenOrders?: number; recon?: Recon | null };
 
@@ -43,10 +43,11 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   // ponytail: doubles the read per refresh; drop the probe if views move to client-side fetching.
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   useEffect(() => setRefreshErr(null), [path]);
+  useEffect(() => rememberList(path), [path]); // BackLink on a market page returns here
   const refreshNow = useCallback(async () => {
-    // /research has no GET of its own; probe the profile list it renders.
-    const root = "/" + location.pathname.split("/")[1];
-    const r = await fetch(root === "/research" ? "/api/research/profiles" : PROBE[location.pathname] ?? `/api${location.pathname}${location.search}`).catch(() => null);
+    const url = probeUrl(location.pathname, location.search);
+    if (!url) { router.refresh(); return; } // no known GET for this view: nothing to probe
+    const r = await fetch(url).catch(() => null);
     if (r?.ok) { setRefreshErr(null); router.refresh(); }
     else setRefreshErr(`Refresh failed: ${r ? r.status : "network error"} · showing last loaded data`);
   }, [router]);
@@ -81,6 +82,8 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   const [chord, setChord] = useState(false);
   const toggleAlerts = useCallback(() => setAlertsOpen((o) => !o), []);
   const closeAlerts = useCallback(() => setAlertsOpen(false), []);
+  // The Watchlist alerts tab's "open drawer" link (it has no handle on the shell).
+  useEffect(() => { const open = () => setAlertsOpen(true); window.addEventListener("pm:alerts-open", open); return () => window.removeEventListener("pm:alerts-open", open); }, []);
   useGlobalKeys({
     onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []),
     onTheme: toggle,
