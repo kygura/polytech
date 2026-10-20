@@ -193,10 +193,9 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
         tier: sc.tier, structuralFlag: sc.structural, structuralDetail: d1 ?? null,
       } satisfies typeof s.screens.$inferInsert];
     });
-    // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen. neon-http has no interactive transactions but batches atomically.
+    // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen.
     const parts = chunks(out, 500);
-    if ("batch" in d.db) await (d.db as unknown as { batch(q: unknown[]): Promise<unknown> }).batch(parts.map((c) => d.db.insert(s.screens).values(c)));
-    else await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
+    await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
 
     // market_latest carries the screen output for the DSL / screener: priority, structural kinds, opportunity (sized live theses). Derived data: a failure here must not lose the screens above.
     let latest = true;

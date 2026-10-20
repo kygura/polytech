@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.10",
-    "@neondatabase/serverless": "1.2.0",
     "@upstash/ratelimit": "2.2.0",
     "@upstash/redis": "1.39.0",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "postgres": "3.4.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

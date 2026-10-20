@@ -39,7 +39,7 @@ export function envExchange(): Exchange | null {
 }
 
 let ready: Promise<Db> | undefined;
-/** getDb(), migrated once per process when running on local PGlite (Neon is migrated at deploy). Cache cleared on reject. */
+/** getDb(), migrated once per process when running on local PGlite (a hosted DATABASE_URL is migrated with `db:migrate`). Cache cleared on reject. */
 export const dbReady = () =>
   (ready ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((ready = undefined), Promise.reject(e))));
 

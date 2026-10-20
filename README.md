@@ -12,7 +12,7 @@ apps/tui       Ink terminal client (`pm`)
 packages/core  book, calibration, autonomy, risk-limit checks
 packages/pm    Polymarket clients, exchange, fixtures
 packages/agents  research pods, judge, sizing
-packages/db    Drizzle schema (Neon, or PGlite when DATABASE_URL is unset)
+packages/db    Drizzle schema (Postgres via DATABASE_URL, e.g. Supabase; PGlite when unset)
 ```
 
 ## Run
