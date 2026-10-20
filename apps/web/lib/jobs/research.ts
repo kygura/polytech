@@ -49,9 +49,9 @@ const soft = async (f: () => Promise<unknown>) => { try { await f(); } catch (e)
 export const POD_WINDOW_MS = 300_000, POD_AGENTS_MS = 170_000, POD_JUDGE_MS = 90_000;
 const FAILED_SKIP_MS = 24 * 3_600_000; // poison-market guard: no pick (initial, re-research, profile) this soon after a failed pod
 const WAVE_MARGIN_MS = 20_000;
-/** Markets with a pod that failed within FAILED_SKIP_MS. */
+/** Markets with a pod that failed or was cancelled within FAILED_SKIP_MS. */
 const failedRecently = async (db: Deps["db"], now: number) =>
-  new Set((await db.select({ c: s.pods.conditionId }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(now - FAILED_SKIP_MS))))).map((r) => r.c));
+  new Set((await db.select({ c: s.pods.conditionId }).from(s.pods).where(and(inArray(s.pods.status, ["failed", "cancelled"]), gte(s.pods.startedAt, new Date(now - FAILED_SKIP_MS))))).map((r) => r.c));
 // ponytail: a timed-out agent/judge reports no usage, so charge a flat guess per model (150k in/10k out agent, 20k in/2k out judge) so the daily cap cannot undercount; read real usage if the runner ever reports partials.
 const timeoutUsd = (model: string, judge = false) => (judge ? costUsd(model, 20_000, 2_000) : costUsd(model, 150_000, 10_000));
 
@@ -74,8 +74,11 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
     if (!rel) return { skipped: true, reason: "LOCKED" };
     try {
       // reap pods stuck `running` (host killed mid-run): nothing outlives the function window, so past it they are dead
-      await db.update(s.pods).set({ status: "failed" })
-        .where(and(eq(s.pods.status, "running"), lt(s.pods.startedAt, new Date(now - POD_WINDOW_MS - 60_000))));
+      const reaped = await db.update(s.pods).set({ status: "failed" })
+        .where(and(eq(s.pods.status, "running"), lt(s.pods.startedAt, new Date(now - POD_WINDOW_MS - 60_000)))).returning({ id: s.pods.id });
+      if (reaped.length)
+        await db.update(s.agentRuns).set({ status: "failed", finishedAt: new Date(now) })
+          .where(and(inArray(s.agentRuns.podId, reaped.map((p) => p.id)), eq(s.agentRuns.status, "running")));
       const [{ n: podsToday }] = await db.select({ n: count() }).from(s.pods).where(gte(s.pods.startedAt, dayStart)) as [{ n: number }];
       const [{ n: running }] = await db.select({ n: count() }).from(s.pods).where(eq(s.pods.status, "running")) as [{ n: number }];
       const sp = (await db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0];
@@ -121,8 +124,12 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
         });
       } catch (e) {
         if (e instanceof PodCancelledError) {
+          // completed agents at real cost; cut-off agents and an in-flight judge at the flat guess, so the daily cap cannot undercount
           const ok = e.agents.flatMap((a) => (a.ok ? [a] : []));
-          await addSpend(db, now, ok.reduce((t, a) => t + a.run.usage.costUsd, 0), ok.reduce((t, a) => t + a.run.sandboxS, 0));
+          const cut = e.agents.filter((a) => !a.ok && a.cancelled);
+          await addSpend(db, now,
+            ok.reduce((t, a) => t + a.run.usage.costUsd, 0) + cut.reduce((t, a) => t + timeoutUsd(a.model), 0) + (e.stage === "judge" ? timeoutUsd(judgeModel, true) : 0),
+            ok.reduce((t, a) => t + a.run.sandboxS, 0));
           await db.update(s.agentRuns).set({ status: "cancelled", finishedAt: new Date(d.now()) }).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.status, "running")));
           await db.update(s.pods).set({ status: "cancelled" }).where(eq(s.pods.id, podId));
           publish("pod.cancelled", { podId, conditionId });
@@ -172,6 +179,12 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
           return { podId, agentRole: e.agent_role, url: e.url, quote: e.quote, claim: e.claim, direction: e.direction === "+" ? 1 : -1, publishedAt: Number.isNaN(+pub) ? null : pub, retrievedAt: new Date(now) };
         }));
       await addSpend(db, now, pod.costs.costUsd, pod.costs.sandboxS);
+      // a cancel that landed after the agents/judge (sizing) is still honoured: spend is recorded, no thesis
+      if ((await db.select({ c: s.pods.cancelRequestedAt }).from(s.pods).where(eq(s.pods.id, podId)))[0]?.c) {
+        await db.update(s.pods).set({ status: "cancelled", costSandboxS: pod.costs.sandboxS }).where(eq(s.pods.id, podId));
+        publish("pod.cancelled", { podId, conditionId });
+        return { podId, status: "cancelled" };
+      }
       await db.update(s.pods).set({ status: "done", stage: "done", costSandboxS: pod.costs.sandboxS }).where(eq(s.pods.id, podId));
 
       let thesisId: string | undefined;

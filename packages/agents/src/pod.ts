@@ -39,7 +39,7 @@ export type PodHooks = {
 
 /** `signal` aborted mid-run: `agents` holds what ran (completed ones keep their usage). */
 export class PodCancelledError extends Error {
-  constructor(public agents: AgentResult[]) { super("pod cancelled"); }
+  constructor(public agents: AgentResult[], public stage: PodStage = "agents") { super("pod cancelled"); } // stage: where the abort landed ("judge" => a judge call was in flight)
 }
 
 export class PodFailedError extends Error {
@@ -135,6 +135,7 @@ export async function runPod(a: {
   const judgeEnd = Date.now() + (settings.judgeMs ?? Infinity);
   const j = await within(a.judge({
     deadline: judgeEnd,
+    signal,
     brief,
     outputs,
     model: modelFor("judge", models),
@@ -145,7 +146,7 @@ export async function runPod(a: {
       bidDepthUsd: usd(book.bids),
       askDepthUsd: usd(book.asks),
     },
-  }), settings.judgeMs ?? Infinity, "judge", signal).catch((e) => { throw signal?.aborted ? new PodCancelledError(agents) : new PodFailedError(agents, e); });
+  }), settings.judgeMs ?? Infinity, "judge", signal).catch((e) => { throw signal?.aborted ? new PodCancelledError(agents, "judge") : new PodFailedError(agents, e); });
 
   const probs = outputs.map((o) => o.probability);
   const confidence = capConfidence(j.judge.confidence, probs, book.pMid);

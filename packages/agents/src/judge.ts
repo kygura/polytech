@@ -17,7 +17,7 @@ export const JudgeOut = z.object({
 export type JudgeOut = z.infer<typeof JudgeOut>;
 
 export type BookSummary = { pMid: number; bestBid: number | null; bestAsk: number | null; bidDepthUsd: number; askDepthUsd: number };
-export type JudgeInput = { brief: Brief; outputs: AgentOutput[]; book: BookSummary; model?: string; deadline?: number };
+export type JudgeInput = { brief: Brief; outputs: AgentOutput[]; book: BookSummary; model?: string; deadline?: number; signal?: AbortSignal /* abort => the request stops */ };
 export type Judge = (i: JudgeInput) => Promise<{ judge: JudgeOut; usage: Usage }>;
 
 export const fakeJudge: Judge = async ({ outputs }) => {
@@ -37,7 +37,7 @@ export const fakeJudge: Judge = async ({ outputs }) => {
 /** Price is revealed only here: agent results first, book last. */
 export const anthropicJudge =
   (client: Client, model = modelFor("judge"), backoff?: BackoffOpts): Judge =>
-  async ({ brief, outputs, book, model: m, deadline }) => {
+  async ({ brief, outputs, book, model: m, deadline, signal }) => {
     const useModel = m ?? model;
     const msg = await withBackoff(
       () =>
@@ -52,7 +52,7 @@ export const anthropicJudge =
             },
           ],
           output_config: { format: { type: "json_schema", schema: jsonSchema(JudgeOut) } },
-        }),
+        }, { signal }),
       { ...backoff, deadline },
     );
     const block = msg.content.find((b) => b.type === "text");
