@@ -1,11 +1,11 @@
-import { costUsd, modelFor, rulesHash } from "@pm/agents";
+import { costUsd, modelFor } from "@pm/agents";
 import {
   crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
-import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, toMarket, toSnap, today, withLock, type Deps } from "./deps";
+import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { memoClear } from "./memo";
 import type { AppSettings } from "./settings";
@@ -14,6 +14,7 @@ import type { AppSettings } from "./settings";
 const BUDGET_MS = 170_000;
 /** ~30 batches of 10 (~1-2s each): a cold cache fills over several runs, best candidates first. */
 const MAX_LLM = 300;
+const GAMMA_CONC = 8;
 // ponytail: classifyR usage is not returned, so charge a flat haiku estimate (~1.5k in / 0.4k out) per call against the daily cap.
 const R_TIMEOUT_MS = 20_000; // hard bound per classifier call (the stub or SDK may hang)
 const R_CALL_USD = costUsd(modelFor("r_classifier"), 1_500, 400);
@@ -136,8 +137,12 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     const cap = st.capFrac * st.bankroll, dbSize = new Map([...groupBy(mrows.filter((r) => r.negRiskGroup), (r) => r.negRiskGroup!)].map(([g, v]) => [g, v.length]));
     const trueSize = new Map<string, number>();
     const flagged = [...detectStructural(rows, cap)].flatMap(([id, x]) => (x.type === "neg-risk-sum" && x.kind === "buy-all" ? [by(rows, id)] : []));
-    for (const m of new Map(flagged.map((m) => [m.negRiskGroup!, m])).values())
-      trueSize.set(m.negRiskGroup!, Date.now() - t0 > o.budgetMs ? -1 : await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m.negRiskGroup).length : -1), () => -1));
+    // GAMMA_CONC lookups in flight (one at a time spent the whole budget on ~500 groups); the pm bucket still paces the host
+    const lookups = [...new Map(flagged.map((m) => [m.negRiskGroup!, m])).values()];
+    await Promise.all(Array.from({ length: GAMMA_CONC }, async () => {
+      for (let m = lookups.shift(); m; m = lookups.shift())
+        trueSize.set(m.negRiskGroup!, Date.now() - t0 > o.budgetMs / 2 ? -1 : await d.pm.event(m.eventId).then((e) => (e ? e.markets.filter((x) => x.neg_risk_group === m!.negRiskGroup).length : -1), () => -1));
+    }));
     const kinds = new Map<string, StructuralKind[]>();
     const structural = detectStructural(rows, cap, new Map([...dbSize, ...trueSize]), kinds);
 
@@ -155,32 +160,37 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     const crowd = (snap: SnapRow) => ({ top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }); // ponytail: comment skew not wired
     const score = ({ m, snap }: Pick<(typeof todo)[number], "m" | "snap">, r: number) =>
       screen({ market: m, snap: toSnap(snap), R: r, structural: structural.has(m.conditionId), settings: st, now, crowd: crowd(snap) });
+    const hR = (x: (typeof todo)[number]) => x.r.heuristicR ?? heuristicR(""); // scored by the sweep; rows swept before heuristic_r existed take the base score
     const need: typeof todo = [];
     for (const x of todo) {
-      const hit = cached.get(`${x.m.conditionId}:${rulesHash(x.m.rules)}`);
+      const hit = cached.get(`${x.m.conditionId}:${x.r.rulesHash ?? ""}`);
       if (hit && !((hit.detail as { fallback?: boolean } | null)?.fallback && d.rScore)) R.set(x.m.conditionId, hit.r);
       else need.push(x);
     }
     const sp = d.rScore ? (await d.db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0] : undefined;
     const capped = (sp?.anthropicUsd ?? 0) >= st.budget.dailySpendCapUsd; // daily spend cap hit: heuristic only
     // LLM budget: best heuristic-priority first, capped per run and by wall clock (function limit 300s, reads included); the rest take the heuristic and are retried next run
-    const first = d.rScore && !capped ? need.map((x) => [x, +alive.has(x.m.conditionId) * 10 + score(x, heuristicR(x.m.rules)).priority] as const).sort((a, b) => b[1] - a[1]).slice(0, o.maxLlm).map(([x]) => x) : d.rScore ? [] : need;
+    const first = d.rScore && !capped ? need.map((x) => [x, +alive.has(x.m.conditionId) * 10 + score(x, hR(x)).priority] as const).sort((a, b) => b[1] - a[1]).slice(0, o.maxLlm).map(([x]) => x) : d.rScore ? [] : need;
     let llm = 0;
     for (const batch of chunks(first, d.rScore ? 10 : 200)) {
       if (Date.now() - t0 > o.budgetMs) break;
       const fresh: (typeof s.rrCache.$inferInsert)[] = [];
-      await Promise.all(batch.map(async ({ m }) => {
+      await Promise.all(batch.map(async (x) => {
+        const { m, r: row } = x;
         let r: number | undefined, fallback = false;
         let tm: ReturnType<typeof setTimeout> | undefined;
-        try { r = d.rScore ? clamp01(await Promise.race([d.rScore(m.rules, t0 + o.budgetMs), new Promise<never>((_, no) => (tm = setTimeout(() => no(new Error("R timeout")), R_TIMEOUT_MS)))])) : undefined; } catch { /* outage/timeout: fall through */ } finally { clearTimeout(tm); }
-        if (r === undefined) { r = heuristicR(m.rules); fallback = true; }
+        try {
+          const rules = d.rScore ? await ruleText(d.pm, row) : undefined; // the db keeps only the hash: fetch the text for the markets actually classified
+          r = rules ? clamp01(await Promise.race([d.rScore!(rules, t0 + o.budgetMs), new Promise<never>((_, no) => (tm = setTimeout(() => no(new Error("R timeout")), R_TIMEOUT_MS)))])) : undefined;
+        } catch { /* outage/timeout: fall through */ } finally { clearTimeout(tm); }
+        if (r === undefined) { r = hR(x); fallback = true; }
         R.set(m.conditionId, r);
-        fresh.push({ conditionId: m.conditionId, rulesHash: rulesHash(m.rules), r, detail: { fallback } });
+        fresh.push({ conditionId: m.conditionId, rulesHash: row.rulesHash ?? "", r, detail: { fallback } });
       }));
       await d.db.insert(s.rrCache).values(fresh).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: sql`excluded.r`, detail: sql`excluded.detail` } });
       if (d.rScore) { llm += batch.length; await addSpend(d.db, now, batch.length * R_CALL_USD, 0); }
     }
-    for (const x of need) if (!R.has(x.m.conditionId)) R.set(x.m.conditionId, heuristicR(x.m.rules));
+    for (const x of need) if (!R.has(x.m.conditionId)) R.set(x.m.conditionId, hR(x));
     console.log(`screen: R by llm/attempted=${llm} cached=${todo.length - need.length} heuristic-only=${need.length - first.length}`);
 
     const out = todo.flatMap(({ m, snap }) => {

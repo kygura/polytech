@@ -5,7 +5,7 @@ import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { categoryConfidence } from "./calib";
-import { DAY, addSpend, feeExpOf, feeOf, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
+import { DAY, addSpend, feeExpOf, feeOf, ruleText, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
 import { matchMarkets, listProfiles, type Match } from "./profiles";
 import { latestSnaps, shortlist } from "./screen";
@@ -95,7 +95,9 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
     publish("pod.started", { podId, conditionId, trigger });
 
     try {
-      const market = toMarket(mrow);
+      const rules = await ruleText(d.pm, mrow); // not stored: the brief needs the full text
+      if (rules == null) console.warn(`research: rules text unavailable for ${conditionId}, briefing on the question alone`);
+      const market = toMarket(mrow, rules ?? "");
       const sibRows = mrow.eventId ? await db.select().from(s.markets).where(eq(s.markets.eventId, mrow.eventId)) : [];
       const book = { bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid };
       const setStage = (stage: PodStage) => soft(async () => {
@@ -112,7 +114,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       let pod;
       try {
         pod = await runPod({
-          market, siblings: sibRows.filter((r) => r.conditionId !== conditionId).slice(0, 10).map(toMarket), book, runner: d.runner, judge: d.judge,
+          market, siblings: sibRows.filter((r) => r.conditionId !== conditionId).slice(0, 10).map((r) => toMarket(r)), book, runner: d.runner, judge: d.judge,
           steering, settings: { models: st.models, concurrency: conc, timeoutMs: st.budget.sandboxTimeoutMin * 60_000, agentsMs: POD_AGENTS_MS, judgeMs: POD_JUDGE_MS, exaCallCap: st.budget.exaCallsPerPod, core: st },
           onAgentDone: (a) => publish("pod.agent", { podId, role: a.role, ok: a.ok }),
           signal: ac.signal,

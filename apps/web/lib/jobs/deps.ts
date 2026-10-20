@@ -86,11 +86,12 @@ type SnapRow = typeof s.snapshots.$inferSelect;
 const OPEN = new Set(["active", "disputed", "not_accepting"]);
 export const isOpenStatus = (st: string) => OPEN.has(st);
 
-export const toMarket = (r: MarketRow): Market => ({
+/** `rules`: the db does not store the text; pass it from `ruleText` where it is read (research brief, classifier). */
+export const toMarket = (r: MarketRow, rules = ""): Market => ({
   conditionId: r.conditionId,
   eventId: r.eventId ?? r.conditionId,
   question: r.question,
-  rules: r.rules,
+  rules,
   category: r.category ?? "other",
   tags: r.tags,
   endDate: r.endDate?.getTime() ?? 0,
@@ -102,6 +103,10 @@ export const toMarket = (r: MarketRow): Market => ({
   acceptingOrders: r.status !== "not_accepting",
   inDispute: r.status === "disputed",
 });
+
+/** Rules text from Gamma by the stored market id; undefined when it cannot be fetched. */
+export const ruleText = async (pm: Deps["pm"], r: Pick<MarketRow, "pmId">): Promise<string | undefined> =>
+  r.pmId ? pm.market(r.pmId).then((m) => m?.rules, () => undefined) : undefined;
 
 export const feeOf = (m: Pick<Market, "category" | "feeRate">) => feeRateFor(m.category, m.feeRate).rate;
 export const feeExpOf = (m: Pick<Market, "feeExponent">) => feeExponentOf(m.feeExponent);

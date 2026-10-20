@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import { checkCron } from "../../../../lib/auth";
 import { JOBS, json, notFound, type JobName } from "../../../../lib/api";
+import { startChain } from "../../../../lib/jobs/kick";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +13,8 @@ async function handle(req: Request, { params }: { params: Promise<{ job: string 
   const name = (await params).job;
   if (!Object.hasOwn(JOBS, name)) return notFound();
   const job = name as JobName;
+  // scout heartbeat (GitHub Actions): the chain starts after the response (inline it is the whole chain); the reply says whether it started
+  if (job === "scout") return json({ started: await JOBS.scout(async () => after(() => startChain().catch((e) => console.error("scouting kick failed", e)))) });
   const scope = new URL(req.url).searchParams.get("scope") === "all" ? "all" : "watchlist";
 
   const long = job === "research" || (job === "snapshot" && scope === "all");

@@ -1,5 +1,6 @@
 import { calibrateNightly, deps, expireProposals, getSettings, monitor, paperBook, propose, proposeSets, read, reconcileJob, researchCron, screenAll, snapshotBooks, sweepUniverse, syncFills, type Decision, type Deps } from "./jobs";
 import type { z } from "zod";
+import { kickIfStale } from "./jobs/kick";
 
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
 export const notFound = () => json({ error: "not found" }, 404);
@@ -38,6 +39,7 @@ export const JOBS = {
   expire: () => getDeps().then(expireProposals),
   sync: () => getDeps().then(syncFills),
   reconcile: () => getDeps().then(reconcileJob),
+  scout: (run?: () => Promise<unknown>) => kickIfStale(undefined, undefined, run), // heartbeat: true = scouting chain started
 };
 export type JobName = keyof typeof JOBS;
 

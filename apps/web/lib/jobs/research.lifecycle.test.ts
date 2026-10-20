@@ -37,6 +37,19 @@ beforeAll(async () => {
 }, 60_000);
 
 describe("research lifecycle", () => {
+  it("the brief carries the rules text fetched from Gamma (the db stores only its hash)", async () => {
+    const mrow = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, markets[3]!)))[0]!;
+    const rules = (await d.pm.market(mrow.pmId!))?.rules ?? "";
+    expect(rules.length).toBeGreaterThan(20);
+    const briefs: string[] = [];
+    withRunner(async (role, brief, o) => (briefs.push(JSON.stringify(brief)), fakeRunner(role, brief, o)));
+    const res = await researchMarket(d, markets[3]!, "manual");
+    if ("skipped" in res) throw new Error(res.reason);
+    expect(briefs.length).toBeGreaterThan(0);
+    expect(briefs.every((b) => b.includes(JSON.stringify(rules.slice(0, 40)).slice(1, -1)))).toBe(true);
+    withRunner(fakeRunner);
+  });
+
   it("agent rows go running -> ok with tool calls, stage walks rules -> agents -> judge -> sizing -> done", async () => {
     const seen: Record<string, string> = {}, stages: (string | null)[] = [];
     withRunner(async (role, brief, o) => {

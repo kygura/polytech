@@ -1,0 +1,1 @@
+ALTER TABLE "markets" ADD COLUMN "heuristic_r" double precision;

@@ -321,15 +321,16 @@ const normQ = (q: string) => q.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export type MirrorItem = { conditionId: string; question: string; p: number };
 
-/** Same normalized question listed twice with prices further apart than `threshold`. */
+/** Same normalized question listed twice with prices further apart than `threshold`. Pairs in (i, j) input order. */
 export function mirrorPairs(items: MirrorItem[], threshold = 0.03) {
-  const out: { a: string; b: string; diff: number }[] = [];
-  for (let i = 0; i < items.length; i++)
-    for (let j = i + 1; j < items.length; j++) {
-      const x = items[i]!, y = items[j]!;
-      const diff = Math.abs(x.p - y.p);
-      if (normQ(x.question) === normQ(y.question) && diff > threshold)
-        out.push({ a: x.conditionId, b: y.conditionId, diff });
-    }
-  return out;
+  // bucket by question first: screen passes the whole universe (~35k), where an all-pairs scan never finishes
+  const groups = new Map<string, number[]>();
+  items.forEach((x, i) => { const k = normQ(x.question), g = groups.get(k); if (g) g.push(i); else groups.set(k, [i]); });
+  const pairs: [number, number][] = [];
+  for (const ix of groups.values())
+    for (let a = 0; a < ix.length; a++)
+      for (let b = a + 1; b < ix.length; b++)
+        if (Math.abs(items[ix[a]!]!.p - items[ix[b]!]!.p) > threshold) pairs.push([ix[a]!, ix[b]!]);
+  return pairs.sort((x, y) => x[0] - y[0] || x[1] - y[1])
+    .map(([i, j]) => ({ a: items[i]!.conditionId, b: items[j]!.conditionId, diff: Math.abs(items[i]!.p - items[j]!.p) }));
 }

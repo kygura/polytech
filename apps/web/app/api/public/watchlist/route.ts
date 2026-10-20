@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // the inline (non-Vercel) scouting chain runs in after()
 
-// Anonymous watchlist: thesis list of both tiers (no structural tab), muted rows hidden, projected, with data freshness.
+// Terminal watchlist (session required, see proxy.ts): thesis list of both tiers (no structural tab), muted rows hidden, projected, with data freshness.
 // A read also kicks stale scouting, never in the response path.
 export async function GET(req: Request) {
   const limited = await publicLimit(req);
@@ -17,6 +17,8 @@ export async function GET(req: Request) {
   after(() => kickIfStale().catch((e) => console.error("scouting kick failed", e)));
   const r = await getRead(), disabled = await researchDisabled();
   const [small, size, fresh] = await Promise.all([read.watchlist(r, "small-cap"), read.watchlist(r, "size"), freshness(r.db, getKv(), r.now())]);
-  const body: PublicWatchlist = { ...fresh, research: disabled ? "disabled" : "on", rows: [...small, ...size].map((x) => publicWatchRow(x, disabled)) };
+  // fresh database (no screens/theses yet): top open markets instead of an empty list
+  const rows = small.length || size.length ? [...small, ...size] : await read.topMarkets(r);
+  const body: PublicWatchlist = { ...fresh, research: disabled ? "disabled" : "on", rows: rows.map((x) => publicWatchRow(x, disabled)) };
   return publicJson(body);
 }

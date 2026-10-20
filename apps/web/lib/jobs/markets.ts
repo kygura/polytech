@@ -43,7 +43,7 @@ export function compileFilter(f: Filter, now: number) {
   ] as const) range(col(field, nowTs), r);
 
   for (const w of f.text?.toLowerCase().split(/\s+/).filter(Boolean) ?? [])
-    c.push(sql`(strpos(lower(${m.question}), ${w}) > 0 or strpos(lower(${m.rules}), ${w}) > 0)`); // strpos, not LIKE: no wildcard escaping
+    c.push(sql`strpos(lower(${m.question}), ${w}) > 0`); // strpos, not LIKE: no wildcard escaping. Questions only: rules text is not stored
   const lc = (xs: string[]) => arr(xs.map((x) => x.toLowerCase()));
   const hasTag = (xs: string[]) => sql`exists (select 1 from jsonb_array_elements_text(${m.tags}) tg(v) where lower(tg.v) = any(${lc(xs)}))`;
   if (f.tags?.length) c.push(hasTag(f.tags));

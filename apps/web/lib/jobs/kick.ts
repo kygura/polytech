@@ -25,7 +25,7 @@ async function chainStep(name: JobName, scope?: "watchlist" | "all") {
 }
 
 /** Like the cron route: Vercel Workflow on Vercel, inline elsewhere (or WORKFLOW_INLINE=1). */
-async function startChain() {
+export async function startChain() {
   if (process.env.VERCEL && process.env.WORKFLOW_INLINE !== "1") {
     const { start } = await import("workflow/api");
     await start(scoutChain, []);

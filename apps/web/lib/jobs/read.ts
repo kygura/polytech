@@ -1,10 +1,12 @@
 import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
+import { createPm } from "@pm/pm";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
-import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
+import { DAY, dbReady, defaultNow, envExchange, ruleText, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
+import { compileFilter } from "./markets";
 import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
@@ -12,8 +14,8 @@ import { getSettings, putSettings } from "./settings";
 import { reconStatus } from "./sync";
 
 /** Everything the API needs for reads. */
-export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean };
-export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null });
+export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean; pm?: Deps["pm"] }; // pm: rules text for the market detail (not stored)
+export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null, pm: createPm() });
 
 type Th = typeof s.theses.$inferSelect;
 type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string };
@@ -106,12 +108,35 @@ async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchS
   return rows.sort((a, b) => (key(b) ?? -Infinity) - (key(a) ?? -Infinity) || (b.priority ?? 0) - (a.priority ?? 0)).slice(0, limit);
 }
 
+const NO_THESIS = {
+  thesisId: null, thesisAgeH: null, expired: null, capped: null, nextCatalyst: null, structural: null,
+  side: null, pMid: null, pHat: null, c: null, pPost: null, k: null, e: null, edgeC: null, r: null, payoff: null, rAnn: null, sizeUsd: null, shares: null, expectedProfit: null, rank: null,
+} as const;
+/** Fallback list before any screen/thesis exists (fresh database): open markets with a mid and a future end date, by priority, then 24h volume, then liquidity. Muted hidden. */
+export async function topMarkets(r: ReadDeps, limit = 100): Promise<WatchlistRow[]> {
+  const { db } = r, now = r.now(), m = s.markets, ml = s.marketLatest;
+  const { where, orderBy } = compileFilter({
+    price: { min: 0 }, daysToResolution: { min: 0 }, muted: false,
+    sort: [{ field: "priority", dir: "desc" }, { field: "volume24h", dir: "desc" }, { field: "liquidity", dir: "desc" }],
+  }, now);
+  const rows = await db
+    .select({ conditionId: m.conditionId, question: m.question, category: m.category, endDate: m.endDate, priority: ml.priority, mid: ml.mid, pinned: s.marketFlags.pinned })
+    .from(m).innerJoin(ml, eq(ml.conditionId, m.conditionId)).leftJoin(s.marketFlags, eq(s.marketFlags.conditionId, m.conditionId))
+    .where(where).orderBy(...orderBy).limit(limit);
+  return rows.map((x): WatchlistRow => ({
+    conditionId: x.conditionId, question: x.question, category: x.category, tier: null,
+    pinned: !!x.pinned, muted: false, shortlisted: false, researching: false,
+    priority: x.priority, midNow: x.mid, daysLeft: ((x.endDate?.getTime() ?? now) - now) / DAY, endDate: x.endDate?.getTime() ?? null,
+    ...NO_THESIS,
+  }));
+}
+
 // ---------------------------------------------------------------- market detail
 export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
   const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
   if (!m) return null;
-  const [snap, ths, flag, scr, hist, pos, pods, latest, st] = await Promise.all([
+  const [snap, ths, flag, scr, hist, pos, pods, latest, st, rules] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
     db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
     db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
@@ -121,6 +146,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
     db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
     getSettings(db),
+    r.pm ? ruleText(r.pm, m) : undefined,
   ]);
   const t = ths[0] ?? null;
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
@@ -132,7 +158,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     : [[], []];
   return {
     market: {
-      conditionId, question: m.question, rules: m.rules, category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
+      conditionId, question: m.question, rules: rules ?? "", category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
       endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, tickSize: m.tickSize, status: m.status,
       yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, pinned: !!flag?.pinned, muted: !!flag?.muted,
       liquidity: m.liquidity, vol24h: m.vol24h, resolutionSource: m.resolutionSource,

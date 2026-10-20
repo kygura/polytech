@@ -77,24 +77,40 @@ describe("proxy: public boundary", () => {
   const req = (path: string, method = "GET", headers: Record<string, string> = {}) => new NextRequest(`http://localhost${path}`, { method, headers });
   const passes = (r: Response) => r.headers.get("x-middleware-next") === "1";
 
-  it("anon GET/HEAD /api/public/* pass; other methods 405", async () => {
-    for (const p of ["/api/public/watchlist", "/api/public/markets/0xabc"]) {
-      expect(passes(await proxy(req(p)))).toBe(true);
-      expect(passes(await proxy(req(p, "HEAD")))).toBe(true);
-    }
-    for (const m of ["POST", "PUT", "DELETE", "PATCH"]) expect((await proxy(req("/api/public/watchlist", m))).status).toBe(405);
+  it("anon /api/public/*: 401 for every method", async () => {
+    for (const p of ["/api/public/watchlist", "/api/public/markets/0xabc", "/api/public/markets/0xabc/feed"])
+      for (const m of ["GET", "HEAD", "POST"]) expect((await proxy(req(p, m))).status).toBe(401);
   });
-  it("/trade pages public; nothing else", async () => {
-    for (const p of ["/trade", "/trade/0xabc"]) expect(passes(await proxy(req(p)))).toBe(true);
-    for (const p of ["/trader", "/tradex/1"]) expect((await proxy(req(p))).status).toBe(307);
+  it("operator GET/HEAD /api/public/* pass; other methods 405", async () => {
+    const cookie = `pm_session=${await signSession()}`;
+    for (const p of ["/api/public/watchlist", "/api/public/markets/0xabc"]) {
+      expect(passes(await proxy(req(p, "GET", { cookie })))).toBe(true);
+      expect(passes(await proxy(req(p, "HEAD", { cookie })))).toBe(true);
+    }
+    for (const m of ["POST", "PUT", "DELETE", "PATCH"]) expect((await proxy(req("/api/public/watchlist", m, { cookie }))).status).toBe(405);
+  });
+  it("anon /trade pages -> login; nothing is public", async () => {
+    for (const p of ["/trade", "/trade/0xabc", "/trade/autonomy", "/trader", "/tradex/1"]) {
+      const r = await proxy(req(p));
+      expect(r.status).toBe(307);
+      expect(r.headers.get("location")).toBe(`http://localhost/login?next=${encodeURIComponent(p)}`);
+    }
     for (const p of ["/api/settings", "/api/watchlist", "/api/public", "/api/publicx/watchlist", "/api/markets/0xabc", "/api/autonomy"]) expect((await proxy(req(p))).status).toBe(401);
     const r = await proxy(req("/autonomy"));
     expect(r.headers.get("location")).toBe("http://localhost/login?next=%2Fautonomy");
+    for (const p of ["/trade", "/trade/0xabc"]) expect(passes(await proxy(req(p, "GET", { cookie: `pm_session=${await signSession()}` })))).toBe(true);
   });
-  it("/: anon -> /trade, operator unchanged", async () => {
+  it("/: anon -> login, operator unchanged", async () => {
     const r = await proxy(req("/"));
     expect(r.status).toBe(307);
-    expect(r.headers.get("location")).toBe("http://localhost/trade");
+    expect(r.headers.get("location")).toBe("http://localhost/login?next=%2F");
     expect(passes(await proxy(req("/", "GET", { cookie: `pm_session=${await signSession()}` })))).toBe(true);
+  });
+  it("login, session, push and cron stay reachable without a session", async () => {
+    for (const p of ["/login", "/api/login", "/api/session", "/api/proposals/abc/push", "/api/sets/abc/push"]) expect(passes(await proxy(req(p)))).toBe(true);
+    process.env.CRON_SECRET = "c".repeat(32);
+    expect(passes(await proxy(req("/api/cron/scout", "GET", { authorization: `Bearer ${"c".repeat(32)}` })))).toBe(true);
+    expect((await proxy(req("/api/cron/scout"))).status).toBe(401);
+    delete process.env.CRON_SECRET;
   });
 });
