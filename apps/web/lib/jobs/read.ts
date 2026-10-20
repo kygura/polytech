@@ -56,15 +56,15 @@ export function watchlist(r: ReadDeps, tab: Tier | "structural", sort: WatchSort
 }
 async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchSort, o: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[] | StructuralRow[]> {
   const { db } = r, now = r.now(), limit = o.limit ?? 100;
-  const screens = await latestScreens(db);
+  // only the rows this tab can show (shortlist + markets with a thesis, or the structural ones), not the whole ~16k-market run
+  const [sl, ths] = await Promise.all([shortlist(db, 20), latestTheses(db)]);
+  const screens = tab === "structural" ? await latestScreens(db, { structural: true }) : await latestScreens(db, { ids: [...new Set([...sl.map((x) => x.conditionId), ...ths.keys()])] });
   const ids = screens.map((x) => x.conditionId);
   if (!ids.length) return [];
-  const [mk, flags, snaps, ths, sl, run] = await Promise.all([
+  const [mk, flags, snaps, run] = await Promise.all([
     db.select().from(s.markets).where(inArray(s.markets.conditionId, ids)),
     db.select().from(s.marketFlags),
     latestSnaps(db, ids),
-    latestTheses(db, ids),
-    shortlist(db, 20),
     db.select({ c: s.pods.conditionId }).from(s.pods).where(eq(s.pods.status, "running")),
   ]);
   const M = new Map(mk.map((m) => [m.conditionId, m])), F = new Map(flags.map((f) => [f.conditionId, f]));
