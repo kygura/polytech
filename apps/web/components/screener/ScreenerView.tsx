@@ -232,7 +232,7 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   const primary = sorts[0]!;
   const sortProp = { id: colOfField(primary.field, cols) ?? "", dir: primary.dir };
   const tableH = `calc(${BODY_H}${error ? " - 46px" : ""})`;
-  const virtual = useMemo(() => ({ rowHeight: 26, overscan: 20, height: tableH, onWindow: (w: { end: number }) => setWinEnd(w.end) }), [tableH]);
+  const virtual = useMemo(() => ({ rowHeight: 44, overscan: 20, height: tableH, onWindow: (w: { end: number }) => setWinEnd(w.end) }), [tableH]);
 
   let table;
   if (rows.length) {

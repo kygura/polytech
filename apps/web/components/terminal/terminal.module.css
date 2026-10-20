@@ -57,10 +57,18 @@
 .cats button { padding: 1px 8px; border-radius: 10px; color: var(--t-dim); font-size: 12px; border: 1px solid var(--t-line); background: none; height: auto; }
 .cats button[aria-pressed="true"] { color: var(--t-text); border-color: var(--t-line-2); background: var(--t-pane-2); }
 .rows { overflow-y: auto; flex: 1; min-height: 0; }
-.mrow { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 6px 12px; border: 0 !important; border-bottom: 1px solid var(--t-line) !important; border-radius: 0 !important; background: none !important; width: 100%; text-align: left; font: inherit; color: var(--t-text); cursor: pointer; }
-.mrow .q { font-size: 12.5px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mrow .sub { color: var(--t-dim); font-size: 11px; }
-.mrow .px { text-align: right; font-weight: 500; }
+.mrow { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 8px 12px 10px; border: 0 !important; border-bottom: 1px solid var(--t-line) !important; border-radius: 0 !important; background: none !important; width: 100%; text-align: left; font: inherit; color: var(--t-text); cursor: pointer; }
+.mrow:hover { background: var(--t-pane-2) !important; }
+.mrow .q { font-size: 12.5px; line-height: 17px; font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.mrow .sub { color: var(--t-dim); font-size: 11px; grid-column: 1 / -1; }
+.odds { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font: 600 12.5px/16px var(--t-font-num); font-variant-numeric: tabular-nums; }
+.odds .no { font-weight: 500; font-size: 11.5px; opacity: .9; }
+.pbar { position: absolute; left: 12px; right: 12px; bottom: 4px; height: 2px; border-radius: 1px; background: var(--t-no-bg); overflow: hidden; }
+.pbar i { display: block; height: 100%; background: var(--t-yes); opacity: .75; }
+.list .cats { gap: 4px; flex-wrap: nowrap; }
+.list .cats button { padding: 1px 7px; font-size: 11.5px; }
+.count { margin-left: auto; color: var(--t-faint); font: 11px var(--t-font-num); align-self: center; }
+.list .ph { gap: var(--t-sp-6); }
 .mrow.sel { background: var(--t-focus-bg) !important; box-shadow: inset 2px 0 var(--t-focus); }
 .mrow.cur { box-shadow: inset 0 0 0 1px var(--t-line-2); }
 .mrow.sel.cur { box-shadow: inset 2px 0 var(--t-focus), inset 0 0 0 1px var(--t-line-2); }
@@ -71,8 +79,13 @@
 /* chart pane */
 .chartp { grid-area: chart; }
 .heroBox { flex: none; display: flex; flex-direction: column; }
-.hero { display: flex; align-items: flex-end; gap: 28px; padding: 12px 16px 10px; border-bottom: 1px solid var(--t-line); }
-.hero h1 { font-size: 16px; line-height: 21px; margin: 0 0 6px; font-weight: 600; }
+.hero { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--t-line); }
+.hero h1 { font-size: 17px; line-height: 23px; margin: 0; font-weight: 600; overflow-wrap: anywhere; text-wrap: pretty; }
+.heroRow { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+.heroLeft { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.prob { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--t-no); }
+.probY { background: var(--t-yes); transition: width 300ms ease-out; }
+.probN { flex: 1; }
 .meta { color: var(--t-dim); font-size: 12px; }
 .out { display: flex; gap: 6px; margin-left: auto; }
 .out button { border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); padding: 4px 12px; min-width: 104px; background: none; text-align: left; height: auto; display: block; }
@@ -83,8 +96,16 @@
 .stats { display: flex; gap: 22px; padding: 8px 16px; border-bottom: 1px solid var(--t-line); }
 .stats .lbl { display: block; color: var(--t-dim); font-size: 11px; }
 .stats .n { font-size: 13px; font-weight: 500; }
-.chart { flex: 1; position: relative; min-height: 0; overflow: hidden; }
-.chart svg { display: block; }
+.chartBox { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.ctools { flex: none; display: flex; align-items: center; gap: 12px; padding: 6px 12px 6px 16px; font-size: 11.5px; flex-wrap: wrap; }
+.cleg { display: inline-flex; align-items: center; gap: 6px; color: var(--t-dim); }
+.swY, .swN { display: inline-block; width: 10px; height: 3px; border-radius: 2px; }
+.swY { background: var(--t-yes); } .swN { background: var(--t-no); margin-left: 6px; }
+.cseg { display: inline-flex; background: var(--t-pane-2); border-radius: var(--t-r-md); padding: 2px; gap: 2px; }
+.cseg button { height: 22px; padding: 0 9px; border: 0 !important; background: none !important; border-radius: var(--t-r-sm) !important; color: var(--t-dim) !important; font: 500 11px var(--t-font-num); }
+.cseg button[aria-checked="true"] { background: var(--t-pane) !important; color: var(--t-text) !important; box-shadow: 0 0 0 1px var(--t-line-2); }
+.chart { flex: 1; position: relative; min-height: 0; overflow: hidden; padding: 0 4px 4px 8px; }
+.ochart { --oc-yes: var(--t-yes); --oc-no: var(--t-no); --oc-line: var(--t-line); --oc-dim: var(--t-dim); --oc-text: var(--t-text); --oc-bg: var(--t-pane-2); --oc-font: var(--t-font-num); --oc-focus: var(--t-focus); --oc-on: var(--t-on-yes); }
 
 /* ladder */
 .ladder { grid-area: book; }
@@ -180,9 +201,9 @@
   .search { width: auto; flex: 1 1 200px; }
   .sp { margin-left: 0; }
   .chartp, .col4 { display: contents; }
-  .heroBox, .chart, .ticket, .tape { background: var(--t-pane); border: 1px solid var(--t-line); border-radius: var(--t-r-lg); box-shadow: var(--t-shadow); overflow: hidden; }
+  .heroBox, .chartBox, .ticket, .tape { background: var(--t-pane); border: 1px solid var(--t-line); border-radius: var(--t-r-lg); box-shadow: var(--t-shadow); overflow: hidden; }
   .hero { flex-wrap: wrap; }
-  .heroBox { order: 1; } .ticket { order: 2; } .ladder { order: 3; } .chart { order: 4; flex: none; height: 240px; } .tape { order: 5; flex: none; } .acct { order: 6; min-height: 214px; } .pageDisc { order: 7; }
+  .heroBox { order: 1; } .ticket { order: 2; } .ladder { order: 3; } .chartBox { order: 4; flex: none; height: 300px; } .tape { order: 5; flex: none; } .acct { order: 6; min-height: 214px; } .pageDisc { order: 7; }
   .far { display: none; }
   .legend { display: none; }
 }

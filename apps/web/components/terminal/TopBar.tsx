@@ -18,13 +18,13 @@ export function FeedBadge({ status, at, now, source = "poll" }: { status: FeedSt
 
 type Props = {
   feedStatus: FeedStatus; feedSource: FeedSource; feedAt: number | null; now: number; balance: number | null;
-  query: string; onQuery: (q: string) => void; onSearchFocus: () => void; onSearchKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  query: string; placeholder: string; onQuery: (q: string) => void; onSearchFocus: () => void; onSearchKey: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   /** An order is mid-send: the logo link must not navigate; `onBlocked` explains why. */
   locked: boolean; onBlocked: () => void;
 };
 
-export function TopBar({ feedStatus, feedSource, feedAt, now, balance, query, onQuery, onSearchFocus, onSearchKey, searchRef, locked, onBlocked }: Props) {
+export function TopBar({ feedStatus, feedSource, feedAt, now, balance, query, placeholder, onQuery, onSearchFocus, onSearchKey, searchRef, locked, onBlocked }: Props) {
   const operator = useOperator();
   return (
     <header className={`${css.pane} ${css.top}`}>
@@ -32,7 +32,7 @@ export function TopBar({ feedStatus, feedSource, feedAt, now, balance, query, on
       {operator && <Link href="/markets" className={css.opLink} onClick={(e) => { if (locked) { e.preventDefault(); onBlocked(); } }}>{"← Operator"}</Link>}
       <label className={css.search}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg>
-        <input ref={searchRef} data-filter type="search" placeholder="Search markets" aria-label="Search markets" value={query}
+        <input ref={searchRef} data-filter type="search" placeholder={placeholder} aria-label="Search markets" value={query}
           onChange={(e) => onQuery(e.target.value)} onFocus={onSearchFocus} onKeyDown={onSearchKey} />
         <kbd>/</kbd>
       </label>

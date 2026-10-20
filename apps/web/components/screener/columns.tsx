@@ -57,7 +57,7 @@ const prioFill = (p: number | null) => ({ background: p == null ? undefined : `c
 
 export const COLUMNS: ColDef[] = [
   { id: "flags", label: "flags", header: <span className={css.srOnly}>flags</span>, width: "64px", align: "l", title: "pinned · S structural · C contrarian · T thesis · Z stale", cell: (r, c) => <Flags r={r} c={c} /> },
-  { id: "market", label: "Market", width: "", minWidth: "280px", align: "l", cell: (r) => <MarketCell question={r.question} category={r.category} max={90} /> },
+  { id: "market", label: "Market", width: "", minWidth: "340px", align: "l", cell: (r) => <MarketCell question={r.question} category={r.category} max={140} /> },
   num("mid", "Mid", "56px", "price", (r) => r.mid, "p"),
   num("sprd", "Sprd", "48px", "spread", (r) => (r.spread == null ? null : r.spread * 100), "cents", { title: "spread, cents" }),
   num("liq", "Liq", "64px", "liquidity", (r) => r.liquidity, "usd"),
