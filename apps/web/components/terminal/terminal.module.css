@@ -109,8 +109,6 @@
 /* ticket column */
 .col4 { grid-area: tick; display: flex; flex-direction: column; gap: var(--t-sp-3); min-height: 0; }
 .ticket { flex: none; }
-.ticket.blocked { border-color: var(--t-down); }
-.ticket.warnb { border-color: var(--t-warn); }
 .tk { padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--t-pane-2); border-radius: var(--t-r-md); padding: 3px; gap: 3px; }
 .seg button { height: 28px; border-radius: var(--t-r-sm); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--t-dim); background: none; border: 0; }

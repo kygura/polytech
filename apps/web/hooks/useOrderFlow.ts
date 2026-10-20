@@ -1,6 +1,6 @@
 "use client";
 // Order phase machine of the public ticket: signing -> checking -> open / filled / cancelled / unknown / error.
-// The gate (connect, region, creds, allowance) stays in ticketGate; this starts once the gate is clear.
+// The gate (connect, creds, allowance) stays in ticketGate; this starts once the gate is clear.
 import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { truncate } from "../components/fmt";

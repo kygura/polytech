@@ -5,7 +5,6 @@ import type { Clob } from "../../hooks/useClob";
 import { inInput } from "../../hooks/useGlobalKeys";
 import type { MarketFeed } from "../../hooks/useMarketFeed";
 import { useOrderFlow, type OrderPhase } from "../../hooks/useOrderFlow";
-import type { Region } from "../../hooks/useRegion";
 import { isRejection, type Wallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail } from "../../lib/public";
 import { loadVisitorSettings } from "../../lib/visitor/settings";
@@ -28,12 +27,12 @@ type Props = {
   held: number;
   /** A ladder click: copy `price` (0–1, the outcome's book) to Limit. `n` changes on every pick. */
   pick: { price: number; n: number } | null;
-  wallet: Wallet & { clob: Clob }; region: Region;
+  wallet: Wallet & { clob: Clob };
   /** The order phase and whether side/outcome are locked, for the page's market-switch guard and B/S/Y/N keys. */
   onState: (s: { phase: OrderPhase["s"]; locked: boolean }) => void;
 };
 
-export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalTicket({ marketId, detail, feed, noBook, side, outcome, onSide, onOutcome, held, pick, wallet: w, region: r, onState }, handle) {
+export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalTicket({ marketId, detail, feed, noBook, side, outcome, onSide, onOutcome, held, pick, wallet: w, onState }, handle) {
   const c = w.clob;
   const btn = useRef<HTMLButtonElement>(null), limitEl = useRef<HTMLInputElement>(null), sharesEl = useRef<HTMLInputElement>(null);
   const [price, setPrice] = useState(""); // cents
@@ -46,10 +45,6 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   const [perTradeMax] = useState(() => loadVisitorSettings().limits.perTradeUsd);
   const lastField = useRef<HTMLInputElement | null>(null); // Esc on the armed button returns here
   useImperativeHandle(handle, () => ({ focusLimit: () => limitEl.current?.focus() }), []);
-
-  // The ticket counts as opened: run the region check now so the state is known before the visitor connects.
-  const { ensure } = r;
-  useEffect(() => ensure(), [ensure]);
 
   const id = marketId;
   const tick = feed?.tickSize ?? null;
@@ -88,7 +83,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     sharesEl.current?.focus();
   }, [pick]); // every pick, never on a tick change
 
-  const gate = ticketGate({ wallet: w.status, chainOk: w.chainOk, region: r.status, credsReady: c.credsReady, approved: c.approved });
+  const gate = ticketGate({ wallet: w.status, chainOk: w.chainOk, credsReady: c.credsReady, approved: c.approved });
   const loaded = feed != null && tick != null && detail != null && detail.market.conditionId === id && feed.tokenId === detail.market.yesTokenId;
   const p01 = num(price) == null ? null : num(price)! / 100, n = num(shares);
   const tokenId = detail ? (outcome === "YES" ? detail.market.yesTokenId : detail.market.noTokenId) : null;
@@ -117,7 +112,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   const shareErr = side === "BUY" ? errs.amount : errs.shares;
   const valid = loaded && !errs.price && !shareErr && nShares != null && sendPrice != null && !!tokenId;
   const canSend = gate === null && phase.s === "idle" && valid;
-  const editable = (phase.s === "idle" || phase.s === "error") && gate !== "geo_blocked";
+  const editable = (phase.s === "idle" || phase.s === "error");
   useEffect(() => onState({ phase: phase.s, locked: !editable }), [phase.s, editable, onState]);
   const verb = side === "BUY" ? "Buy" : "Sell";
   const orderText = valid ? `${verb} ${sh(nShares!)} ${outcome} at ${cents(sendPrice, tick!)}¢` : "";
@@ -194,7 +189,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     approve: () => void run(c.approve, "You rejected the transaction. Nothing was approved."),
     place: () => void place(), cancel: () => void flow.cancel(), newOrder, recheck: () => void flow.recheck(), reset: flow.reset,
   };
-  const links = { retryRegion: ["Retry check", r.retry], retryAllowance: ["Retry check", () => void c.checkApproval().catch(() => {})], startOver: ["Start over", startOver] } as const;
+  const links = { retryAllowance: ["Retry check", () => void c.checkApproval().catch(() => {})], startOver: ["Start over", startOver] } as const;
   const look = { off: css.off, act: css.act, connect: css.connect, yes: css.yes, no: css.no }[bs.look];
   const aria = bs.action === "place" ? (side === "BUY"
     ? `Sign and place order: buy ${outcome} ${sh(nShares!)} shares at ${cents(sendPrice, tick!)} cents, up to ${summary[1]![1]}`
@@ -203,10 +198,9 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   if (bs.line) {
     const l = bs.line, link = l.link ? links[l.link] : null;
     const body = <>{l.text}{link && <> <button type="button" className={css.link} onClick={link[1]}>{link[0]}</button></>}</>;
-    line = <span className={l.tone === "neg" ? css.down : l.tone === "up" ? css.up : undefined} role={l.alert ? "alert" : undefined} title={phase.s === "error" ? phase.msg : undefined}>{body}</span>;
+    line = <span className={l.tone === "neg" ? css.down : l.tone === "up" ? css.up : undefined} title={phase.s === "error" ? phase.msg : undefined}>{body}</span>;
   }
 
-  const border = gate === "geo_blocked" ? css.blocked : gate === "geo_failed" ? css.warnb : "";
   const tickTxt = tick == null ? "tick —" : `${cents(tick, tick)}`;
   const sellOff = !(held > 0);
   const segKeys = (vals: readonly string[], cur: string, set: (v: string) => void) => (e: KeyboardEvent<HTMLDivElement>) => {
@@ -218,7 +212,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   };
 
   return (
-    <section className={`${css.pane} ${css.ticket} ${border}`} aria-label="trade ticket">
+    <section className={`${css.pane} ${css.ticket}`} aria-label="trade ticket">
       <h2 className={css.ph}>Order · limit <span className={css.r}><span className={css.dim}>{bs.word}</span><kbd>⇧T</kbd> focus</span></h2>
       <form className={css.tk} onSubmit={(e) => e.preventDefault()}>
         <div className={css.seg} role="radiogroup" aria-label="Side" onKeyDown={segKeys(["BUY", "SELL"], side, (v) => onSide(v as TradeSide))}>

@@ -17,16 +17,13 @@ export const sellable = (held: number, orders: Pick<OpenOrder, "tokenId" | "side
 export const GATE: Record<Gate, { button: string; copy: string; spin?: boolean; off?: boolean }> = {
   disconnected: { button: "Connect wallet", copy: "Connect a wallet on Polygon to trade. Research above stays free to read." },
   wrong_network: { button: "Switch to Polygon", copy: "Your wallet is on another network. Polymarket runs on Polygon." },
-  geo_checking: { button: "Checking region…", copy: "Checking whether Polymarket accepts orders from your location.", spin: true, off: true },
-  geo_blocked: { button: "Trading blocked in your region", copy: "Polymarket does not accept orders from your region. Research stays available. We do not offer a way around this.", off: true },
-  geo_failed: { button: "Trading unavailable", copy: "Could not confirm your region, so trading stays off. Retry, or try again later.", off: true },
   creds_needed: { button: "Enable trading (1 signature)", copy: "Polymarket needs a one-time signature to create your API key for this session. It is not a transaction and costs nothing." },
   allowance_checking: { button: "Checking trading allowances…", copy: "Checking whether Polymarket's exchange can trade your USDC and outcome tokens.", spin: true, off: true },
   allowance_needed: { button: "Approve trading allowances", copy: "Polymarket's exchange needs permission to trade your USDC and outcome tokens. These are on-chain transactions and cost a little POL for gas. One time per wallet." },
 };
 
 export type Action = "connect" | "switchChain" | "enable" | "approve" | "place" | "cancel" | "newOrder" | "recheck" | "reset";
-export type Line = { text: string; tone?: "neg" | "up"; link?: "retryRegion" | "retryAllowance" | "startOver"; alert?: boolean };
+export type Line = { text: string; tone?: "neg" | "up"; link?: "retryAllowance" | "startOver" };
 export type ButtonState = { label: string; kbd: string[]; spin: boolean; off: boolean; look: "off" | "act" | "connect" | "yes" | "no"; word: string; line: Line | null; action: Action | null };
 
 export type ButtonIn = {
@@ -51,7 +48,7 @@ export function buttonState(i: ButtonIn): ButtonState {
     const base = s({
       label: i.gate === "disconnected" && i.wallet === "unavailable" ? "No wallet found" : i.gate === "disconnected" && connecting ? "Connecting…" : g.button,
       word: i.gate.replace(/_/g, " "), spin: !!g.spin || connecting, off, look: i.gate === "disconnected" ? "connect" : off ? "off" : "act",
-      line: { text: g.copy, link: i.gate === "geo_failed" ? "retryRegion" : undefined, alert: i.gate === "geo_blocked" },
+      line: { text: g.copy },
       action: i.gate === "disconnected" ? "connect" : i.gate === "wrong_network" ? "switchChain" : i.gate === "creds_needed" ? "enable" : i.gate === "allowance_needed" ? "approve" : null,
     });
     if (i.gate === "allowance_checking" && i.allowanceError) base.line = { text: i.allowanceError, link: "retryAllowance" };

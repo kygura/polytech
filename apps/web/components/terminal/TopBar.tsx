@@ -4,7 +4,6 @@ import type { RefObject } from "react";
 import type { FeedStatus } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
 import { ConnectButton } from "../public/PublicShell";
-import { RegionStatus } from "../public/RegionStatus";
 import css from "./terminal.module.css";
 
 /** Text plus dot or spinner, never a dot alone (DESIGN 11.7). `at` = feed.at (server ms). */
@@ -35,7 +34,6 @@ export function TopBar({ feedStatus, feedAt, now, balance, query, onQuery, onSea
         <kbd>/</kbd>
       </label>
       <span className={css.sp}><FeedBadge status={feedStatus} at={feedAt} now={now} /></span>
-      <span className={css.pill}><RegionStatus /></span>
       <ConnectButton />
       {balance != null && <span className={`${css.pill} ${css.n}`}><span className={css.dim}>USDC</span> {balance.toFixed(2)}</span>}
     </header>

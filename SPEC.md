@@ -288,7 +288,7 @@ The app is deployed at a public URL. Anonymous visitors see the LLM-scouted watc
 ### Flows
 
 1. **Browse.** `/` redirects anonymous visitors to `/trade`. The watchlist comes from `GET /api/public/watchlist`, polled every 60 s. Market detail at `/trade/[id]` comes from `GET /api/public/markets/[id]`. Public payloads are projections that leave out operator sizing, pin/mute flags, the paper/live book, agent usage, cost and model, and pod internals. The public API is rate-limited per IP.
-2. **Connect.** The visitor connects an injected EIP-1193 wallet (viem custom transport, Polygon). WalletConnect is deferred. Before any trading control is enabled, the browser checks Polymarket's geoblock for the visitor's own IP. If the visitor is blocked, or the check fails, trading stays disabled (fail closed). Orders go from the browser straight to Polymarket's CLOB, never through our server, so Polymarket's own jurisdiction checks see the visitor.
+2. **Connect.** The visitor connects an injected EIP-1193 wallet (viem custom transport, Polygon). WalletConnect is deferred. There is no app-side geoblock check (personal tool; Polymarket enforces its restrictions server-side). Orders go from the browser straight to Polymarket's CLOB, never through our server.
 3. **Manual trade.** The ticket is prefilled from the thesis: side, limit price from `livelimitPrice`, and size from `sizeTrade` using the visitor's bankroll and Kelly settings. The wallet signs CLOB auth once per session and then signs each order. Positions, open orders (with cancel) and balance are read through the CLOB client.
 4. **Visitor autonomy.** Modes: Manual (default), L2 approve each, L3 bounded auto (inside `limits.l3`), L4 full auto inside the risk limits. Settings live in the visitor's localStorage and are validated with the core zod schema. The loop reuses `packages/core` (`sizeTrade`, `checkOrder`, `autoAllowed`, `livelimitPrice`, fees). The kill switch stops the loop and cancels open orders. There is no local paper book.
 5. **Scouting (server).** The pipeline is unchanged: sweep, snapshot, screen, research pods, judge. Production refuses the fake runner: with no `ANTHROPIC_API_KEY`, research is skipped with an explicit status. With no `EXA_API_KEY`, agents use the Agent SDK's built-in web search. The daily Anthropic spend cap is enforced as before.
@@ -297,7 +297,7 @@ The app is deployed at a public URL. Anonymous visitors see the LLM-scouted watc
 
 - Project `polytech` with root directory `apps/web`; dependencies install from the repo root with bun. Neon Postgres and Upstash Redis come from the Vercel Marketplace free tiers. Migrations run during the deploy step.
 - Hobby allows only daily crons. The scouting crons run daily, and the trading crons (paper, propose, sets, expire, sync, reconcile) are removed from `vercel.json`. A public watchlist read starts the scouting chain when the last sweep is older than 30 minutes, under a Redis lock so only one chain runs at a time. On Pro, restore the Rev 5 schedule.
-- The `dub1` region pin is removed: Ireland is reported as restricted by Polymarket, and in this mode the server only reads Polymarket data. Operator server-side trading needs a region decision before `PM_PRIVATE_KEY` is set in production.
+- Functions are pinned to `arn1` (Stockholm), which is not on Polymarket's restricted list (docs.polymarket.com/api-reference/geoblock). The `dub1` pin was dropped because Ireland is restricted.
 
 ### Done
 

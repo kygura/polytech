@@ -31,10 +31,9 @@ describe("buttonState", () => {
     expect(buttonState({ ...base, loaded: false, gate: "disconnected" })).toMatchObject({ label: "Waiting for live book…", spin: true, off: true });
     expect(buttonState({ ...base, loaded: false, noBook: true }).line?.text).toBe("No live book for this market.");
   });
-  it("gate next: no wallet, blocked region alert, signing step", () => {
+  it("gate next: no wallet, signing step", () => {
     expect(buttonState({ ...base, gate: "disconnected", wallet: "unavailable" })).toMatchObject({ label: "No wallet found", off: true, look: "connect" });
     expect(buttonState({ ...base, gate: "disconnected", wallet: "disconnected" })).toMatchObject({ label: "Connect wallet", off: false, action: "connect" });
-    expect(buttonState({ ...base, gate: "geo_blocked" })).toMatchObject({ label: "Trading blocked in your region", off: true, line: { alert: true } });
     expect(buttonState({ ...base, gate: "allowance_needed", signing: true })).toMatchObject({ label: "Confirm in your wallet…", off: true, spin: true });
     expect(buttonState({ ...base, gate: "allowance_checking", allowanceError: "down" }).line).toEqual({ text: "down", link: "retryAllowance" });
   });

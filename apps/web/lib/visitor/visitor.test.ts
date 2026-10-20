@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { checkGeoblock } from "./geoblock";
 import { visitorExchange } from "./exchange";
 import { createTradingKey, exportTradingKey, forgetTradingKey, fundingInfo, importTradingKey, loadTradingKey, STORAGE_KEY, tradingKeyAddress, tradingKeySigner, type KeyStore } from "./tradingKey";
 import { isRejection } from "../../hooks/useWallet";
@@ -10,25 +9,6 @@ const fakeStore = (): KeyStore & { m: Map<string, string> } => {
   return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) };
 };
 const reply = (status: number, body: unknown) => (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status })) as typeof fetch;
-
-describe("geoblock", () => {
-  it("allowed only on an OK response with blocked: false", async () => {
-    expect(await checkGeoblock(reply(200, { blocked: false, ip: "1.2.3.4", country: "BR", region: "SP" }))).toEqual({ blocked: false, country: "BR", region: "SP" });
-    expect(await checkGeoblock(reply(200, { blocked: true, country: "US" }))).toEqual({ blocked: true, reason: "blocked", country: "US", region: undefined });
-  });
-  it("fails closed", async () => {
-    const failed = { blocked: true, reason: "check_failed" };
-    expect(await checkGeoblock(reply(500, { blocked: false }))).toEqual(failed);
-    expect(await checkGeoblock(reply(403, "nope"))).toEqual(failed);
-    expect(await checkGeoblock(reply(200, "<html>"))).toEqual(failed);
-    expect(await checkGeoblock(reply(200, null))).toEqual(failed);
-    expect(await checkGeoblock(reply(200, { blocked: "false" }))).toEqual(failed);
-    expect(await checkGeoblock(reply(200, {}))).toEqual(failed);
-    expect(await checkGeoblock((async () => { throw new TypeError("CORS"); }) as typeof fetch)).toEqual(failed);
-    const hang = ((_u: unknown, i?: RequestInit) => new Promise((_, rej) => i?.signal?.addEventListener("abort", () => rej(new Error("abort"))))) as typeof fetch;
-    expect(await checkGeoblock(hang, 10)).toEqual(failed);
-  });
-});
 
 describe("trading key", () => {
   it("create / load / export / forget roundtrip", () => {

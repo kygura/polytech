@@ -1,11 +1,10 @@
 "use client";
-// Visitor shell (DESIGN 10.1): no operator state, no /api/autonomy, no EventSource. Owns the region and wallet providers.
+// Visitor shell (DESIGN 10.1): no operator state, no /api/autonomy, no EventSource. Owns the wallet provider.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useClob } from "../../hooks/useClob";
 import { useGlobalKeys } from "../../hooks/useGlobalKeys";
-import { RegionContext, useRegionCheck } from "../../hooks/useRegion";
 import { useTheme } from "../../hooks/useTheme";
 import { useWallet, useWalletConnection, WalletContext } from "../../hooks/useWallet";
 import { Drawer } from "../Drawer";
@@ -13,7 +12,6 @@ import { isTerminal, terminalNav } from "../../lib/terminalPath";
 import { TERMINAL_SHORTCUTS } from "../terminal/shortcuts";
 import shell from "../Shell.module.css";
 import ui from "../ui.module.css";
-import { RegionStatus } from "./RegionStatus";
 import css from "./public.module.css";
 
 const GO = { w: "/trade", a: "/trade/autonomy" };
@@ -28,7 +26,6 @@ const canGo = () => { if (terminalNav.locked) terminalNav.onBlocked(); return !t
 export const DISCLAIMER = "Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions; you are responsible for complying with yours.";
 
 export function PublicShell({ children }: { children: ReactNode }) {
-  const region = useRegionCheck();
   const wallet = useWalletConnection();
   const clob = useClob(wallet.exchange);
   const path = usePathname();
@@ -36,13 +33,8 @@ export function PublicShell({ children }: { children: ReactNode }) {
   const { toggle } = useTheme();
   useGlobalKeys({ onHelp: useCallback(() => { const d = sheet.current; if (d) d.open ? d.close() : d.showModal(); }, []), onTheme: toggle, go: GO, canGo });
 
-  // The region check is only needed to trade: run it once a wallet is connected (the ticket also asks for it).
-  const { ensure } = region;
-  useEffect(() => { if (wallet.status === "connected") ensure(); }, [wallet.status, ensure]);
-
   const terminal = isTerminal(path); // the terminal (DESIGN 11) brings its own top bar and disclaimer
   return (
-    <RegionContext.Provider value={region}>
       <WalletContext.Provider value={{ ...wallet, clob }}>
         {terminal ? children : <>
         <header className={shell.header}>
@@ -53,7 +45,6 @@ export function PublicShell({ children }: { children: ReactNode }) {
             <Link href="/trade/autonomy" aria-current={path.startsWith("/trade/autonomy") ? "page" : undefined}>Autonomy</Link>
           </nav>
           <div className={shell.right}>
-            <span className={css.hdrRegion}><RegionStatus /></span>
             <ConnectButton />
             <Link href="/login" className={css.signin}>Sign in</Link>
           </div>
@@ -67,7 +58,6 @@ export function PublicShell({ children }: { children: ReactNode }) {
           <p className="muted ui" style={{ margin: "var(--sp-2) 0 0" }}>Esc closes</p>
         </dialog>
       </WalletContext.Provider>
-    </RegionContext.Provider>
   );
 }
 

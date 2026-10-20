@@ -18,18 +18,14 @@ describe("ticket quote + validate", () => {
 });
 
 describe("ticket gate", () => {
-  const ok = { wallet: "connected", chainOk: true, region: "ok", credsReady: true, approved: true } as const;
+  const ok = { wallet: "connected", chainOk: true, credsReady: true, approved: true } as const;
   it("first unmet precondition wins, in order", () => {
     expect(ticketGate(ok)).toBeNull();
-    expect(ticketGate({ ...ok, wallet: "disconnected", chainOk: false, region: "blocked" })).toBe("disconnected");
-    expect(ticketGate({ ...ok, chainOk: false, region: "blocked" })).toBe("wrong_network");
-    expect(ticketGate({ ...ok, region: "failed", credsReady: false })).toBe("geo_failed");
-    expect(ticketGate({ ...ok, region: "idle" })).toBe("geo_checking");
+    expect(ticketGate({ ...ok, wallet: "disconnected", chainOk: false })).toBe("disconnected");
+    expect(ticketGate({ ...ok, chainOk: false })).toBe("wrong_network");
     expect(ticketGate({ ...ok, credsReady: false, approved: false })).toBe("creds_needed");
     expect(ticketGate({ ...ok, approved: false })).toBe("allowance_needed");
     expect(ticketGate({ ...ok, approved: null })).toBe("allowance_checking");
-    expect(ticketGate({ ...ok, region: "blocked" })).toBe("geo_blocked");
-    expect(ticketGate({ ...ok, region: "checking" })).toBe("geo_checking");
     expect(ticketGate({ ...ok, wallet: "connecting" })).toBe("disconnected");
     expect(ticketGate({ ...ok, wallet: "unavailable" })).toBe("disconnected");
   });

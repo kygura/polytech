@@ -6,7 +6,6 @@ import { useMarketFeed, type MarketFeed } from "../../hooks/useMarketFeed";
 import type { OrderPhase } from "../../hooks/useOrderFlow";
 import { inInput } from "../../hooks/useGlobalKeys";
 import { usePoll } from "../../hooks/usePoll";
-import { useRegion } from "../../hooks/useRegion";
 import { useWallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail, PublicWatchlist } from "../../lib/public";
 import { terminalNav } from "../../lib/terminalPath";
@@ -30,7 +29,7 @@ const LOCK_NOTE = "Finish or check the current order first";
 export function TerminalPage({ fontClass }: { fontClass: string }) {
   const router = useRouter();
   const params = useParams<{ id?: string }>();
-  const w = useWallet(), region = useRegion(), clob = w.clob;
+  const w = useWallet(), clob = w.clob;
   const wl = usePoll<PublicWatchlist>("/api/public/watchlist", 60_000);
 
   const [picked, setPicked] = useState<string | null>(params.id ?? null); // condition ids are hex: no decoding needed
@@ -199,7 +198,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
 
       <div className={css.col4}>
         <TerminalTicket ref={ticket} marketId={id} detail={detail} feed={feed.data} noBook={feed.noBook} side={side} outcome={outcome}
-          onSide={pickSide} onOutcome={pickOutcome} held={held} pick={pick} wallet={w} region={region} onState={setOrder} />
+          onSide={pickSide} onOutcome={pickOutcome} held={held} pick={pick} wallet={w} onState={setOrder} />
         <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}><TradeTape feed={viewFeed} status={feed.status} viewKey={viewFeed?.tokenId ?? ""} /></div>
       </div>
 

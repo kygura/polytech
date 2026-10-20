@@ -11,13 +11,10 @@
 .row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .headErr { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
 
-.hdrRegion { display: contents; }
 @media (max-width: 719px) {
   .tagline { display: none; }
-  /* Narrow header: the ticket carries the region state and the operator link is not needed on a phone. */
-  .hdrRegion, .signin { display: none; }
+  /* Narrow header: the operator link is not needed on a phone. */
+  .signin { display: none; }
   .connect, .chip { white-space: nowrap; }
 }
 
-.linkBtn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-family: var(--font-ui); }
-.linkBtn:hover:not(:disabled) { background: none; text-decoration: underline; }
