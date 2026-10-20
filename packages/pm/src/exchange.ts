@@ -1,4 +1,4 @@
-import type { SecureClient, Signer } from "@polymarket/client";
+import type { EnvironmentConfig, SecureClient, Signer } from "@polymarket/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { bucket } from "./bucket";
@@ -79,6 +79,8 @@ export type ClobSigner = {
   wallet?: string;
   /** Extra strings scrubbed from every error (e.g. the raw key). API secrets are added automatically. */
   secrets?: string[];
+  /** SDK environment (e.g. a relay); resolved lazily with the client. Default: production hosts. */
+  environment?: () => Promise<EnvironmentConfig>;
 };
 export type ClobExchange = Exchange & {
   wallet(): Promise<string>;
@@ -121,7 +123,7 @@ export function clobExchange(src: ClobSigner | Record<string, string | undefined
     (client ??= (async () => {
       const { createSecureClient } = await import("@polymarket/client");
       const signer = typeof acct.signer === "function" ? await acct.signer() : acct.signer;
-      const cl = await createSecureClient({ signer, wallet: acct.wallet });
+      const cl = await createSecureClient({ signer, wallet: acct.wallet, environment: await acct.environment?.() });
       secrets.push(cl.credentials.secret, cl.credentials.passphrase, cl.credentials.key);
       return cl;
     })().catch((e) => {

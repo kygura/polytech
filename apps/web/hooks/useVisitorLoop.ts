@@ -11,6 +11,7 @@ import {
   PROPOSAL_TTL_MS, type Candidate, type Ledger, type LedgerEntry, type LedgerStore, type TokenInfo,
 } from "../lib/visitor/autonomy";
 import { loadVisitorSettings, saveVisitorSettings, type VisitorMode, type VisitorSettings } from "../lib/visitor/settings";
+import { relayEnvironment } from "../lib/visitor/relay";
 
 export const TICK_MS = 60_000;
 export const LOG_MAX = 50;
@@ -44,7 +45,7 @@ const getJson = async <T,>(url: string): Promise<T> => {
 };
 let pub: Promise<{ fetchOrderBook(r: { assetId: string }): Promise<Parameters<typeof toLiveBook>[0]> }> | undefined;
 /** Live YES-token book + tick size straight from the CLOB (unauthenticated). */
-const liveBook = async (assetId: string) => toLiveBook(await (await (pub ??= import("@polymarket/client").then((m) => m.createPublicClient()))).fetchOrderBook({ assetId }));
+const liveBook = async (assetId: string) => toLiveBook(await (await (pub ??= import("@polymarket/client").then(async (m) => m.createPublicClient({ environment: await relayEnvironment() })))).fetchOrderBook({ assetId }));
 const fetchCandidate = async (conditionId: string): Promise<Candidate> => {
   const detail = await getJson<PublicMarketDetail>(`/api/public/markets/${conditionId}`);
   return { detail, book: await liveBook(detail.market.yesTokenId!) };

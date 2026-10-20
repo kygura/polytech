@@ -9,6 +9,7 @@
 import type { Signer } from "@polymarket/client";
 import { createWalletClient, custom, getAddress, type WalletClient } from "viem";
 import { polygon } from "viem/chains";
+import { relayEnvironment } from "./relay";
 
 export type Eip1193 = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -75,7 +76,7 @@ type ProfileLookup = (address: string) => Promise<{ wallet?: string | null } | n
 
 const sdkProfile: ProfileLookup = async (address) => {
   const { createPublicClient } = await import("@polymarket/client");
-  return createPublicClient().fetchPublicProfile({ address });
+  return createPublicClient({ environment: await relayEnvironment() }).fetchPublicProfile({ address });
 };
 
 /** The Polymarket account wallet owned by `address` (its public profile's proxyWallet), else the EOA itself. */
