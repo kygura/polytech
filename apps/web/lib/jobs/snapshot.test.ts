@@ -11,7 +11,8 @@ const fx = createPm({ fixtures: true });
 let T = Date.parse("2026-10-15T12:00:00Z");
 /** token -> book edit, applied to what the CLOB "serves" */
 const tweak = new Map<string, (b: Book) => Book>();
-const pm = { ...fx, books: async (tokens: string[]) => (await fx.books(tokens)).map((b) => tweak.get(b.token_id)?.(b) ?? b) } as typeof fx;
+let oiMax = 0; // largest /v2/oi condition list sent (the live API rejects > 20)
+const pm = { ...fx, books: async (tokens: string[]) => (await fx.books(tokens)).map((b) => tweak.get(b.token_id)?.(b) ?? b), oi: async (c: string[]) => ((oiMax = Math.max(oiMax, c.length)), fx.oi(c)) } as typeof fx;
 let d: Deps, yes: Map<string, string>;
 // scoped to explicit ids: a full run also prunes history of unwatched markets, which would hide the row counts under test
 const snap = async () => (await takeSnapshots({ ...d, now: () => T }, [...yes.keys()])) as { markets: number; snapshots: number; latest: number; unchanged: number; noBook: number };
@@ -35,6 +36,8 @@ describe("snapshot: market_latest in place, history only on change", () => {
     expect(rows.every((r) => r.mid != null && r.bestBid != null && r.spread != null && r.depth2c != null && r.exitDepth != null && r.bookHash && r.midChangedAt)).toBe(true);
     expect(rows.filter((r) => r.holderCount != null && r.top1Share != null && r.holderHhi != null).length).toBeGreaterThan(0); // fixtures hold holders for some markets
     expect(rows.every((r) => r.flow24h != null && r.lastTradeTs !== undefined)).toBe(true); // all fixture markets are crowd candidates (< 200)
+    expect(oiMax).toBeGreaterThan(0);
+    expect(oiMax).toBeLessThanOrEqual(20);
   });
 
   it("stored book keeps only levels within 10c of the touch; market_latest depth still comes from the full book", async () => {

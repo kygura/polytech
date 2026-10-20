@@ -167,6 +167,7 @@ const TRADES_CAP = 1000; // rows per call; hitting it means the 24h window is in
 const fnv = (str: string) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193); return h >>> 0; };
 const CROWD_DEADLINE_MS = 120_000; // from the start of the run: remaining crowd chunks are skipped (their markets keep the previous values)
 const CROWD_WAVE = 4; // concurrent data-API chunks
+const OI_CHUNK = 20; // Data API v2 /oi: "condition accepts at most 20 distinct values" (50 got a 400 on every chunk)
 
 const ml = s.marketLatest;
 const keep = (c: { name: string }) => sql`coalesce(excluded."${sql.raw(c.name)}", ${sql.raw(`"market_latest"."${c.name}"`)})`;
@@ -203,7 +204,7 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   };
   const [books, oiParts, prevRows, histRows, researched] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
-    soft("oi", chunks(conds, 50), (c) => d.pm.oi(c)),
+    soft("oi", chunks(conds, OI_CHUNK), (c) => d.pm.oi(c)),
     byIds(ids && conds, (c) => d.db.select().from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
     byIds(ids && conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
     d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses),
