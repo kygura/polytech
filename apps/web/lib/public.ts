@@ -1,5 +1,5 @@
 import { pickRunner } from "@pm/agents";
-import { feeRateFor } from "@pm/core";
+import { feeExponentOf, feeRateFor } from "@pm/core";
 import { getKv, schema as s, type Db, type Kv } from "@pm/db";
 import { max } from "drizzle-orm";
 import { clientIp } from "./auth";
@@ -38,8 +38,8 @@ export type Freshness = { sweptAt: number | null; snapshotAt: number | null; sta
 export const STALE_MS = 6 * 3_600_000;
 export const KICK_AT = "kick:sweepAt"; // written by the sweep on success (public sweptAt); kickIfStale keeps its own key
 export async function freshness(db: Db, kv: Kv, now: number): Promise<Freshness> {
-  const [sweptAt, snap] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)]);
-  const snapshotAt = snap[0]?.ts?.getTime() ?? null;
+  const [sweptAt, snap, latest] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots), db.select({ ts: max(s.marketLatest.ts) }).from(s.marketLatest)]);
+  const snapshotAt = Math.max(snap[0]?.ts?.getTime() ?? 0, latest[0]?.ts?.getTime() ?? 0) || null; // history rows skip unchanged books; market_latest moves every run
   return { sweptAt, snapshotAt, stale: snapshotAt == null || now - snapshotAt > STALE_MS };
 }
 export type PublicWatchlist = Freshness & { research: "on" | "disabled"; rows: PublicWatchRow[] };
@@ -53,13 +53,13 @@ type Thesis = NonNullable<Detail["thesis"]>;
 export const MARKET_KEYS = ["conditionId", "question", "rules", "category", "tags", "eventId", "negRiskGroup", "endDate", "daysLeft", "status", "tickSize", "yesTokenId", "noTokenId"] as const;
 export const SNAP_KEYS = ["ts", "mid", "bestBid", "bestAsk", "depth5cUsd", "vol24h", "oi", "top10Share", "bids", "asks", "netFlow"] as const;
 export const SCREEN_KEYS = ["ts", "R", "I", "L", "T", "C", "priority", "tier"] as const;
-export const THESIS_KEYS = ["id", "createdAt", "expiresAt", "side", "pHat", "c", "pPost", "edgeC", "rAnn", "catalysts", "killCriteria", "thesis", "pYes", "pMidYes", "capped"] as const;
+export const THESIS_KEYS = ["id", "createdAt", "expiresAt", "side", "pHat", "c", "pPost", "edgeC", "rAnn", "catalysts", "killCriteria", "thesis", "pYes", "pMidYes", "extremize", "capped"] as const;
 export const MARKER_KEYS = ["createdAt", "pHat", "side"] as const;
 export const EVIDENCE_KEYS = ["id", "role", "claim", "quote", "url", "direction", "publishedAt", "retrievedAt"] as const;
 export const AGENT_KEYS = ["role", "status", "probability", "confidence"] as const;
 
 export type PublicMarketDetail = {
-  market: Pick<Detail["market"], (typeof MARKET_KEYS)[number]> & { feeRate: number; negRisk: boolean };
+  market: Pick<Detail["market"], (typeof MARKET_KEYS)[number]> & { feeRate: number; feeExponent: number; negRisk: boolean };
   snapshot: Pick<NonNullable<Detail["snapshot"]>, (typeof SNAP_KEYS)[number]> | null;
   history: { ts: number; mid: number | null }[];
   screen: (Pick<NonNullable<Detail["screen"]>, (typeof SCREEN_KEYS)[number]> & { structural: PublicStruct | null }) | null;
@@ -76,7 +76,7 @@ export const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : "");
 export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDetail {
   const m = d.market;
   return {
-    market: { ...pick(m, MARKET_KEYS), feeRate: feeRateFor(m.category ?? "other", m.feeRate).rate, negRisk: m.negRiskGroup != null },
+    market: { ...pick(m, MARKET_KEYS), feeRate: feeRateFor(m.category ?? "other", m.feeRate).rate, feeExponent: feeExponentOf(m.feeExponent), negRisk: m.negRiskGroup != null },
     snapshot: d.snapshot ? pick(d.snapshot, SNAP_KEYS) : null,
     history: d.history.map((h) => ({ ts: h.ts, mid: h.mid })),
     screen: d.screen ? { ...pick(d.screen, SCREEN_KEYS), structural: struct(d.screen.structural as StructDetail | null) } : null,

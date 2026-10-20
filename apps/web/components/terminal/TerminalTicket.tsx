@@ -87,7 +87,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   const loaded = feed != null && tick != null && detail != null && detail.market.conditionId === id && feed.tokenId === detail.market.yesTokenId;
   const p01 = num(price) == null ? null : num(price)! / 100, n = num(shares);
   const tokenId = detail ? (outcome === "YES" ? detail.market.yesTokenId : detail.market.noTokenId) : null;
-  const feeRate = detail?.market.feeRate ?? 0, minSh = feed?.minOrderSize ?? null;
+  const feeRate = detail?.market.feeRate ?? 0, feeExp = detail?.market.feeExponent ?? 1, minSh = feed?.minOrderSize ?? null;
 
   let errs: FieldErrors = {}, nShares: number | null = null, sendPrice: number | null = null;
   let summary: [string, string, string?][] = [];
@@ -95,14 +95,14 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     sendPrice = p01 == null ? null : roundTick(side, p01, tick);
     if (side === "BUY") {
       const amount = p01 == null || n == null ? null : n * onTick(p01, tick);
-      const q = p01 == null || amount == null ? null : quote(p01, amount, feeRate, tick);
+      const q = p01 == null || amount == null ? null : quote(p01, amount, feeRate, tick, feeExp);
       errs = validate(p01, amount, c.balance, q, tick);
       if (!errs.amount && q && minSh != null && q.shares < minSh) errs.amount = `Minimum order is ${sh(minSh)} shares`;
       if (!errs.amount && q && q.maxLoss > perTradeMax) errs.amount = `Above your per-trade max $${perTradeMax}`;
       nShares = q?.shares ?? null;
       summary = [["Fee (max)", q ? usd(q.fee) : "—"], ["Max loss", q ? usd(q.maxLoss) : "—", css.down], [`Payout if ${outcome}`, q ? usd(q.payout) : "—", css.up]];
     } else {
-      const q = p01 == null || n == null ? null : sellQuote(p01, n, feeRate, tick);
+      const q = p01 == null || n == null ? null : sellQuote(p01, n, feeRate, tick, feeExp);
       errs = validateSell({ price: p01, shares: n, held, tick, outcome, minShares: minSh });
       nShares = q?.shares ?? null;
       const show = q && !errs.shares; // over the cap: no proceeds for shares that can't be sold

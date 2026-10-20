@@ -5,6 +5,7 @@ import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
+import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
 import { getSettings, putSettings } from "./settings";
@@ -45,9 +46,13 @@ const KEY: Record<WatchSort, (r: WatchlistRow) => number | null> = {
   rank: (r) => r.rank, edge: (r) => r.edgeC, r_ann: (r) => r.rAnn, days: (r) => (r.daysLeft == null ? null : -r.daysLeft), // days: soonest first
 };
 
-export async function watchlist(r: ReadDeps, tab: "small-cap" | "size", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[]>;
-export async function watchlist(r: ReadDeps, tab: "structural", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<StructuralRow[]>;
-export async function watchlist(r: ReadDeps, tab: Tier | "structural", sort: WatchSort = "rank", o: { includeMuted?: boolean; limit?: number } = {}): Promise<WatchlistRow[] | StructuralRow[]> {
+export function watchlist(r: ReadDeps, tab: "small-cap" | "size", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[]>;
+export function watchlist(r: ReadDeps, tab: "structural", sort?: WatchSort, o?: { includeMuted?: boolean; limit?: number }): Promise<StructuralRow[]>;
+export function watchlist(r: ReadDeps, tab: Tier | "structural", sort: WatchSort = "rank", o: { includeMuted?: boolean; limit?: number } = {}): Promise<WatchlistRow[] | StructuralRow[]> {
+  // the structural tab only moves with a screen run or a pin/mute flip (both call memoClear): a 10 s cache absorbs polling and shares one in-flight read
+  return tab === "structural" ? memo(`watch:structural:${sort}:${!!o.includeMuted}:${o.limit ?? ""}`, 10_000, () => watchlistRead(r, tab, sort, o)) : watchlistRead(r, tab, sort, o);
+}
+async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchSort, o: { includeMuted?: boolean; limit?: number }): Promise<WatchlistRow[] | StructuralRow[]> {
   const { db } = r, now = r.now(), limit = o.limit ?? 100;
   const screens = await latestScreens(db);
   const ids = screens.map((x) => x.conditionId);
@@ -106,7 +111,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
   const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
   if (!m) return null;
-  const [snap, ths, flag, scr, hist, pos, pods] = await Promise.all([
+  const [snap, ths, flag, scr, hist, pos, pods, latest, st] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
     db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
     db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
@@ -114,6 +119,8 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.select({ ts: s.snapshots.ts, mid: s.snapshots.mid }).from(s.snapshots).where(eq(s.snapshots.conditionId, conditionId)).orderBy(desc(s.snapshots.ts)).limit(500),
     db.select().from(s.positions).where(and(eq(s.positions.conditionId, conditionId), eq(s.positions.paper, true))).orderBy(desc(s.positions.id)),
     db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
+    db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
+    getSettings(db),
   ]);
   const t = ths[0] ?? null;
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
@@ -126,15 +133,19 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   return {
     market: {
       conditionId, question: m.question, rules: m.rules, category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
-      endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, tickSize: m.tickSize, status: m.status,
+      endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, tickSize: m.tickSize, status: m.status,
       yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, pinned: !!flag?.pinned, muted: !!flag?.muted,
+      liquidity: m.liquidity, vol24h: m.vol24h, resolutionSource: m.resolutionSource,
     },
+    /** DESIGN 12.6 Metrics + badges: the market_latest row (null until the snapshot job has written it). Times are epoch ms. */
+    latest: latest && { ...latest, ts: latest.ts.getTime(), midChangedAt: latest.midChangedAt?.getTime() ?? null, lastTradeTs: latest.lastTradeTs?.getTime() ?? null },
     snapshot: snap && { ts: snap.ts.getTime(), mid: snap.mid, bestBid: snap.bestBid, bestAsk: snap.bestAsk, depth5cUsd: snap.depth5cUsd, vol24h: snap.vol24h, oi: snap.oi, top10Share: snap.top10Share, bids: snap.book?.bids ?? [], asks: snap.book?.asks ?? [], netFlow: snap.book?.netFlow ?? 0 },
     history: hist.map((h) => ({ ts: h.ts.getTime(), mid: h.mid })).reverse(),
     screen: scr && { ts: scr.ts.getTime(), R: scr.r, I: scr.i, L: scr.l, T: scr.t, C: scr.c, priority: scr.priority, tier: scr.tier, structural: scr.structuralDetail },
     thesis: t && {
       id: t.id, podId: t.podId, createdAt: t.createdAt.getTime(), expiresAt: t.expiresAt?.getTime() ?? null, side: t.side as Side, pHat: t.pHat, c: t.c, pPost: t.pPost,
       edgeC: t.edgeC, sizeUsd: t.sizeUsd, rAnn: t.rAnn, rank: t.rank, catalysts: t.catalysts, killCriteria: t.killCriteria, ...dt(t),
+      extremize: st.extremize, // the log-odds multiplier sizing applies to pYes (visitor sizing must use the same)
     },
     thesisMarkers: ths.map((x) => ({ createdAt: x.createdAt.getTime(), pHat: x.pHat, side: x.side as Side })),
     evidence: evidence.map((e) => ({ id: e.id, role: e.agentRole, claim: e.claim, quote: e.quote, url: e.url, direction: e.direction, publishedAt: e.publishedAt?.getTime() ?? null, retrievedAt: e.retrievedAt.getTime() })),
@@ -169,7 +180,7 @@ export async function fleet(r: ReadDeps) {
       tokensIn: todayRuns.reduce((t, a) => t + usage(a).inputTokens, 0), tokensOut: todayRuns.reduce((t, a) => t + usage(a).outputTokens, 0),
     },
     pods: pods.map(({ p, q }) => ({
-      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, profileId: p.profileId, profileName: p.profileId ? names.get(p.profileId) ?? null : null, steering: p.steering as Partial<Steering> | null, steered: p.steering != null, steeringQuestion: (p.steering as { question?: string } | null)?.question ?? null, status: p.status, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
+      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, profileId: p.profileId, profileName: p.profileId ? names.get(p.profileId) ?? null : null, steering: p.steering as Partial<Steering> | null, steered: p.steering != null, steeringQuestion: (p.steering as { question?: string } | null)?.question ?? null, status: p.status, stage: p.stage ?? null, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
       agents: runs.filter((a) => a.podId === p.id).map((a) => ({ role: a.role, model: a.model, status: a.status, durationS: a.durationS, usage: usage(a), output: a.outputJson })),
     })),
   };
@@ -402,4 +413,37 @@ export const settingsPut = (r: Pick<Deps, "db">, patch: unknown) => putSettings(
 
 export async function setFlag(r: Pick<Deps, "db">, conditionId: string, flag: { pinned?: boolean; muted?: boolean }) {
   await r.db.insert(s.marketFlags).values({ conditionId, ...flag }).onConflictDoUpdate({ target: s.marketFlags.conditionId, set: flag });
+  memoClear("watch:");
+}
+
+// ---------------------------------------------------------------- pod detail (live runs view)
+/** One pod: stage, cost totals, agent rows with captured tool calls, evidence, thesis (null until sizing wrote one), per-pod budget knobs. */
+export async function podDetail(r: ReadDeps, podId: string) {
+  const { db } = r;
+  const row = (await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId)).where(eq(s.pods.id, podId)))[0];
+  if (!row) return null;
+  const { p } = row;
+  const [agents, ev, th, st] = await Promise.all([
+    db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId)).orderBy(asc(s.agentRuns.id)),
+    db.select().from(s.evidence).where(eq(s.evidence.podId, podId)).orderBy(asc(s.evidence.id)),
+    db.select().from(s.theses).where(eq(s.theses.podId, podId)).orderBy(desc(s.theses.createdAt)).limit(1),
+    getSettings(db),
+  ]);
+  type U = { inputTokens: number; outputTokens: number; costUsd: number };
+  const u = (a: (typeof agents)[number]) => (a.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }) as U;
+  const t = th[0];
+  return {
+    pod: {
+      id: p.id, conditionId: p.conditionId, question: row.q, status: p.status, stage: p.stage, trigger: p.trigger, profileId: p.profileId, steering: p.steering,
+      startedAt: p.startedAt.getTime(), cancelRequestedAt: p.cancelRequestedAt?.getTime() ?? null, costSandboxS: p.costSandboxS,
+      cost: { inputTokens: agents.reduce((n, a) => n + u(a).inputTokens, 0), outputTokens: agents.reduce((n, a) => n + u(a).outputTokens, 0), costUsd: agents.reduce((n, a) => n + u(a).costUsd, 0) },
+    },
+    agents: agents.map((a) => ({
+      id: a.id, role: a.role, model: a.model, status: a.status, output: a.outputJson, usage: a.usage as U | null, durationS: a.durationS,
+      startedAt: a.startedAt?.getTime() ?? null, finishedAt: a.finishedAt?.getTime() ?? null, toolCalls: a.toolCalls ?? [],
+    })),
+    evidence: ev.map((e) => ({ id: e.id, role: e.agentRole, claim: e.claim, quote: e.quote, url: e.url, direction: e.direction, publishedAt: e.publishedAt?.getTime() ?? null, retrievedAt: e.retrievedAt.getTime() })),
+    thesis: t ? { id: t.id, createdAt: t.createdAt.getTime(), expiresAt: t.expiresAt?.getTime() ?? null, side: t.side as Side, pHat: t.pHat, c: t.c, pPost: t.pPost, edgeC: t.edgeC, sizeUsd: t.sizeUsd, rAnn: t.rAnn, rank: t.rank, catalysts: t.catalysts, killCriteria: t.killCriteria, ...dt(t) } : null,
+    budget: st.budget, // per-pod knobs: sandboxTimeoutMin, exaCallsPerPod, plus the daily caps
+  };
 }

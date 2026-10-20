@@ -4,14 +4,20 @@
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .wordmark { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
+.wordmark i { font-style: normal; color: var(--accent); }
 .nav { display: flex; gap: var(--sp-3); font-family: var(--font-ui); height: 100%; }
 .nav a { color: var(--muted); display: flex; align-items: center; height: 40px; border-bottom: 2px solid transparent; }
 .nav a:hover { text-decoration: none; color: var(--text); }
+.nav a { gap: var(--sp-1); }
+.nav kbd { display: none; }
+.nav a:hover kbd, .nav a:focus-visible kbd { display: inline; }
+.count { font: 500 10px/1 var(--font-mono); color: var(--accent); position: relative; top: -5px; }
 .nav a[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
 .right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
 .themeBtn { font-size: var(--fs-sm); }
-.main { padding: 52px var(--sp-3) var(--sp-3); }
+.main { padding: 52px var(--sp-3) 36px; }
 .sheet { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-3); min-width: 420px; }
 .sheet::backdrop { background: var(--backdrop); }
 .sheet h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); }
 .sheet table th { position: static; background: none; text-align: left; }
+.sheet h3 { margin: var(--sp-3) 0 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 600; }

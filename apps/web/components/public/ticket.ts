@@ -19,12 +19,12 @@ export const roundTick = (side: "BUY" | "SELL", p: number, tick: number) => (sid
 export type Quote = { shares: number; cost: number; fee: number; maxLoss: number; payout: number };
 
 /** Buy `amount` USD at limit `price`: shares rounded down to 0.01; fee = taker fee (an upper bound: a resting maker fill pays none). */
-export function quote(rawPrice: number, amount: number, feeRate: number, tick: number): Quote | null {
+export function quote(rawPrice: number, amount: number, feeRate: number, tick: number, feeExponent = 1): Quote | null {
   const price = onTick(rawPrice, tick);
   if (!(price > 0 && price < 1) || !(amount > 0)) return null;
   const shares = Math.floor((amount / price) * SHARE_STEP) / SHARE_STEP;
   if (!(shares > 0)) return null;
-  const cost = shares * price, fee = takerFeePerShare(feeRate, price) * shares;
+  const cost = shares * price, fee = takerFeePerShare(feeRate, price, feeExponent) * shares;
   return { shares, cost, fee, maxLoss: cost + fee, payout: shares };
 }
 
@@ -49,12 +49,12 @@ export function validate(price: number | null, amount: number | null, balance: n
 export type SellQuote = { shares: number; proceeds: number; fee: number };
 
 /** Sell `shares` at limit `price`: shares rounded down to 0.01; price rounds UP to the tick; fee = taker fee (an upper bound); proceeds = shares x price - fee. */
-export function sellQuote(rawPrice: number, shares: number, feeRate: number, tick: number): SellQuote | null {
+export function sellQuote(rawPrice: number, shares: number, feeRate: number, tick: number, feeExponent = 1): SellQuote | null {
   const price = onTickUp(rawPrice, tick);
   if (!(price > 0 && price < 1) || !(shares > 0)) return null;
   const n = Math.floor(shares * SHARE_STEP + 1e-9) / SHARE_STEP;
   if (!(n > 0)) return null;
-  const fee = takerFeePerShare(feeRate, price) * n;
+  const fee = takerFeePerShare(feeRate, price, feeExponent) * n;
   return { shares: n, proceeds: n * price - fee, fee };
 }
 

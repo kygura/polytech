@@ -37,7 +37,7 @@ export function ProfileToolbar({ name, enabled, nameError, dirty, isNew, blocker
       </div>
       {confirm && <span className={`${cx.line} muted`}>Delete &lsquo;{name}&rsquo;? Past pods keep their steering snapshot.</span>}
       {nameError && <span className="neg" role="alert">{nameError}</span>}
-      {status && <span className={`${cx.line} ${status.tone}`} role="status">{status.text}{status.fleet && <> · <Link href="/fleet">View in Fleet</Link></>}</span>}
+      {status && <span className={`${cx.line} ${status.tone}`} role="status">{status.text}{status.fleet && <> · <Link href="/runs">View in Runs</Link></>}</span>}
     </div>
   );
 }

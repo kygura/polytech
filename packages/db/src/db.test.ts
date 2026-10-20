@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { getDb, insertSnapshots, latestSnapshot, memoryKv, migrate, schema as s } from "./index";
 
@@ -40,6 +41,20 @@ describe("db (pglite memory)", () => {
     await db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
     await db.insert(s.researchProfiles).values({ id: "rp1", name: "p", filter: {}, steering: {} });
     expect((await db.select().from(s.fills))[0]?.paper).toBe(true);
+    // rev 7 tables
+    await db.update(s.markets).set({ liquidity: 1500, rulesHash: "h", resolutionSource: "official_data" }).where(eq(s.markets.conditionId, "c1"));
+    expect((await db.select().from(s.markets).where(eq(s.markets.conditionId, "c1")))[0]).toMatchObject({ liquidity: 1500, negRiskAugmented: false });
+    await db.insert(s.marketLatest).values({ conditionId: "c1", mid: 0.4, depth2c: 120, largeTrade24h: true, structural: ["ladder"], opportunity: { side: "YES", edge: 0.05, stake: 10, o: 1.2, contrarian: false } });
+    expect((await db.select().from(s.marketLatest))[0]).toMatchObject({ mid: 0.4, structural: ["ladder"] });
+    await db.insert(s.views).values({ id: "v1", name: "liq", query: "liq:1k..", columns: ["mid"] });
+    expect((await db.select().from(s.views))[0]?.columns).toEqual(["mid"]);
+    await db.insert(s.alerts).values({ conditionId: "c1", kind: "mid_move", message: "m", data: { c: 6 } });
+    const al = (await db.select().from(s.alerts))[0]!;
+    expect(al.ackedAt).toBeNull();
+    await db.insert(s.journal).values({ thesisId: "t-r7", conditionId: "c1", pHat: 0.6, brierModel: 0.1, paperPnl: 2 });
+    expect((await db.select().from(s.journal))[0]).toMatchObject({ thesisId: "t-r7", brierModel: 0.1, result: null });
+    await db.update(s.pods).set({ cancelRequestedAt: now, status: "cancelled", stage: "agents" }).where(eq(s.pods.id, "p1"));
+    expect((await db.select().from(s.pods).where(eq(s.pods.id, "p1")))[0]).toMatchObject({ status: "cancelled", stage: "agents", cancelRequestedAt: now });
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);
   });

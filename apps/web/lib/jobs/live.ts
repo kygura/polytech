@@ -224,7 +224,7 @@ async function proposeExits(d: Deps, top: Mode, skip: (r: string) => void) {
     const bid = yes ? sn?.bestBid : sn?.bestAsk == null ? null : 1 - sn.bestAsk;
     if (bid == null || sn?.mid == null) { skip("NO_BOOK"); continue; }
     const tick = tickOf(m), limit = Math.max(tick, Math.round(Math.floor(Math.round((bid - 0.02) / tick * 1e6) / 1e6) * tick * 1e8) / 1e8);
-    const shares = Math.floor(p.size * SHARE_STEP) / SHARE_STEP;
+    const shares = Math.floor(p.size * SHARE_STEP + 1e-6) / SHARE_STEP; // 1073.59 * 100 = 107358.99999…: without the nudge the exit leaves 0.01 dust
     if (!(shares > 0)) continue;
     const sizeUsd = shares * limit;
     if ((await currentMode(db)) !== top) { skip("MODE_CHANGED"); break; }

@@ -880,3 +880,149 @@ The price prefill when a market is selected: best ask for Buy, best bid for Sell
 ### 11.8 Accessibility
 
 §7 and §10.7 rules apply, with these changes: the ticket submits only through the arm-then-sign path in 11.5 (replaces §10.7's "Enter in the amount field submits"); the ladder is a `grid` with `aria-label="Order book, YES, in cents"` and roving tabindex; FeedBadge is `role="status"` with the text, never a dot alone; key caps are `<kbd>` inside the visible label, and every keyboard action has a button or click target with the same name.
+
+## 12. Rev 7 — unified terminal
+
+Scope: SPEC "Rev 7 — Polyscout merge", "Unified terminal". One authenticated shell for Screener, Watchlist (+ alerts), Runs, Research, Journal, Book, Autonomy, Settings, with `/trade` (§11) one click away in both directions. Polyscout's views come over as behaviours; their look is re-expressed with the §1 tokens and §5 components. Nothing in §11 (terminal internals, `.term` tokens, 11.5 key map) changes except the two additions in 12.1.4. Sections 2–5 stay in force where this section is silent; where they conflict, this section wins.
+
+### 12.1 Shell
+
+#### 12.1.1 Token strategy: two palettes, one set of shapes
+
+The operator shell keeps the §1 `:root` tokens; `/trade` keeps the §11.1 `.term` tokens. Neither adopts the other's colours (the terminal's purple focus and blue/orange YES/NO would collide with `--accent` and `--mode-*` meanings in the operator app; the operator's `--pos`/`--neg` for YES/NO would break 11.1's "identity ≠ direction" rule). What is shared is shape and language, implemented once in `globals.css` with no token prefix:
+
+- Wordmark: both headers read `PM/EDGE` in the mono font, 600, with the `/` coloured `--accent` (operator) or `--t-focus` (terminal). The terminal keeps its ` terminal` suffix; the operator header has none.
+- `<kbd>` caps: one `kbd` rule in `globals.css`: `font: 500 10px/14px var(--font-mono); padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius); color: var(--muted); background: var(--surface-2)`. Inside `.term` the existing 11.1 rule already matches this geometry with `--t-*` tokens; leave it.
+- Status language: text plus dot, never a dot alone; the operator `SseIndicator` now reads `live · 14:02:11` (`--pos`), `reconnecting · 3s` (`--warn`, blinking dot, counts down to the next retry), `offline · retrying` (`--neg`). Same pattern as `FeedBadge` (11.7).
+- Selection: 2px left bar `--accent` + `--surface-2` row (DataTable today) is the only selection style in both apps (`--t-focus` in the terminal).
+- Help sheet: the operator `?` dialog adopts the terminal's two-column `<kbd>` layout, grouped by scope (`Global`, then the current view).
+
+New `:root` tokens (dark / light), all checked ≥ 4.5:1 on `--surface`:
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `--badge-s` | `#a58bf5` | `#6a4bd1` | structural mispricing badge `S` |
+| `--badge-c` | `#d97bb0` | `#a63a78` | contrarian badge `C` |
+
+Everything else reuses existing tokens: pinned `--accent`, has-thesis `--pos`, stale `--warn`, running `--accent`, DSL classes below. Tinted fills are `color-mix(in srgb, var(--X) 15%, transparent)`; no new fill tokens.
+
+#### 12.1.2 Header (40px, unchanged geometry)
+
+Nav order and labels, left to right: `Screener` `/markets` · `Watchlist` `/watchlist` · `Trade` `/trade` · `Runs` `/runs` · `Research` `/research` · `Journal` `/journal` · `Book` `/paper` · `Autonomy` `/autonomy` · `Settings` `/settings`. `Trade` is a plain `<a>` (route group change; it leaves the operator shell). `Runs` carries a superscript count of live pods (`--accent`, mono 10px) when > 0; `Watchlist` carries the unacked alert count the same way. Hovering a nav item shows its `g` chord as a `<kbd>` after the label (hidden otherwise). Right side unchanged: `find market`, `theme`, `SseIndicator`, `ModeBadge`, `ApprovalsBadge`, `KillSwitchButton`. Active item: `--text` + 2px bottom `--accent` as today.
+
+Redirects (permanent): `/fleet` → `/runs`, `/calibration` → `/journal`. `/m/[id]` from §2 was never built; the detail stays at `/markets/[id]`, so `/markets` as the Screener makes list → detail one path.
+
+#### 12.1.3 Keyboard (`useGlobalKeys`, `GO` map)
+
+| Chord | Goes to | Note |
+|---|---|---|
+| `g m` | `/markets` Screener | new (m = markets) |
+| `g w` | `/watchlist` | kept |
+| `g t` | `/trade` | new; lowercase `t` alone stays theme |
+| `g f` | `/runs` | kept from Fleet (muscle memory; the sheet says "runs (fleet)") |
+| `g r` | `/research` | kept |
+| `g j` | `/journal` | new; `g c` also goes to `/journal` but is not listed |
+| `g p` | `/paper` Book | kept |
+| `g a` | `/autonomy` | kept |
+| `g s` | `/settings` | kept |
+| `g n` | toggles the alerts drawer (12.5) | new; not a route |
+
+`/` rule change: if the current view has an input with `data-filter` (screener query bar, watchlist `FilterInput`, research list filter), `/` focuses the first one; otherwise it opens `MarketSearch` as today. `Esc`, `?`, `t` unchanged. `j`/`k`/`Enter` stay DataTable's. View keys are listed per view below and in the `?` sheet under the view's name; `SHORTCUTS` becomes `{ scope, keys }[]`.
+
+#### 12.1.4 Cross-links with `/trade`
+
+- Operator → terminal: the `Trade` nav item and `g t`. Leaving does not touch theme storage; 11.1's "dark when unset" rule still applies on terminal paths.
+- Terminal → operator: `TopBar` gets a link `← Operator` to `/markets` right after the logo, `--t-dim` text, `--t-text` on hover, 11.5 `locked` rule applies (blocked while an order is mid-send, same `onBlocked` message). It renders only when a session exists: `TerminalPage` calls `GET /api/session` once on mount (`{ operator: boolean }`, 200 for everyone, no caching headers) and keeps the answer in state. Anonymous visitors never see the link. The terminal's `g` map gains `g o` → `/markets` under the same condition; `KeyLegend` is unchanged (the `?` sheet lists `g o`).
+
+#### 12.1.5 Status bar (new, `StatusBar.tsx`)
+
+Fixed bottom, full width, 24px, `--surface`, 1px top border `--border`, mono `--fs-xs`, `--muted` by default. `main` padding-bottom becomes `36px`. Segments separated by `│` in `--faint` with `8px` padding each side, left to right:
+
+1. `SseIndicator` (moves here from the header; the header keeps `ModeBadge`, `ApprovalsBadge`, `KillSwitchButton`). While not `live`, a 2px `--warn` line runs along the top edge of the bar.
+2. `runs 2 active` (`--text`) or `runs idle` (`--muted`). Click → `/runs`. `title` lists `podId8 · stage · market` per live pod.
+3. `spend $4.12 / $25.00` + `MeterBar` 80px. Fill `--accent` < 80 %, `--warn` ≥ 80 %, `--neg` ≥ 100 % where the label reads `cap reached $25.40 / $25.00`. Click → `/settings#budget`.
+4. `snapshot 7m · sweep 2h` ingest ages from the latest `snapshots.ts` and the latest sweep. Each age is `--text` under 2× its cadence, `--warn` to 6×, `--neg` beyond (cadences: snapshot 15 min, sweep 24 h; `STALE_MS` stays the banner rule).
+5. `alerts 3` in `--warn` when unacked > 0 (`alerts 0` muted). Click or `g n` opens the alerts drawer (12.5). `aria-label="3 unacknowledged alerts"`.
+6. `14:02:11 UTC`, right-aligned (margin-left auto), ticks each second with tabular nums; a pending `g` chord shows `g…` in `--accent` just before the clock for 800 ms.
+
+Data: one `GET /api/status` (`{ activeRuns: {id, stage, question}[], spendTodayUsd, dailyCapUsd, lastSnapshotAt, lastSweepAt, unackedAlerts }`) fetched on mount, on `pod.*`, `snapshot.done`, `sweep.done`, `alert.created` (new SSE event) and every 30 s while SSE is not live. Under 1100px the ingest and clock segments hide; the bar never wraps.
+
+### 12.2 Screener `/markets`
+
+Layout: a 32px bar row (`ViewMenu` 200px · `QueryBar` flex · `312 mkts` + `[c] cols` 120px), then a row with `FilterPanel` 240px left rail (toggle `f`, open by default, collapsed state in `localStorage pm.screener.panel`) and the table filling the rest. The table scroll container is `calc(100dvh − 40 − 24 − 32 − 36px)`; the page itself does not scroll. URL is the truth: `/markets?q=<query>&view=<id>`; `q` is written with `router.replace` 250 ms after the last valid parse.
+
+**QueryBar**: single-line `<input data-filter>` 32px, mono `--fs-md`, `--surface-2` bg, 1px `--border`, focus ring per §1. The text is transparent with `caret-color: var(--text)`; a `DslHighlighter` mirror sits under it (`pointer-events: none`, scroll-synced by `translateX(−scrollLeft)`). Token classes, one CSS class each in `screener.module.css`: `.key` `--accent` (known key), `.op` `--muted` (`:` `..` `,` `>` `<`), `.val` `--text`, `.neg` `--neg` (a leading `-` on a key or value), `.word` `--muted` (bare text search), `.err` `text-decoration: underline wavy var(--neg)` on the whole token that `parseQuery` reported at that `col` (unknown key, bad range, bad enum). Parsing runs on every keystroke with `parseQuery` from `@pm/core`; a valid parse fetches `GET /api/markets?q=` after 250 ms; an invalid parse fetches nothing and dims the table to 60 % opacity (last good rows stay).
+
+**Error line** (under the bar, 16px, mono `--fs-xs`): `⚠ col 41: unknown key "sprd"` in `--neg`, followed by a suggestion chip when `error.suggestion` exists: a `<button>` styled as a `kbd` cap reading `spread` with `title="replace (Tab)"`; clicking it or pressing `Tab` while the caret is inside the bad token and no hint list is open replaces that token's key and re-parses. More than one error: ` · +2 more` in `--muted`; only the first is shown.
+
+**Hints** (`DslHints`): a `role=listbox` popover under the bar, 420px, `--surface`, 1px `--border`, `box-shadow: 0 8px 24px var(--backdrop)`, rows 26px. It opens while typing the key part of a token and lists `DSL_KEYS` entries whose `key` or alias starts with the typed prefix: `key` in `--accent` (mono), `example` in `--text`, `description` in `--muted` (ui font, truncated). After `tag:`, `cat:`, `src:`, `struct:`, `is:`, `has:` it lists known values (tags/categories from the loaded rows, enums from core). `↓`/`↑` move, `Tab`/`Enter` accept (inserts `key:` and keeps the caret), `Esc` closes the list, a second `Esc` blurs. Keys (SPEC "DSL fields"): `liq vol24h depth spread price days stale top1 holders tag cat src struct prio opp edge sort is has limit offset`.
+
+**FilterPanel**: `Filter` is the single source of truth (`useScreenerFilter`): bar text → `parseQuery` → `Filter` → panel; a panel edit → `formatQuery(filter)` replaces the bar text verbatim. Sections (collapsible `<details>` with the §5 pane title style): Liquidity & volume (`liq`, `vol24h`), Book (`depth`, `spread`, `price`), Time (`days`, `stale`), Crowd (`top1`, `holders`), Resolution (`src` checkboxes), Structural (`struct` checkboxes), Scores (`prio`, `opp`, `edge`), Flags (`is:watch`, `is:pinned`, `is:muted`, `has:thesis` as tri-state `any / yes / no`), Tags & category (`TagInput` chips; exclude chips show `−tag` in `--neg`). Each range is two 64px mono inputs `[min]..[max]` accepting `2k`, `1.5M`, `0.06`, `6¢`, committing on blur or `Enter`. While the bar has an error the panel is disabled and shows `query has errors` in `--warn` at its top.
+
+**ViewMenu**: a 200px button `Default ▾` (name, `•` in `--accent` when `formatQuery(filter)` differs from the view's canonical query). Menu (`role=menu`, same popover style): `Default` (built from Settings → Filters: `days:{min}..{max} depth:>{minDepth} sort:-prio`, read-only), the rows of `GET /api/views`, a divider, `Save as…` (`Ctrl+S`; 360px dialog with one name field, `POST /api/views {name, query, columns}`), `Rename`, `Delete` (saved views only; delete asks `Delete view "Asymmetry"?`), `Revert`. Picking a view sets `q` and `view`, and applies the view's `columns`.
+
+**Table**: `DataTable` gains `virtual?: { rowHeight: 26; overscan: 20 }`. When set: `table-layout: fixed`, every column has a `width`, and only the visible window renders between two spacer `<tr>`s whose heights are the hidden rows × 26. Infinite pages: when the selection or scroll is within 50 rows of the end, fetch the next page by appending `offset:` to the query (`limit` 200). Sorting a header writes `sort:-prio,days` back into the query (shift-click adds a secondary); the bar stays the truth.
+
+Default columns, in order (`market_latest` unless noted): `flags` 64 · `Market` flex ≥ 280 (`MarketCell`) · `Mid` 56 (`p` fmt) · `Sprd` 48 (cents, 1 dp) · `Liq` 64 (`usd`) · `Vol24` 60 (`usd`, markets) · `D±2¢` 60 (`usd`) · `Days` 44 (`int`) · `Stale` 48 (`18h` / `4d` since `last_trade_ts`) · `Top1` 48 (`pct`) · `Src` 40 (`off sch med sub unk`, title = full name) · `Prio` 44 (`0.00`, cell bg `color-mix(--accent, priority×20%)`) · `Opp` 52 (`opportunity.o`, 3 s.f., `—` when null) · `Edge¢` 56 (`EdgeBadge` from `opportunity.edge`). Default sort `sort:-prio`. Extra columns in the picker: `bid ask d1c d5c exit cap holders hhi top5 flow24 (signed usd) ticket (median) lasttrade end (YYYY-MM-DD) cat`.
+
+Badges (`Badge`, 14×14, 1px border + 10px mono 600 letter in the badge colour, 15 % tint fill; `title` gives the reason) in fixed order `● S C T Z`: `●` pinned (`--accent` dot, not boxed, as the Watchlist), `S` structural (`--badge-s`, title lists `structural[]` kinds), `C` contrarian (`--badge-c`, `opportunity.contrarian`), `T` has-thesis (`--pos`), `Z` stale (`--warn`, `last_trade_ts` older than 48 h, title `no trade for 3d`).
+
+**Column picker**: popover from `[c] cols` (`c`), 256px: `Columns` title + `Reset`, then every column as a checkbox row (26px, mono label), visible ones first with `↑`/`↓` buttons (no drag). Persists in `localStorage pm.cols.<viewId>` and into `views.columns` on save.
+
+**States**: loading `Skeleton` 20 rows; empty `No markets match. Loosen a range or drop a tag.` with `Clear query`; error `ErrorBar` above the table, last rows kept; stale (snapshot > `STALE_MS`) uses `DataTable muted`. Count cell shows the §4 spinner while refetching (`312 mkts`).
+
+**Keys** (view scope, ignored in inputs): `/` focus bar · `j`/`k` select · `Enter` open `/markets/[id]` · `p` pin/unpin · `m` mute/unmute · `r` research (same endpoints as Watchlist, optimistic, `ErrorBar` on failure) · `f` filter panel · `c` columns · `v` view menu · `Ctrl+S` save view · `Esc` close popover, then blur. A row selected for 300 ms prefetches its detail (`router.prefetch`).
+
+### 12.3 Runs `/runs` and `/runs/[podId]`
+
+Route decision: `/runs/[podId]` (not `/fleet/...`); `/fleet` redirects. APIs: `/api/fleet` unchanged for the list, new `GET /api/pods/[id]` (pod, agents with `tool_calls`, evidence, thesis/result, budget) and `POST /api/pods/[id]/cancel`.
+
+**List**: `BudgetStrip` unchanged, then `PodTable` with two column changes: `Stage` after `Status` (text `rules · agents · judge · sizing · done`, `--accent` while live, `--muted` otherwise) and `Cost` after `Tokens` (`$1.42`). Row click / `Enter` navigates to `/runs/[podId]` (the expand-in-place from 3.4 is retired). Live pods stay pinned on top; the one allowed flash stays. Empty: `No runs yet. Press r on a market.`
+
+**Detail** (one column, panes in this order):
+
+1. `RunHeader` pane: `← Runs` link; line 1: `StatusDot` + status, question (link to `/markets/[id]`, truncated 72ch), `pod 7f3a2c1d`, `started 09:12:04`, `elapsed 06:41` (ticks each second while live), right: `Cancel` button (`--neg` border/text, transparent bg, label `[x] Cancel`), shown only while status is `queued`/`running`/`judging`. Line 2: `StageStepper` left, `CostMeter` right.
+2. `StageStepper`: `rules ─ agents ─ judge ─ sizing ─ done` in mono `--fs-sm`; completed stages `--pos` joined by `━`, the current stage `--accent` 600, pending `--faint` joined by `─`. On `failed`/`cancelled` the last node is replaced by `✕ failed` (`--neg`) or `⊘ cancelled` (`--muted`); the stepper stops at `pods.stage`.
+3. `CostMeter`: `$1.42 / $3.00` + `MeterBar` 120px (same thresholds as the status bar) + `Σ 31 tools` in `--muted`. Per-pod budget = `settings.budget.perPodUsd` when present, else `dailyCapUsd / maxPodsPerDay`; the `title` says which.
+4. `ResultCard` (only when `done`; on `failed` an `ErrorBar` with the error and the stage reached stands here): headline row in mono `--fs-lg` 600 with `--muted` labels: `p̂ 0.470` · `p_post 0.455` · `p_pre 0.440` · `mid 0.425` · `Edge¢ +3.2` (`EdgeBadge`) · `c 0.62`. Second row mono `--fs-md`: `BUY YES ≤ $180 · E[P] +$18.4 · r_ann 143% · payoff 1.35× · 23d`, side coloured `--pos`/`--neg` as the Watchlist; when the thesis has no positive edge the row reads `NO TRADE · best side YES edge −0.4¢` in `--muted`. Third row: `contrarian C` badge when flagged, `Open thesis →` link to the market. Thesis prose is not repeated here.
+5. `AgentTable` (`AgentRunTable` extended; `DataTable`, `keys` on): `Role` (R S B N J order) · `Model` · `Status` (`StatusDot`; `running` = `--accent`) · `Started` · `Dur` (live tick) · `Tokens in/out` · `Cost` · `Tools` (count) · `p` (`—` for rules) · `retry` tag. Rows with status `running` carry a 1px `--accent` left border in addition to the selection bar. `Enter`/click expands the row in place (`renderExpanded`) with `ToolCallLog`; `view output` link opens the existing `Drawer` with the JSON.
+6. `ToolCallLog`: `agent_runs.tool_calls` chronological, mono `--fs-sm`, one line per call: `09:14:02` (`--muted`) `web_search` (`--accent`) then `input` truncated to the cell (full in `title`); `ok:false` appends `→ error` in `--neg`. Max height 320px, scrolls; autoscroll only while already at the bottom, otherwise a `↓ 4 new` chip (kbd style) at the bottom right. Empty: `No tool calls recorded.`
+7. `EvidenceStream` pane: all evidence rows for this pod newest first, `EvidenceTable` columns plus a leading `Role` column; title `Evidence (14)`. Empty `No evidence yet`.
+
+**Cancel**: `x` or the button opens a native `<dialog>` (`.sheet` style, 360px): `Cancel run? Agents that finished are kept; no thesis will be written.` with `Keep (Esc)` and `Cancel run (Enter)` (the latter `--neg` filled). Confirm → `POST .../cancel`, button reads `cancelling…` disabled until `pod.done`/`pod.failed`/`pod.cancelled` arrives or the poll shows `cancelled`.
+
+**Live**: refetch on SSE `pod.started|agent|done|failed|cancelled` for this pod; while the pod is live also poll `GET /api/pods/[id]` every 5 s (SPEC: runs must be live across instances). The elapsed and duration cells tick locally.
+
+### 12.4 Journal `/journal` (replaces Calibration)
+
+Controls row (`panels.module.css .controls`): `category`, `model`, `window` selects as today, plus `group by` (`category · model · liquidity band · R bucket`) and `min n` (number, default 5). All in the URL.
+
+Panes, top to bottom:
+
+1. `KpiStrip` (`.strip`, 6 cells, each: `--muted` ui label over a mono `--fs-xl` 600 value — the one place `--fs-xl` appears outside the header): `Resolved 41` · `Brier model · mkt · Δ` `0.184 · 0.201 · −0.017` (Δ via `Delta`, `--pos` when ours < market) · `Log loss 0.55` · `Pre → final 0.192 → 0.184` · `Drift 24h · 7d` `+0.6¢ +1.4¢` (`EdgeBadge` semantics; positive = moved toward p̂) · `Paper P&L +$412` (signed, `--pos`/`--neg`). Under 30 resolved a 7th muted cell reads `12/30 resolved · refit unlocks at 30`.
+2. Two-up (`.half`): left `Reliability` (existing `ReliabilityChart` + its Brier line, unchanged); right `Paper P&L` (`PnlCurve`, SVG 100% × 220): cumulative `journal.paper_pnl` ordered by `resolved_at`, step line `--text` 1.5px, area between the line and zero filled `color-mix(--pos 15%)` above and `color-mix(--neg 15%)` below, zero axis `--muted`, y labels `$`, x first/last date. Hover tooltip `MM-DD · +$412 · n 23` (§5 chart rules).
+3. Two-up: left `Brier · model vs market vs pre-reveal` (`BrierCompareChart`, SVG 100% × 200): rolling-20 Brier over resolution order, three lines: model `--text` solid, market `--muted` dashed `4 3`, pre-reveal `--accent` dotted `1 3`; fill between model and market `color-mix(--pos 15%)` where model is lower, `--neg` where higher. Legend as text in the pane title line: `— model  ╌ market  ⋯ pre-reveal`. Needs ≥ 20 rows; otherwise `EmptyState` `Rolling Brier needs 20 resolved theses (n=12).` Right `Drift toward p̂` (`DriftHistogram`, SVG 100% × 200): 1¢ bins from −10 to +10 (clamped), two bar series side by side, 24h `--text`, 7d `--muted`, mean markers as dashed verticals in the series colour with labels `μ24 +0.6¢`, `μ7 +1.4¢`. x labels every 5¢ with signs.
+4. `BreakdownTable` (replaces `BrierTable`; `DataTable`): `Group` · `n` · `Brier` · `Mkt Brier` · `Δ` (`Delta`) · `Pre Brier` · `Log loss` · `Drift 7d` (`EdgeBadge`) · `P&L` (signed usd) · `Hit %` · `c` · `gate` (`12/30`, as 3.5). Groups with `n < min n` render `--muted` and sort last. Liquidity bands: `<$5k`, `$5–25k`, `$25–100k`, `>$100k`; R buckets: `<0.3`, `0.3–0.6`, `>0.6`.
+5. When `settings.suggested` is non-null, a one-line `.bar .barWarn`: `Refit suggested from n=34: extremize 1.00 → 1.12 · apply in Settings →` (link to `/settings#calibration`). Apply never happens here.
+
+Empty (0 resolved): `No resolved theses yet. Edge is measured forward; rows appear as markets resolve.` Charts still render with an `n=12 · low confidence` watermark in `--faint` (`--fs-xs`, top-right) below 30.
+
+**Refit card (Settings)**: a new `FormGroup` `Calibration` (`id="calibration"`) with the `extremize` field (number, 2 dp, unit `×`, range 0.5–2) and, only when `suggested` exists, a `SuggestedRefit` block above the field: title `Suggested from journal (n=34, computed 2026-10-19)`, a 3-column mono table `component · current · suggested · Δ` (one row: `extremize 1.00 1.12 +0.12`), buttons `Dismiss` (clears `suggested`, `POST /api/settings`) and `Apply suggested` (`--accent` filled; confirm dialog repeats the row: `Apply extremize 1.12? Future p̂ blends use it; past journal rows are not rewritten.`). Apply writes `extremize` and clears `suggested` on its own, independent of the group's Save; it is disabled with the hint `Save or discard edits first` while the group is dirty.
+
+### 12.5 Alerts
+
+**Drawer**: the existing `Drawer` (`<dialog>`), restyled as a right rail: `position: fixed; inset: 40px 0 24px auto; width: 360px; height: auto; margin: 0; border-left: 1px solid var(--border)`; backdrop `--backdrop`. Title `Alerts · 3 unacked`; head right: `ack all (A)` button when unacked > 0 and a `show acked` checkbox (default off; on, the last 50 acked rows render muted below a `.divider acked`). Opens from the status bar segment, `g n`, or the `Watchlist` alerts tab's `open drawer` link. `Esc` closes (native). Data: `GET /api/alerts?acked=0|1&limit=`, refetched on SSE `alert.created`/`alert.acked` and every 30 s otherwise.
+
+**Watchlist tab**: `Tabs` gains `Alerts` (count = unacked) after `Structural`. The tab body is the same `AlertsList` component as the drawer at full width (max 720px), with the `show acked` checkbox in the watchlist bar.
+
+**Item anatomy** (`AlertItem`, `<li role=option>`, min height 44px, 1px bottom `--border`, selected = 2px left `--accent` + `--surface-2`): column 1 `●` `--accent` unacked / `○` `--faint` acked (`aria-label`). Column 2, line 1 mono `--fs-sm`: `09:31` (`--muted`) · kind glyph · kind label; line 2 ui `--fs-md`: `message` truncated (full in `title`); line 3 (when `condition_id`) `MarketCell` style question in `--muted`. Column 3: `[ack]` kbd-style button on unacked rows. Unacked rows: `--text` 600 on lines 1–2; acked: `--muted` 400. Glyphs by kind: `mid_move` `↕` (`--text`; `data.deltaC` appended to the kind, signed `EdgeBadge`), `catalyst_passed` `⏱` (`--warn`), `new_candidate` `▲` (`--pos`), `structural` `◆` (`--badge-s`), `run_failed` `✕` (`--neg`). Click/`Enter` acks and opens: `run_failed` → `/runs/[podId]` from `data.podId`, others → `/markets/[condition_id]`.
+
+**Ack**: `a` acks the selected row, `A` acks all (`POST /api/alerts/[id]/ack`, `POST /api/alerts/ack-all`); optimistic (row flips to acked at once; status bar count decrements), rollback + `ErrorBar` `Ack failed: …` on error. Keys `j`/`k`/`Enter`/`a`/`A` are scoped to the list while the drawer is open or the tab is active. Empty: `No alerts.` (unacked) / `Nothing acked yet.` Dedupe (6 h per kind + market) is server-side; the UI shows no grouping.
+
+### 12.6 Market detail additions (`/markets/[id]`)
+
+1. `MarketHeader` meta line gains the structural badges after `status`: the same `Badge` as 12.2 (`S` once per `structural[]` kind with its reason in `title`, e.g. `overround +4.1¢ net of fees`, `ladder: P(≥3.1) > P(≥3.0)`, `sibling sum 1.06`), then `C` and `Z` under the same rules. `KeyStats` is unchanged.
+2. `Price history` pane title gets a right-aligned segmented control `1D 1W 1M ALL` (`role=radiogroup`, mono `--fs-xs` buttons 22px high, selected `--text` 600 on `--surface-2` with 1px `--border`, others `--muted`; keys `[`/`]` step it while the detail view has focus). Default `1M`, kept in the URL `?range=`. The pane fetches `GET /api/markets/[id]/history?range=` (server downsamples to ≤ 600 points); `PriceHistoryChart` is unchanged apart from receiving the slice and its thesis markers filtered to the range. Empty per range: `No points in the last day`.
+3. New pane `Slippage` under `Book` (`SlippageCurve`, SVG 100% × 140, same chart rules as §5): x = order size in USD on a log scale with ticks `$10 $100 $1k $10k`, y = average fill price (`p`, 3 dp, range from best ask to best ask + 10¢). Line `--text` 1.5px; dashed `--muted` horizontal at the best ask labelled `ask 0.420`; dotted `--faint` verticals at `capacity(ε)` for ε = 0.5¢, 1¢, 2¢ labelled `0.5¢ $620` etc. in `--muted` `--fs-xs`. A `YES NO` segmented control in the pane title picks the side (default = thesis side, else YES; NO uses the complement book). Hover: `$1,200 → avg 0.431 · slip +1.1¢`. `aria-label` `Slippage curve, YES, capacity at 1¢ $1,840`. Under 2 levels: `Not enough depth for a curve.`
+4. New pane `Metrics` under `Slippage` (`MetricsGrid`, `<dl>` in 4 columns, `--fs-sm`, label `--muted` ui left, value mono right, 24px rows): `mid · bid · ask · spread (¢) · fee · liq · vol24h · OI · d±1¢ · d±2¢ · d±5¢ · exit depth · capacity (@1¢) · holders · HHI (2 dp) · top1 · top5 · flow 24h (signed usd, `--pos`/`--neg`) · median ticket · large trade 24h (`yes`/`—`) · last trade (ago) · stale (h) · priority (2 dp) · src`. Null → `—` in `--muted`. All values come from `market_latest` plus the market row; nothing is computed client-side.
+5. Right column unchanged. The detail's `← Watchlist` link becomes `← Back` and returns to the referring list (`/markets` or `/watchlist`, read from `document.referrer` path, default `/markets`).

@@ -103,6 +103,14 @@ describe("http api", () => {
     expect((await ok.json()).bankroll).toBe(2000);
   });
 
+  it("settings PUT {suggested:null} clears a refit suggestion; apply writes extremize and clears together", async () => {
+    const sug = { extremize: 1.12, n: 34, at: "2026-10-19" };
+    expect((await (await h.settings!.PUT(put(`${U}/settings`, { suggested: sug }))).json()).suggested).toEqual(sug);
+    const applied = await (await h.settings!.PUT(put(`${U}/settings`, { extremize: 1.12, suggested: null }))).json();
+    expect(applied).toMatchObject({ extremize: 1.12, suggested: null });
+    expect((await (await h.settings!.GET()).json()).suggested).toBeNull();
+  });
+
   it("rebaseline: body {ack?} validated; no exchange in tests -> 409 {error, needsAck:false}", async () => {
     expect((await h.rebaseline!.POST(post({ ack: "yes" }))).status).toBe(400);
     for (const body of [undefined, { ack: true }]) {

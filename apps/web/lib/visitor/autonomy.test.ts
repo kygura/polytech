@@ -14,7 +14,7 @@ const settings = (mode: VisitorSettings["mode"], l3: Partial<VisitorSettings["li
   ...DEFAULT_VISITOR_SETTINGS, mode, limits: { ...DEFAULT_VISITOR_SETTINGS.limits, ...lim, l3: { ...DEFAULT_VISITOR_SETTINGS.limits.l3, categoryAllowlist: ["politics"], perTradeUsd: 100, ...l3 } },
 });
 const detail = (o: { id?: string; cid?: string; snapAge?: number; research?: "done" | "pending" } = {}): PublicMarketDetail => ({
-  market: { conditionId: o.cid ?? "c1", question: "Will X?", rules: "r", category: "politics", tags: [], eventId: "e1", negRiskGroup: null, endDate: NOW + 30 * 86_400_000, daysLeft: 30, status: "active", tickSize: null, yesTokenId: "y1", noTokenId: "n1", feeRate: 0, negRisk: false },
+  market: { conditionId: o.cid ?? "c1", question: "Will X?", rules: "r", category: "politics", tags: [], eventId: "e1", negRiskGroup: null, endDate: NOW + 30 * 86_400_000, daysLeft: 30, status: "active", tickSize: null, yesTokenId: "y1", noTokenId: "n1", feeRate: 0, feeExponent: 1, negRisk: false },
   snapshot: { ts: NOW - (o.snapAge ?? 60_000), mid: 0.5, bestBid: 0.49, bestAsk: 0.51, depth5cUsd: 500, vol24h: 1000, oi: 1000, top10Share: 0.2, bids: [], asks: [], netFlow: 0 },
   history: [], screen: null,
   thesis: { id: o.id ?? "t1", createdAt: NOW - 3_600_000, expiresAt: NOW + 5 * 86_400_000, side: "YES", pHat: 0.7, c: 0.8, pPost: 0.66, edgeC: 15, catalysts: [], killCriteria: [], thesis: "t", pYes: 0.7, pMidYes: 0.5, capped: false } as unknown as PublicMarketDetail["thesis"],
@@ -124,8 +124,9 @@ describe("settings", () => {
 
 describe("sendEntry ledger", () => {
   const entry = () => entryOf(decide(input("L4"))[0]!, NOW);
+  const fx = () => fakeExchange({ now: () => new Date(NOW) });
   it("sends once; a second call never resends", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     const r = await sendEntry(ex, e, "auto", s, NOW);
     expect(r.status).toBe("sent");
     expect((await ex.openOrders()).length).toBe(1);
@@ -133,7 +134,7 @@ describe("sendEntry ledger", () => {
     expect((await ex.openOrders()).length).toBe(1);
   });
   it("place throws -> unknown, ledger written before place, never resent", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     let seen: string | undefined;
     ex.place = async () => { seen = loadLedger(s).t1?.status; throw new Error("socket hang up"); };
     const r = await sendEntry(ex, e, "auto", s, NOW);
@@ -147,7 +148,7 @@ describe("sendEntry ledger", () => {
     expect(decide(input("L4", { ledger: loadLedger(s) }))[0]).toMatchObject({ kind: "skip", reason: "DUPLICATE" });
   });
   it("rejected -> failed; kill before place -> failed, nothing sent; corrupt ledger throws", async () => {
-    const s = store(), ex = fakeExchange(), e = entry();
+    const s = store(), ex = fx(), e = entry();
     expect((await sendEntry(ex, e, "auto", s, NOW, () => false)).error).toBe("KILLED");
     expect((await ex.openOrders()).length).toBe(0);
     const s2 = store();
@@ -155,5 +156,14 @@ describe("sendEntry ledger", () => {
     expect((await sendEntry(ex, e, "auto", s2, NOW)).status).toBe("failed");
     s2.m.set(LEDGER_KEY, "{");
     await expect(sendEntry(ex, e, "auto", s2, NOW)).rejects.toThrow(/corrupt/);
+  });
+});
+
+describe("assess: extremize", () => {
+  it("applies the server's log-odds multiplier to pYes (same sizing as the server), none when absent", () => {
+    const withK = (k?: number): Candidate => { const c = cand(); return { ...c, detail: { ...c.detail, thesis: { ...c.detail.thesis!, pYes: 0.6, ...(k ? { extremize: k } : {}) } } }; };
+    const size = (k?: number) => (decide(input("L2", { candidates: [withK(k)] }))[0] as { sizeUsd?: number } | undefined)?.sizeUsd ?? 0;
+    expect(size(3)).toBeGreaterThan(size());
+    expect(size(1)).toBeCloseTo(size(), 9);
   });
 });

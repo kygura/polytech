@@ -17,6 +17,8 @@
   --mode-4: #f0616d;
   --kill: #ff3b3b;
   --on-kill: #fff;
+  --badge-s: #a58bf5;
+  --badge-c: #d97bb0;
   --backdrop: rgb(0 0 0 / 0.5);
 
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -51,6 +53,8 @@
   --mode-3: #c2410c;
   --mode-4: #c6333f;
   --kill: #d00000;
+  --badge-s: #6a4bd1;
+  --badge-c: #a63a78;
   color-scheme: light;
 }
 
@@ -95,6 +99,9 @@ th { height: 28px; font-weight: 600; background: var(--surface-2); color: var(--
 tbody tr { border-top: 1px solid var(--border); }
 tbody tr:hover { background: var(--surface-2); }
 .num, th.num, td.num { text-align: right; font-family: var(--font-mono); }
+
+/* Shared shape (DESIGN 12.1.1): key caps. The terminal restyles kbd with its --t-* tokens (terminal.module.css). */
+kbd { font: 500 10px/14px var(--font-mono); padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius); color: var(--muted); background: var(--surface-2); }
 
 .ui { font-family: var(--font-ui); }
 .muted { color: var(--muted); }

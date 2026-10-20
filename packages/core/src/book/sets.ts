@@ -53,7 +53,7 @@ const r8 = (x: number) => Math.round(x * 1e8) / 1e8;
  * All legs are BUYs: buy-all = YES at the ask; sell-all = NO at 1 - bid (pays n-1). Thinnest leg first.
  * Each leg is capped at price + slack; edge is the worst-case locked profit after fees. null edge <= 0 or too thin.
  */
-export function setLegPlan(kind: "buy-all" | "sell-all", legs: SetInputLeg[], shares: number, feeRate = 0, slack = 0.01):
+export function setLegPlan(kind: "buy-all" | "sell-all", legs: SetInputLeg[], shares: number, feeRate = 0, slack = 0.01, feeExponent = 1):
   | { ok: true; legs: PlannedLeg[]; totalCost: number; edge: number }
   | { ok: false; reason: "TOO_THIN" | "NO_EDGE" } {
   const buy = kind === "buy-all";
@@ -62,7 +62,7 @@ export function setLegPlan(kind: "buy-all" | "sell-all", legs: SetInputLeg[], sh
     return { g, size: q.size, limit: Math.min(0.99, r8(q.price + slack)) };
   });
   if (rows.some((r) => !(r.size >= shares))) return { ok: false, reason: "TOO_THIN" };
-  const perShare = rows.reduce((t, r) => t + r.limit + takerFeePerShare(feeRate, r.limit), 0);
+  const perShare = rows.reduce((t, r) => t + r.limit + takerFeePerShare(feeRate, r.limit, feeExponent), 0);
   const edge = r8(shares * ((buy ? 1 : legs.length - 1) - perShare));
   if (!(edge > 0)) return { ok: false, reason: "NO_EDGE" };
   rows.sort((a, b) => a.size - b.size);

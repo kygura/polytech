@@ -2,7 +2,7 @@ import { applyFill, checkOrder, effectiveMode, feeRateFor, mirror, paperFill, pa
 import { schema as s } from "@pm/db";
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, max } from "drizzle-orm";
 import { currentMode, downgradeOn } from "./autonomy";
-import { DAY, feeOf, toMarket, toSnap, today, withLock, type Deps } from "./deps";
+import { DAY, feeExpOf, feeOf, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { latestSnaps } from "./screen";
 import { takeSnapshots } from "./sweep";
@@ -79,7 +79,7 @@ export function assess(d: Deps, t: ThesisRow, row: MarketRow, snap: SnapRow | un
   const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
   const sz = sizeTrade({
     bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: dt.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY,
-    feeRate: feeOf(m), crowdC: cr.c, crowdSide: cr.side, settings: st,
+    feeRate: feeOf(m), feeExponent: feeExpOf(m), crowdC: cr.c, crowdSide: cr.side, settings: st,
   });
   if (!sz || sz.side !== t.side || sz.sizeUsd <= 0) return { ok: false, failed: ["NO_EDGE_NOW"] };
   const q = qualifies(
@@ -93,7 +93,8 @@ export function assess(d: Deps, t: ThesisRow, row: MarketRow, snap: SnapRow | un
 /** Auto-downgrade inputs shared by paper (L1) and propose (L2). Stale = newest snapshot anywhere (feed down), not one candidate; skipped on a DB with no snapshots yet. `x` must be the book's own exposure. */
 export async function downgradeSignals(d: Deps, x: Exposure, nCands: number) {
   const now = d.now();
-  const last = ((await d.db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots)) as [{ ts: Date | null }])[0].ts;
+  const [[a], [b]] = await Promise.all([d.db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots), d.db.select({ ts: max(s.marketLatest.ts) }).from(s.marketLatest)]) as [{ ts: Date | null }[], { ts: Date | null }[]];
+  const last = a?.ts && b?.ts ? (a.ts > b.ts ? a.ts : b.ts) : (a?.ts ?? b?.ts ?? null); // market_latest moves every run; history rows skip unchanged books
   return {
     dailyLossHit: d.settings.limits.dailyLoss > 0 && !(x.dailyRealizedLoss < d.settings.limits.dailyLoss), // 0 = disabled
     bookStaleMs: !last ? 0 : nCands || now - last.getTime() > NO_CAND_STALE_MS ? now - last.getTime() : 0,
@@ -149,7 +150,7 @@ export async function paperBook(d: Deps) {
 
       const chk = checkOrder({ sizeUsd: now1.sizeUsd, marketId: m.conditionId, eventId: eventOf(row), category: row.category ?? "other" }, x, L);
       const tokenId = t.side === "YES" ? row.yesTokenId : row.noTokenId;
-      const f = paperFill(t.side === "YES" ? snap.book.asks : mirror(snap.book.bids), now1.sizeUsd, feeRateFor(m.category, m.feeRate).rate);
+      const f = paperFill(t.side === "YES" ? snap.book.asks : mirror(snap.book.bids), now1.sizeUsd, feeRateFor(m.category, m.feeRate).rate, feeExpOf(m));
       if (!tokenId || !f.complete || f.shares <= 0) { reject("THIN_BOOK"); continue; }
 
       const rules = chk.violations.map((v) => v.rule);

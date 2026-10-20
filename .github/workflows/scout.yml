@@ -1,6 +1,7 @@
 # Heartbeat for scouting on Vercel Hobby (vercel.json crons are once-per-day there).
 # A read of the public watchlist runs kickIfStale, which starts scoutChain (sweep -> snapshot -> screen -> research)
 # when the last kick is older than 30 min; its KV lock keeps overlapping pings to one start. Merged with the sweep fixes in 85b81c8.
+# With the CRON_SECRET repo secret set it also runs the alert pass (monitor job) on every beat; deduped server-side, so extra beats are cheap.
 name: scout
 
 on:
@@ -11,7 +12,9 @@ on:
 jobs:
   kick:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
+    env:
+      CRON_SECRET: ${{ secrets.CRON_SECRET }} # job-level so a step `if` can test it; empty when the secret is unset
     steps:
       - name: Ping public watchlist
         env:
@@ -19,3 +22,10 @@ jobs:
         run: |
           test -n "$SCOUT_URL" || { echo "::error::set repo variable SCOUT_URL"; exit 1; }
           curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" "$SCOUT_URL/api/public/watchlist"
+      - name: Run alert monitor
+        if: env.CRON_SECRET != ''
+        env:
+          SCOUT_URL: ${{ vars.SCOUT_URL }}
+        run: |
+          test -n "$SCOUT_URL" || { echo "::error::set repo variable SCOUT_URL"; exit 1; }
+          curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/monitor"

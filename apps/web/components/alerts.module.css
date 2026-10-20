@@ -1,0 +1,23 @@
+/* Right-rail Drawer: below the 40px header, above the 24px status bar. `dialog.rail` outranks .drawer in ui.module.css. */
+dialog.rail { inset: 40px 0 24px auto; width: 360px; max-width: 100vw; height: auto; max-height: none; margin: 0; border-left: 1px solid var(--border); }
+dialog.rail[open] { display: flex; flex-direction: column; }
+dialog.rail > :last-child { flex: 1; min-height: 0; max-height: none; padding: 0; }
+.showAcked { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); color: var(--muted); }
+.showAcked input { height: auto; }
+
+.list { list-style: none; margin: 0; padding: 0; outline-offset: -2px; }
+.item { display: grid; grid-template-columns: 16px 1fr auto; gap: var(--sp-2); align-items: start; min-height: 44px; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); border-left: 2px solid transparent; cursor: pointer; }
+.item[aria-selected="true"] { border-left-color: var(--accent); background: var(--surface-2); }
+.state { line-height: var(--lh-sm); font-size: var(--fs-sm); }
+.unacked .state { color: var(--accent); }
+.acked .state { color: var(--faint); }
+.body { display: flex; flex-direction: column; min-width: 0; }
+.l1 { display: flex; gap: var(--sp-2); align-items: baseline; font: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.time { color: var(--muted); }
+.l2 { font-family: var(--font-ui); font-size: var(--fs-md); line-height: var(--lh-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l3 { font-family: var(--font-ui); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unacked .l1, .unacked .l2 { color: var(--text); font-weight: 600; }
+.unacked .time { color: var(--muted); font-weight: 400; }
+.acked .l1, .acked .l2 { color: var(--muted); font-weight: 400; }
+.ackBtn { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); padding: 0 var(--sp-1); border-bottom-width: 2px; color: var(--muted); }
+.divider { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-xs); color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--border); text-transform: lowercase; }

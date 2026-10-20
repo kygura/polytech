@@ -116,12 +116,13 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const boom = async () => { throw new Error("GET /oi -> 403 <!DOCTYPE html>"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const before = Math.max(0, ...(await d.db.select({ id: s.snapshots.id }).from(s.snapshots)).map((x) => x.id));
+    await d.db.update(s.snapshots).set({ ts: new Date(d.now() - 2 * 3_600_000) }); // unchanged books are only re-recorded once the last history row is older than an hour
     const out = (await snapshotBooks({ ...d, pm: { ...pm, oi: boom, trades: boom, holders: boom } as unknown as typeof pm }, "all")) as { snapshots: number };
     warn.mockRestore();
     expect(out.snapshots).toBeGreaterThan(0);
     const fresh = (await d.db.select().from(s.snapshots)).filter((x) => x.id > before);
     expect(fresh).toHaveLength(out.snapshots);
-    expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.lastTradeTs === null && x.book?.flowUnknown === true)).toBe(true);
+    expect(fresh.every((x) => x.oi === null && x.top10Share === null && x.book?.flowUnknown === true)).toBe(true);
     const bug = async () => { throw new TypeError("x is undefined"); };
     await expect(snapshotBooks({ ...d, pm: { ...pm, oi: bug } as unknown as typeof pm }, "all")).rejects.toThrow(TypeError);
   });

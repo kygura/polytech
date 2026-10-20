@@ -104,14 +104,14 @@ export function assess(c: Candidate, st: ReturnType<typeof toAppSettings>, now: 
   let sz: WatchCore | null;
   try {
     const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.netFlow, skew: 0 });
-    sz = sizeTrade({ bids: book.bids, asks: book.asks, pMid, pHat: t.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: m.feeRate, crowdC: cr.c, crowdSide: cr.side, settings: st });
+    sz = sizeTrade({ bids: book.bids, asks: book.asks, pMid, pHat: t.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, crowdC: cr.c, crowdSide: cr.side, settings: st, extremize: t.extremize ?? 1 });
   } catch {
     return no("BAD_INPUT"); // sizeTrade throws RangeError on out-of-range probabilities
   }
   if (!sz || sz.side !== t.side || sz.sizeUsd <= 0) return no("NO_EDGE_NOW");
   const core: Market = {
     conditionId: m.conditionId, eventId: m.eventId ?? m.conditionId, question: m.question, rules: m.rules, category: m.category ?? "other", tags: m.tags,
-    endDate: m.endDate, negRiskGroup: m.negRiskGroup, feeRate: m.feeRate, open: ["active", "disputed", "not_accepting"].includes(m.status),
+    endDate: m.endDate, negRiskGroup: m.negRiskGroup, feeRate: m.feeRate, feeExponent: m.feeExponent, open: ["active", "disputed", "not_accepting"].includes(m.status),
     acceptingOrders: m.status !== "not_accepting", inDispute: m.status === "disputed",
   };
   const live: Snapshot = { conditionId: m.conditionId, ts: now, bids: book.bids, asks: book.asks, vol24h: snap.vol24h ?? 0, oi: snap.oi ?? 0, top10Share: snap.top10Share ?? 0, lastTradeTs: null };

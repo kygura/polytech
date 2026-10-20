@@ -8,10 +8,10 @@ type Marker = { ts: number; pHat: number; side: "YES" | "NO" };
 const W = 1000, PAD = { l: 36, r: 8, t: 8, b: 18 };
 
 /** Mid line over snapshot history, y 0–1, thesis markers as dashed verticals. */
-export function PriceHistoryChart({ series, markers, height = 180 }: { series: Pt[]; markers: Marker[]; height?: number }) {
+export function PriceHistoryChart({ series, markers, height = 180, empty = "No price history yet" }: { series: Pt[]; markers: Marker[]; height?: number; empty?: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const pts = series.filter((p): p is { ts: number; mid: number } => p.mid != null);
-  if (pts.length < 2) return <div className="muted" style={{ height }}>No price history yet</div>;
+  if (pts.length < 2) return <div className="muted" style={{ height }}>{empty}</div>;
   const t0 = pts[0]!.ts, t1 = pts[pts.length - 1]!.ts, span = t1 - t0 || 1;
   const x = (ts: number) => PAD.l + ((ts - t0) / span) * (W - PAD.l - PAD.r);
   const y = (p: number) => PAD.t + (1 - p) * (height - PAD.t - PAD.b);

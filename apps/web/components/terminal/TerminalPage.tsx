@@ -177,7 +177,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
 
   return (
     <div className={`term ${fontClass} ${css.grid}`}>
-      <TopBar feedStatus={feed.status} feedAt={feed.data?.at ?? shown.current?.feed.at ?? null} now={Date.now()} balance={clob.balance}
+      <TopBar feedStatus={feed.status} feedSource={feed.source} feedAt={feed.data?.at ?? shown.current?.feed.at ?? null} now={Date.now()} balance={clob.balance}
         query={query} onQuery={setQuery} onSearchFocus={() => setDrawer(true)} onSearchKey={searchKeys} searchRef={searchRef} locked={!switchable} onBlocked={blocked} />
       <div className={`${css.backdrop} ${drawer ? css.open : ""}`} onClick={() => setDrawer(false)} aria-hidden />
       <MarketList rows={rows} loading={wl.loading} error={wl.error} empty={empty} cats={cats} cat={cat} onCat={setCat}

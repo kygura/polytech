@@ -30,13 +30,18 @@ describe("fetch wrapper", () => {
     const pm = createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) });
     expect(await pm.feeRateBps("1")).toBe(400);
     expect(f).toHaveBeenCalledTimes(3);
-    expect(sleeps).toEqual([5000, 500]);
+    // 429: 5 s ban, then one clob refill interval (20 ms: a ban earns no tokens); 503: plain backoff. The injected sleep does not move the
+    // clock, so the last attempt waits for refill tokens; how long depends on real time elapsed, so only its bound is fixed.
+    expect(sleeps.slice(0, 3)).toEqual([5000, 20, 500]);
+    expect(sleeps.slice(3).every((ms) => ms >= 0 && ms <= 40)).toBe(true);
+    expect(sleeps.length).toBeLessThanOrEqual(4);
   });
   it("caps retry-after at 30s", async () => {
     const f = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "999" } })).mockResolvedValueOnce(json({ base_fee: "1" }));
     const sleeps: number[] = [];
     await createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) }).feeRateBps("1");
-    expect(sleeps).toEqual([30_000]);
+    expect(sleeps[0]).toBe(30_000);
+    expect(sleeps.slice(1).every((ms) => ms >= 0 && ms <= 20)).toBe(true); // refill wait shrinks with real time elapsed
   });
   it("gives up after 3 retries and does not retry 4xx", async () => {
     const f = vi.fn().mockResolvedValue(json({}, 500));
@@ -79,7 +84,9 @@ describe("pagination", () => {
     const r = await createPm({ fixtures: false, fetch: f as never, sleep: async (ms) => void sleeps.push(ms) }).walkMarkets({}, (ms) => void got.push(ms.map((x) => x.id)));
     expect(got).toEqual([["1", "2"]]);
     expect(r).toEqual({ pages: 1, complete: false });
-    expect(sleeps).toEqual([100, 5000]); // page gap, then one wait floored at 5 s; no hammering
+    // page gap, then one wait floored at 5 s plus at most a gamma refill interval (shorter when real time has passed); no hammering
+    expect(sleeps.slice(0, 2)).toEqual([100, 5000]);
+    expect(sleeps.slice(2).every((ms) => ms >= 0 && ms <= 34)).toBe(true);
     expect(f).toHaveBeenCalledTimes(3);
   });
   it("walkMarkets: budget exhausted -> complete=false after the page in flight", async () => {
@@ -163,7 +170,10 @@ describe("fixture client", () => {
     expect((await pm.holders([l2.condition_id]))[0]!.holders.length).toBeGreaterThan(0);
     expect((await pm.trades({ market: [l2.condition_id] })).length).toBeGreaterThan(0);
     expect(Object.keys(await pm.oi([l2.condition_id]))).toEqual([l2.condition_id]);
-    expect((await pm.pricesHistory({ token: l2.yes_token_id! })).length).toBeGreaterThan(10);
+    expect((await pm.pricesHistory({ token: l2.yes_token_id!, interval: "1w" })).length).toBeGreaterThan(10);
+    expect((await pm.clobMarket(l2.condition_id))!.tokens.map((t) => t.token_id)).toContain(l2.yes_token_id);
+    expect((await pm.book(l2.yes_token_id!))!.token_id).toBe(l2.yes_token_id);
+    expect(await pm.book("no-such-token")).toBeUndefined();
     expect(await pm.feeRateBps(l2.yes_token_id!)).toBe(700);
     expect(await pm.tickSize(l2.yes_token_id!)).toBe(0.01);
     expect(Object.keys(await pm.spreads([l2.yes_token_id!]))).toHaveLength(1);
@@ -174,7 +184,7 @@ describe("fixture client", () => {
   });
   it("network failures after retries are marked like HTTP failures", async () => {
     const pm = createPm({ fixtures: false, fetch: (async () => { throw new TypeError("fetch failed"); }) as never, sleep: async () => {} });
-    await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/oi -> network fetch failed/);
+    await expect(pm.oi(["0x1"])).rejects.toThrow(/^GET \/v2\/oi -> network fetch failed/);
   });
 });
 

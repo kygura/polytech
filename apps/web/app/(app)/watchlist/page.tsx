@@ -3,7 +3,7 @@ import { desc } from "drizzle-orm";
 import { read } from "../../../lib/jobs";
 import { WatchlistView, type Tab } from "./WatchlistView";
 
-const TABS = new Set<Tab>(["small-cap", "size", "structural"]);
+const TABS = new Set<Tab>(["small-cap", "size", "structural", "alerts"]);
 
 export default async function WatchlistPage({ searchParams }: { searchParams: Promise<{ tab?: string; muted?: string }> }) {
   const q = await searchParams;

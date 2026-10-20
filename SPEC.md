@@ -319,3 +319,46 @@ The public `/trade` surface becomes a single-screen, multi-pane trading terminal
 **Visual direction:** a new terminal design system chosen by the user from 2–3 rendered directions (dense, numeric-first, monospaced figures, dark-first). The chosen tokens supersede `DESIGN.md` §10 for `/trade`.
 
 **Done:** `bun run build`, `bun run typecheck`, `bun run test` green; `/trade` verified in a real browser (live book updates, keyboard order path reaches the signing step, correct tick on a 0.001 market) and checked for drift against the approved mockup.
+
+## Rev 7 — Polyscout merge (2026-10-20)
+
+Polyscout (sibling repo, Hono + pg-boss + Vite) is folded into polytech. The result is one web terminal on polytech's stack: Next.js on Vercel (arn1), Drizzle over Neon/PGlite, Bun + turbo + vitest. No Hono, pg-boss, Postgres-only features (partitions, LISTEN/NOTIFY) or Vite app come over; their ideas are re-expressed in this stack. The TUI is out of scope.
+
+### What comes over
+
+1. **Polymarket client hardening** (`packages/pm`): FIFO token bucket with 429 penalty and `Retry-After`, tolerant zod response parsing with string/JSON coercion, `POST /books` batching, `prices-history`, Data API holders and trades, Gamma events for neg-risk siblings, an isomorphic CLOB market-channel WebSocket client, and fixture contract tests. Written up in `docs/polymarket-api.md`.
+2. **Scoring upgrades** (`packages/core`): polyscout's book metrics (spread, depth at 1/2/5c, slippage curve, capacity, exit depth, complement book), its structural detector (ladder parsing from question text, executable neg-risk overround net of fees, sibling-sum inconsistency, augmented-event guard), crowd metrics (holder HHI/top1/top5, signed 24h taker flow, median ticket, large-trade flag), and the sizing refinements: fee charged per book level, both sides evaluated via the complement book, exit-depth factor, contrarian flag. `sizeTrade` stays the single sizing entry point used by trading; its signature does not change.
+3. **DSL screener**: `parseQuery`/`formatQuery` in core, a `/api/markets?q=` endpoint that compiles a `Filter` to SQL, saved views, and a Screener view with a highlighted query bar, hints, filter panel, column picker and a virtualized table.
+4. **Journal + alerts**: per-thesis journal rows (model, pre-reveal and market Brier, log loss, 24h/7d drift, paper P&L), breakdowns by category, liquidity band, model and R bucket, a paper P&L curve, an extremize refit suggestion (applied only from Settings), and an alerts feed (mid move since thesis, catalyst passed, new candidate, structural arb) with ack and ack-all.
+5. **Live runs view**: per-agent status rows written as agents start and finish, captured tool calls, cost meter, stage stepper (rules → agents → judge → sizing → done), and cancel.
+6. **Optimisations**: incremental sweep upsert (rewrite a market only when a field changed; liquidity/volume only on a >5% move), a `market_latest` table updated in place by the snapshot job with a skip-if-unchanged rule for snapshot history, in-flight-deduped short caches on the structural scan and price history, login lockout with exponential backoff, an SSRF guard on agent URL fetches, and CI (typecheck + test on push/PR).
+
+### Unified terminal
+
+One shell for everything an authenticated operator does. Nav: Screener, Watchlist, Trade (`/trade`), Runs (was Fleet), Research, Journal (was Calibration), Book, Autonomy, Settings. A status bar shows active runs, today's spend against budget, ingest age, unacked alerts, SSE state and a UTC clock. The public `/trade` terminal keeps working anonymously; when a session exists it shows a link back into the operator shell. The `/trade` live book upgrades to the CLOB WebSocket when it connects and falls back to the existing 3 s poll.
+
+### Data model additions (migration 0009)
+
+- `markets`: `liquidity` dp, `rules_hash` text, `resolution_source` text (heuristic classifier: official_data | scheduled_event | media_report | subjective | unknown), `neg_risk_augmented` bool default false.
+- `market_latest` (one row per market, updated in place): `condition_id` PK, `ts`, `mid`, `best_bid`, `best_ask`, `spread`, `depth_1c`, `depth_2c`, `depth_5c`, `exit_depth`, `capacity`, `book_hash` text, `mid_changed_at`, `holder_count` int, `holder_hhi`, `top1_share`, `top5_share`, `flow_24h`, `trade_median`, `large_trade_24h` bool, `last_trade_ts`, `priority` (latest screen score), `structural` jsonb string[] (structural kinds this market is in), `opportunity` jsonb (`{side, edge, stake, o, contrarian}` or null).
+- `views`: `id` text PK, `name` text unique, `query` text, `columns` jsonb string[], `created_at`.
+- `alerts`: `id` bigserial PK, `condition_id` text null, `kind` text (mid_move | catalyst_passed | new_candidate | structural | run_failed), `message` text, `data` jsonb, `created_at`, `acked_at` null. Index on (`acked_at`, `created_at`). Dedupe: same kind + market not re-raised within 6 h.
+- `journal`: `thesis_id` text PK, `condition_id`, `category`, `model`, `p_hat`, `p_pre` (mean of blind agent estimates), `mid_at`, `liquidity_at`, `r`, `side`, `stake`, `result` text null, `resolved_at` null, `brier_model`, `brier_market`, `brier_pre`, `log_loss`, `drift_24h`, `drift_7d`, `paper_pnl`. Filled by the calibrate job.
+- `pods`: `cancel_requested_at` ts null; status gains `cancelled`; `stage` text (rules | agents | judge | sizing | done).
+- `agent_runs`: `started_at`, `finished_at` ts null; status gains `running` and `cancelled`; `tool_calls` jsonb (`{ts, name, input (≤500 chars), ok}[]`, capped at 200 entries).
+- Settings additions: `extremize` (default 1, applied to p̂ in logit space before the blend), `suggested` `{extremize, n, at}` or null, `alerts` thresholds `{midMoveC: 5, cooldownH: 6}`.
+
+### DSL fields (polytech mapping)
+
+`liq` → markets.liquidity, `vol24h` → markets.vol_24h, `depth` → market_latest.depth_2c, `spread`, `price` (mid), `days` (end_date − now), `stale` (hours since last trade), `top1`, `holders`, `tag`, `cat` (category), `src` (resolution_source), `struct`, `prio` (priority), `opp` (opportunity.o), `edge` (opportunity.edge), `sort`, `is:watch|pinned|muted`, `has:thesis`, `limit`, `offset`. Unknown keys are errors with a nearest-key suggestion.
+
+### Scheduling
+
+Vercel Hobby allows only daily crons, so a new `monitor` job (alerts) runs at the tail of every watchlist snapshot and from the existing GitHub Actions heartbeat (`scout.yml`, every 30 min, `Authorization: Bearer $CRON_SECRET` when set). The SSE bus stays in-process; views that must be live across instances (runs, alerts) poll.
+
+### Done (Rev 7)
+
+- `bun run typecheck` and `bun run test` green from a fresh checkout, including the two previously clock-dependent `sendEntry ledger` tests.
+- CI workflow runs both on push and PR.
+- `bun run build` succeeds for `apps/web`.
+- With `PM_FIXTURES=1` and no API keys: a sweep → snapshot → screen → monitor cycle fills `market_latest` and alerts; `/api/markets?q=liq:1k.. sort:-prio` returns rows; the Screener, Runs (fake runner pod visible with agent rows and stage), Journal and alerts views render; a running pod can be cancelled.

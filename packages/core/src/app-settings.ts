@@ -32,6 +32,9 @@ export const AppSettingsSchema = z.strictObject({
     l3: z.strictObject({ perTradeUsd: nonneg, dailyNotional: nonneg, categoryAllowlist: z.array(z.string()), structuralAuto: z.boolean() }),
   }),
   overrides: z.record(z.string(), mode), // category -> mode; can only lower (effectiveMode)
+  extremize: num.positive(), // applied to p-hat in logit space before the blend
+  suggested: z.strictObject({ extremize: num, n: nonneg, at: z.string() }).nullable(), // journal refit; applied only from Settings
+  alerts: z.strictObject({ midMoveC: nonneg, cooldownH: nonneg }),
 });
 export type AppSettings = Settings & z.infer<typeof AppSettingsSchema>;
 
@@ -47,4 +50,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     l3: { perTradeUsd: 25, dailyNotional: 150, categoryAllowlist: [], structuralAuto: false },
   },
   overrides: {},
+  extremize: 1,
+  suggested: null,
+  alerts: { midMoveC: 5, cooldownH: 6 },
 };

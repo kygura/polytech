@@ -15,6 +15,7 @@ export async function scoutChain() {
   await run("snapshot", "all");
   await run("screen");
   await run("research");
+  await run("monitor"); // after screen + research: new candidates, structural flags, failed pods, mid moves
 }
 
 async function chainStep(name: JobName, scope?: "watchlist" | "all") {

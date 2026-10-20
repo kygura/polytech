@@ -4,7 +4,7 @@ import { scrub, type ImmediateResult } from "@pm/pm";
 import { and, desc, eq, gt, gte, inArray, lt, or } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode } from "./autonomy";
-import { feeOf, toMarket, withLock, type Deps } from "./deps";
+import { feeExpOf, feeOf, toMarket, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { BURNED, autoGate, halted, liveMode, newToken, ntfy, sha256, type Action, type Via } from "./live";
 import { addExposure, eventOf, exposureOf } from "./paper";
@@ -60,6 +60,8 @@ const fresh = async (d: Deps, ids: string[]) => {
   return latestSnaps(d.db, ids);
 };
 const feeRate = (rows: Row[]) => Math.max(0, ...rows.map((r) => feeOf(toMarket(r))));
+/** Lowest exponent across the legs: (p(1-p))^e shrinks as e grows, so the smallest e over-estimates the fee (conservative). */
+const feeExp = (rows: Row[]) => Math.min(1, ...rows.map((r) => feeExpOf(toMarket(r))));
 
 // ---------------------------------------------------------------- housekeeping
 /** Pending past expiry => expired; sending/unwinding older than 10 min (crash mid-loop) => flagged, leg orders left to fill sync. Runs at any mode. */
@@ -119,7 +121,7 @@ export async function proposeSets(d: Deps) {
       const perShare = inp.reduce((t, g) => t + Math.min(0.99, legPrice(c.kind, g) + 0.01), 0);
       const shares = Math.floor(Math.min(depth, (st.capFrac * st.bankroll) / perShare) * 100) / 100;
       if (!(shares > 0)) { skip("TOO_THIN"); continue; }
-      const plan = setLegPlan(c.kind, inp, shares, feeRate(rows));
+      const plan = setLegPlan(c.kind, inp, shares, feeRate(rows), 0.01, feeExp(rows));
       if (!plan.ok) { skip(plan.reason); continue; }
       const row0 = rows[0]!, category = row0.category ?? "other";
       const chk = checkSet(plan.legs.map((l) => ({ sizeUsd: l.shares * l.limit, marketId: l.conditionId })), { eventId: c.event, category }, xp, st.limits);
@@ -195,7 +197,7 @@ export async function decideSet(d: Deps, id: string, action: Action, via: Via, t
   const by = new Map(inp.map((g) => [g.conditionId, g]));
   const px = p.legs.map((l) => legPrice(p.kind, by.get(l.conditionId)!));
   if (p.legs.some((l, i) => px[i]! > l.limit + EPS)) return expireSet(d, p, "PRICE_MOVED"); // touch above the approved cap: the FOK would die
-  if (p.legs.some((l, i) => Math.abs(px[i]! - l.price) > DRIFT + EPS) && !setLegPlan(p.kind as "buy-all" | "sell-all", inp, p.shares, feeRate([...mk.values()])).ok) return expireSet(d, p, "PRICE_MOVED");
+  if (p.legs.some((l, i) => Math.abs(px[i]! - l.price) > DRIFT + EPS) && !setLegPlan(p.kind as "buy-all" | "sell-all", inp, p.shares, feeRate([...mk.values()]), 0.01, feeExp([...mk.values()])).ok) return expireSet(d, p, "PRICE_MOVED");
 
   const r = await withLock(d, "live-send", 2 * MIN, async (): Promise<SetDecision> => {
     const chk = checkSet(p.legs.map((l) => ({ sizeUsd: l.shares * l.limit, marketId: l.conditionId })), { eventId: eventOf(row0), category: row0.category ?? "other" },

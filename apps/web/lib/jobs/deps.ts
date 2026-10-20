@@ -1,5 +1,5 @@
 import { anthropicJudge, classifyR, disabledJudge, fakeJudge, isProd, pickRunner, type AgentRunner, type Judge } from "@pm/agents";
-import { feeRateFor, type Market, type Snapshot } from "@pm/core";
+import { feeExponentOf, feeRateFor, type Market, type Snapshot } from "@pm/core";
 import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
 import { sql } from "drizzle-orm";
@@ -95,13 +95,16 @@ export const toMarket = (r: MarketRow): Market => ({
   tags: r.tags,
   endDate: r.endDate?.getTime() ?? 0,
   negRiskGroup: r.negRiskGroup,
+  negRiskAugmented: r.negRiskAugmented,
   feeRate: r.feeRate,
+  feeExponent: r.feeExponent,
   open: isOpenStatus(r.status),
   acceptingOrders: r.status !== "not_accepting",
   inDispute: r.status === "disputed",
 });
 
 export const feeOf = (m: Pick<Market, "category" | "feeRate">) => feeRateFor(m.category, m.feeRate).rate;
+export const feeExpOf = (m: Pick<Market, "feeExponent">) => feeExponentOf(m.feeExponent);
 
 export const toSnap = (r: SnapRow): Snapshot => ({
   conditionId: r.conditionId,

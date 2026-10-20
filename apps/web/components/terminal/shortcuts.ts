@@ -8,3 +8,5 @@ export const TERMINAL_SHORTCUTS: [string, string][] = [
   ["Shift+T", "focus the ticket"], ["p / o", "Positions / Open orders"], ["x", "cancel the focused open order, or the ticket's order"],
   ["Esc", "disarm, close, then blur"], ["g w / g a", "terminal / autonomy"], ["t", "toggle theme"], ["?", "this sheet"],
 ];
+/** `g o` (back to the operator app) only exists for an operator session (DESIGN 12.1.4). */
+export const terminalShortcuts = (operator: boolean): [string, string][] => (operator ? [...TERMINAL_SHORTCUTS, ["g o", "operator app"]] : TERMINAL_SHORTCUTS);
