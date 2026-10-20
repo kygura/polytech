@@ -29,6 +29,12 @@ export function getDb(): Db {
   if (url) {
     const sql = postgres(url, { prepare: false, max: 5, idle_timeout: 20, connect_timeout: 10 });
     const d = drizzlePg({ client: sql, schema });
+    // drizzle makes date/time serializers pass-through (it maps column values itself), but raw sql`${new Date()}` params skip that mapping
+    // and postgres-js then rejects the Date. neon-http and PGlite accept Dates, so restore that for timestamp/timestamptz/date.
+    for (const oid of [1114, 1184, 1082]) {
+      const next = sql.options.serializers[oid];
+      sql.options.serializers[oid] = (v: unknown) => (v instanceof Date ? (oid === 1082 ? v.toISOString().slice(0, 10) : v.toISOString()) : next!(v));
+    }
     migrator = () => migratePg(d, { migrationsFolder });
     closer = () => sql.end({ timeout: 5 });
     return (db = d);
