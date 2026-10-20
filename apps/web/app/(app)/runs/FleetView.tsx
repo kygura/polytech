@@ -1,19 +1,14 @@
 "use client";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { AgentRunTable, type AgentRun } from "../../../components/AgentRunTable";
 import { BudgetStrip } from "../../../components/BudgetStrip";
-import { Drawer } from "../../../components/Drawer";
 import { EmptyState } from "../../../components/EmptyState";
-import { PodTable, orderPods, steeringLine, type Fleet } from "../../../components/PodTable";
+import { PodTable, orderPods, type Fleet } from "../../../components/PodTable";
 import { useSse } from "../../../hooks/useSse";
-import css from "../../../components/panels.module.css";
 
 export function FleetView({ data, now }: { data: Fleet; now: number }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
-  const [output, setOutput] = useState<AgentRun | null>(null);
   const [t, setT] = useState(now);
   // The shell refreshes on pod.started/done/failed; agent-level progress needs pod.agent too.
   useSse((e) => { if (e.type === "pod.agent") router.refresh(); });
@@ -29,19 +24,8 @@ export function FleetView({ data, now }: { data: Fleet; now: number }) {
     <>
       <BudgetStrip budget={data.budget} />
       {pods.length ? (
-        <PodTable pods={pods} now={t} selected={selected} onSelect={setSelected} isNew={isNew}
-          renderExpanded={(p) => (
-            <>
-              <p style={{ margin: "0 0 var(--sp-2)" }}><Link href={`/runs/${p.id}`}>Open run {"→"}</Link></p>
-              {p.steeringQuestion && <p className="ui muted" style={{ whiteSpace: "pre-wrap", margin: "0 0 var(--sp-2)" }}><b>steering</b> {p.steeringQuestion}</p>}
-              {steeringLine(p.steering) && <p className="muted" style={{ margin: "0 0 var(--sp-2)" }}>{steeringLine(p.steering)}</p>}
-              <AgentRunTable agents={p.agents} onView={setOutput} />
-            </>
-          )} />
-      ) : <EmptyState text="No pods running." />}
-      <Drawer open={output != null} title={output ? `${output.role} · ${output.model} output` : ""} onClose={() => setOutput(null)}>
-        {output && <pre className={css.pre}>{JSON.stringify(output.output, null, 2)}</pre>}
-      </Drawer>
+        <PodTable pods={pods} now={t} selected={selected} onSelect={setSelected} onOpen={(p) => router.push(`/runs/${p.id}`)} isNew={isNew} />
+      ) : <EmptyState text="No runs yet. Press r on a market." />}
     </>
   );
 }

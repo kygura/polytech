@@ -13,7 +13,10 @@ export async function getSettings(db: Db): Promise<AppSettings> {
 
 /** Deep-merges `patch` onto the stored settings, validates, saves. Throws ZodError on bad input (nothing saved). */
 export async function putSettings(db: Db, patch: unknown): Promise<AppSettings> {
-  const next = AppSettingsSchema.parse(merge(await getSettings(db), patch)) as AppSettings;
+  const merged = merge(await getSettings(db), patch);
+  // merge() lets a null patch fall back to the stored value; `suggested: null` must clear it (Settings refit Apply / Dismiss).
+  if (plain(patch) && patch.suggested === null) merged.suggested = null;
+  const next = AppSettingsSchema.parse(merged) as AppSettings;
   await db.insert(s.settings).values({ id: 1, data: next }).onConflictDoUpdate({ target: s.settings.id, set: { data: next } });
   return next;
 }

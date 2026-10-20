@@ -3,12 +3,14 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { ErrorBar } from "../../../components/ErrorBar";
 import { Field } from "../../../components/Field";
+import { refitConfirm, refitPayload } from "../../../components/refit";
+import { SuggestedRefit } from "../../../components/SuggestedRefit";
 import { FormGroup } from "../../../components/FormGroup";
 import { useTheme, type Theme } from "../../../hooks/useTheme";
 import type { AppSettings } from "../../../lib/jobs/settings";
 
 const GROUPS = {
-  Filters: ["filters"], Weights: ["sizeTargets", "tDecayDays", "cCoef", "crowdBonus"], "Bankroll & sizing": ["bankroll", "kelly", "capFrac", "minEdge"],
+  Filters: ["filters"], Calibration: ["extremize"], Weights: ["sizeTargets", "tDecayDays", "cCoef", "crowdBonus"], "Bankroll & sizing": ["bankroll", "kelly", "capFrac", "minEdge"],
   "Models per role": ["models"], Budget: ["budget"], "Risk limits": ["limits"],
 } as const;
 type Group = keyof typeof GROUPS;
@@ -34,6 +36,7 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
   const [s, setS] = useState(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
+  const [refitBusy, setRefitBusy] = useState(false);
   const set = (path: string, v: unknown) => setS((x) => setAt(x, path, v));
   const dirty = (g: Group) => JSON.stringify(pick(s, GROUPS[g])) !== JSON.stringify(pick(saved, GROUPS[g]));
 
@@ -44,6 +47,18 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
     if (r.status === 400 && Array.isArray(j.issues)) { setErrors(Object.fromEntries(j.issues.map((i: { path: (string | number)[]; message: string }) => [i.path.join("."), i.message]))); return; }
     if (!r.ok) { setMsg(`Save failed: ${j.error ?? r.status}`); return; }
     setErrors({}); setSaved(j); setS((x) => ({ ...x, ...pick(j, GROUPS[g]) })); router.refresh();
+  };
+
+  // Apply / Dismiss write on their own (not through the group's Save): extremize and/or suggested only; other unsaved edits stay in `s`.
+  const refit = async (mode: "apply" | "dismiss") => {
+    const sug = s.suggested;
+    if (!sug || (mode === "apply" && !window.confirm(refitConfirm(sug)))) return;
+    setMsg(null); setRefitBusy(true);
+    const r = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(refitPayload(mode, sug)) });
+    const j = await r.json().catch(() => ({}));
+    setRefitBusy(false);
+    if (!r.ok) { setMsg(`${mode === "apply" ? "Apply" : "Dismiss"} failed: ${j.error ?? r.status}`); return; }
+    setSaved((x) => ({ ...x, extremize: j.extremize, suggested: null })); setS((x) => ({ ...x, extremize: j.extremize, suggested: null })); router.refresh();
   };
 
   // Plain functions, not components: inputs keep focus across re-renders.
@@ -67,7 +82,7 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
       </Field>
     );
   };
-  const group = (g: Group, children: ReactNode) => <FormGroup key={g} title={g} dirty={dirty(g)} onSave={() => save(g)}>{children}</FormGroup>;
+  const group = (g: Group, children: ReactNode) => <FormGroup key={g} id={g === "Calibration" ? "calibration" : undefined} title={g} dirty={dirty(g)} onSave={() => save(g)}>{children}</FormGroup>;
 
   return (
     <>
@@ -76,6 +91,10 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
         {num("filters.minDays", "min days", "d")}{num("filters.maxDays", "max days", "d")}
         {num("filters.minDepthUsd", `min depth ${s.filters.depthCents}¢`, "USD")}
         {multi("filters.excludedCategories", "excluded categories")}
+      </>)}
+      {group("Calibration", <>
+        {s.suggested && <SuggestedRefit current={saved.extremize} suggested={s.suggested} dirty={dirty("Calibration")} busy={refitBusy} onApply={() => void refit("apply")} onDismiss={() => void refit("dismiss")} />}
+        {num("extremize", "extremize", "×")}
       </>)}
       {group("Weights", <>
         {num("sizeTargets.smallCap", "small-cap target", "USD")}{num("sizeTargets.size", "size target", "USD")}

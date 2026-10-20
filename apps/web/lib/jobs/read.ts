@@ -169,7 +169,7 @@ export async function fleet(r: ReadDeps) {
       tokensIn: todayRuns.reduce((t, a) => t + usage(a).inputTokens, 0), tokensOut: todayRuns.reduce((t, a) => t + usage(a).outputTokens, 0),
     },
     pods: pods.map(({ p, q }) => ({
-      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, profileId: p.profileId, profileName: p.profileId ? names.get(p.profileId) ?? null : null, steering: p.steering as Partial<Steering> | null, steered: p.steering != null, steeringQuestion: (p.steering as { question?: string } | null)?.question ?? null, status: p.status, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
+      id: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, profileId: p.profileId, profileName: p.profileId ? names.get(p.profileId) ?? null : null, steering: p.steering as Partial<Steering> | null, steered: p.steering != null, steeringQuestion: (p.steering as { question?: string } | null)?.question ?? null, status: p.status, stage: p.stage ?? null, startedAt: p.startedAt.getTime(), costSandboxS: p.costSandboxS,
       agents: runs.filter((a) => a.podId === p.id).map((a) => ({ role: a.role, model: a.model, status: a.status, durationS: a.durationS, usage: usage(a), output: a.outputJson })),
     })),
   };

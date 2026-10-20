@@ -1,6 +1,11 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertsList } from "../../../components/AlertsList";
+import { alertHref, type Alert } from "../../../components/alerts";
+import { ErrorBar } from "../../../components/ErrorBar";
+import { useAlerts } from "../../../hooks/useAlerts";
+import { useSse } from "../../../hooks/useSse";
 import { DataTable, MarketCell, type Column, type Sort } from "../../../components/DataTable";
 import { EdgeBadge } from "../../../components/EdgeBadge";
 import { EmptyState } from "../../../components/EmptyState";
@@ -14,7 +19,7 @@ import { inInput } from "../../../hooks/useGlobalKeys";
 import type { StructuralRow, WatchlistRow } from "../../../lib/jobs/read";
 import css from "./watchlist.module.css";
 
-export type Tab = "small-cap" | "size" | "structural";
+export type Tab = "small-cap" | "size" | "structural" | "alerts";
 type Props = { tab: Tab; small: WatchlistRow[]; size: WatchlistRow[]; structural: StructuralRow[]; showMuted: boolean; lastSnapshotAt: number | null; now: number };
 
 const Pin = ({ pinned }: { pinned: boolean }) => (pinned ? <span className={css.pin} title="pinned" aria-label="pinned">{"●"}</span> : null);
@@ -66,6 +71,15 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<Sort>({ id: "rank", dir: "asc" });
   const [selected, setSelected] = useState<string | null>(null);
+  const [showAcked, setShowAcked] = useState(false);
+  const [alertsTick, setAlertsTick] = useState(0);
+  useSse((e) => { if (e.type === "alert.created" || e.type === "alert.acked") setAlertsTick((n) => n + 1); });
+  const alerts = useAlerts({ enabled: true, showAcked: tab === "alerts" && showAcked, refreshKey: alertsTick });
+  const openAlert = useCallback((a: Alert) => {
+    if (a.ackedAt == null) void alerts.ack(a.id);
+    const href = alertHref(a);
+    if (href) router.push(href);
+  }, [alerts, router]);
   const stale = lastSnapshotAt == null || now - lastSnapshotAt > STALE_MS;
   const q = filter.trim().toLowerCase();
 
@@ -79,7 +93,7 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
   // p / m / r act on the selected row.
   useEffect(() => {
     const h = async (e: KeyboardEvent) => {
-      if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey || !selected) return;
+      if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey || !selected || tab === "alerts") return;
       const row = rows.find((r) => r.conditionId === selected);
       if (!row) return;
       if (e.key === "p" || e.key === "m") {
@@ -93,9 +107,16 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [rows, selected, router]);
+  }, [rows, selected, router, tab]);
 
-  const table = tab === "structural" ? (
+  const table = tab === "alerts" ? (
+    <div style={{ maxWidth: 720 }}>
+      {alerts.error && <ErrorBar message={alerts.error} onRetry={() => { alerts.clearError(); void alerts.reload(); }} onDismiss={alerts.clearError} />}
+      {alerts.loaded || alerts.rows.length
+        ? <section className="pane"><AlertsList rows={alerts.rows} emptyText={showAcked ? "Nothing acked yet." : "No alerts."} onAck={(id) => void alerts.ack(id)} onAckAll={() => void alerts.ack()} onOpen={openAlert} /></section>
+        : !alerts.error && <p className="muted ui">Loading…</p>}
+    </div>
+  ) : tab === "structural" ? (
     structRows.length ? (
       <DataTable columns={STRUCT_COLS} rows={structRows} rowKey={(r) => r.conditionId} sort={sort} onSort={setSort} selectedKey={selected} onSelect={setSelected} onOpen={(r) => open(r.conditionId)} muted={stale} label="structural edges" />
     ) : <EmptyState text={q ? "No rows match the filter." : "No structural edges in the last sweep."} />
@@ -107,15 +128,22 @@ export function WatchlistView({ tab, small, size, structural, showMuted, lastSna
     <>
       <div className={css.bar}>
         <Tabs active={tab} onChange={(t) => go(t as Tab)} items={[
-          { id: "small-cap", label: "Small-cap", count: small.length }, { id: "size", label: "Size", count: size.length }, { id: "structural", label: "Structural", count: structural.length },
+          { id: "small-cap", label: "Small-cap", count: small.length }, { id: "size", label: "Size", count: size.length }, { id: "structural", label: "Structural", count: structural.length }, { id: "alerts", label: "Alerts", count: alerts.unacked },
         ]} />
-        <div className={css.right}>
-          <label className={css.check}><input type="checkbox" checked={showMuted} onChange={(e) => go(tab, e.target.checked)} /> show muted</label>
-          <FilterInput value={filter} onChange={setFilter} placeholder="filter question / category" />
-          <span className="muted">{lastSnapshotAt ? `swept ${hms(lastSnapshotAt)}` : "never swept"}</span>
-        </div>
+        {tab === "alerts" ? (
+          <div className={css.right}>
+            <label className={css.check}><input type="checkbox" checked={showAcked} onChange={(e) => setShowAcked(e.target.checked)} /> show acked</label>
+            <span className="muted" title="the same list as the right-hand drawer">drawer <kbd>g</kbd> <kbd>n</kbd></span>
+          </div>
+        ) : (
+          <div className={css.right}>
+            <label className={css.check}><input type="checkbox" checked={showMuted} onChange={(e) => go(tab, e.target.checked)} /> show muted</label>
+            <FilterInput value={filter} onChange={setFilter} placeholder="filter question / category" />
+            <span className="muted">{lastSnapshotAt ? `swept ${hms(lastSnapshotAt)}` : "never swept"}</span>
+          </div>
+        )}
       </div>
-      {stale && <StaleBanner lastSnapshotAt={lastSnapshotAt} now={now} />}
+      {stale && tab !== "alerts" && <StaleBanner lastSnapshotAt={lastSnapshotAt} now={now} />}
       {table}
     </>
   );

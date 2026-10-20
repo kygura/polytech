@@ -32,6 +32,9 @@ export const steeringLine = (st: Pod["steering"]) => {
 };
 export const dotStatus = (s: string): DotStatus => (s === "ok" || s === "done" ? "done" : s === "failed" ? "failed" : s === "running" || s === "judging" ? s : "queued");
 export const podTokens = (p: Pod) => p.agents.reduce((t, a) => t + a.usage.inputTokens + a.usage.outputTokens, 0);
+/** Sum of agent_runs.usage.costUsd. */
+export const podCost = (p: Pod) => p.agents.reduce((t, a) => t + (Number.isFinite(a.usage.costUsd) ? a.usage.costUsd : 0), 0);
+export const costLabel = (c: number) => `$${c.toFixed(2)}`;
 const live = (s: string) => s === "running" || s === "judging" || s === "queued";
 /** Running pods: wall clock. Finished: longest agent (pods store no finishedAt). */
 const elapsed = (p: Pod, now: number) => (live(p.status) ? (now - p.startedAt) / 1000 : Math.max(0, ...p.agents.map((a) => a.durationS ?? 0)));
@@ -47,18 +50,21 @@ const cols = (now: number): Column<Pod>[] => [
   { id: "started", header: "Started", align: "r", cell: (p) => hm(p.startedAt) },
   { id: "elapsed", header: "Elapsed", align: "r", cell: (p) => <span title={live(p.status) ? undefined : "longest agent"}>{dur(elapsed(p, now))}</span> },
   { id: "status", header: "Status", align: "l", cell: (p) => <StatusDot status={dotStatus(p.status)} label={p.status} /> },
+  { id: "stage", header: "Stage", align: "l", cell: (p) => p.stage ? <span style={{ color: live(p.status) ? "var(--accent)" : "var(--muted)" }}>{p.stage}</span> : <span className="muted">{"—"}</span> },
   { id: "agents", header: "Agents", align: "l", cell: (p) => (
     <span className={css.dots}>
       {podRoles(p).map((role) => { const a = p.agents.find((x) => x.role === role); return <span key={role} title={`${role}: ${a?.status ?? "queued"}`}><StatusDot status={a ? dotStatus(a.status) : "queued"} label={false} /></span>; })}
     </span>
   ) },
   { id: "tokens", header: "Tokens", align: "r", cell: (p) => podTokens(p).toLocaleString("en-US") },
+  { id: "cost", header: "Cost", align: "r", cell: (p) => costLabel(podCost(p)) },
   { id: "sbx", header: "Sandbox s", align: "r", cell: (p) => p.costSandboxS == null ? <span className="muted">{"—"}</span> : Math.round(p.costSandboxS) },
 ];
 
 /** Running first, then started desc. */
 export const orderPods = (pods: Pod[]) => [...pods].sort((a, b) => Number(live(b.status)) - Number(live(a.status)) || b.startedAt - a.startedAt);
 
-export function PodTable({ pods, now, selected, onSelect, isNew, renderExpanded }: { pods: Pod[]; now: number; selected: string | null; onSelect: (id: string) => void; isNew?: (p: Pod) => boolean; renderExpanded: (p: Pod) => ReactNode }) {
-  return <DataTable columns={cols(now)} rows={pods} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} renderExpanded={renderExpanded} label="pods" rowClass={(p) => (isNew?.(p) ? css.flash : undefined)} />;
+/** `onOpen` fires on row click and Enter (DataTable); `renderExpanded` is the retired expand-in-place and stays optional. */
+export function PodTable({ pods, now, selected, onSelect, onOpen, isNew, renderExpanded }: { pods: Pod[]; now: number; selected: string | null; onSelect: (id: string) => void; onOpen?: (p: Pod) => void; isNew?: (p: Pod) => boolean; renderExpanded?: (p: Pod) => ReactNode }) {
+  return <DataTable columns={cols(now)} rows={pods} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} onOpen={onOpen} renderExpanded={renderExpanded} label="pods" rowClass={(p) => (isNew?.(p) ? css.flash : undefined)} />;
 }
