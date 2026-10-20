@@ -1,4 +1,5 @@
-import { migrate } from "./client";
+import { closeDb, migrate } from "./client";
 
 await migrate();
 console.log("migrated");
+await closeDb();
