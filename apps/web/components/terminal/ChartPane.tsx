@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { OpenOrder } from "@pm/pm/exchange";
 import type { MarketFeed } from "../../hooks/useMarketFeed";
 import type { PublicMarketDetail } from "../../lib/public";
-import { DEFAULT_TICK } from "../public/ticket";
+import { DEFAULT_TICK } from "./ticket";
 import { cents, sh, usdShort, type Outcome } from "./book";
 import css from "./terminal.module.css";
 

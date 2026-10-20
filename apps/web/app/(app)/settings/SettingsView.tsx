@@ -16,7 +16,7 @@ const GROUPS = {
 type Group = keyof typeof GROUPS;
 const ROLES = ["rules", "source", "base_rate", "news", "red_team", "judge"];
 const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
-const THEMES: Theme[] = ["dark", "light", "system"];
+const THEMES: Theme[] = ["dark", "light"];
 
 const pick = (s: AppSettings, keys: readonly string[]) => Object.fromEntries(keys.map((k) => [k, (s as Record<string, unknown>)[k]]));
 const getAt = (o: unknown, path: string): unknown => path.split(".").reduce<any>((x, k) => x?.[k], o);

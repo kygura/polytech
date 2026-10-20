@@ -9,7 +9,7 @@ import { isRejection, type Wallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail } from "../../lib/public";
 import { loadVisitorSettings } from "../../lib/visitor/settings";
 import { truncate } from "../fmt";
-import { DEFAULT_TICK, onTick, quote, roundTick, sellQuote, ticketGate, validate, validateSell, type FieldErrors } from "../public/ticket";
+import { DEFAULT_TICK, onTick, quote, roundTick, sellQuote, ticketGate, validate, validateSell, type FieldErrors } from "./ticket";
 import { cents, errMsg, forOutcome, nudge, sh, usd, type Outcome, type TradeSide } from "./book";
 import { buttonState, type Action } from "./rules";
 import css from "./terminal.module.css";

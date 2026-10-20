@@ -19,7 +19,7 @@ export function KillSwitchButton({ mode, liveOpenOrders = 0, onKill, wide }: { m
     try { setKilled((await onKill()) ?? null); } finally { setTimeout(() => setKilled(false), 3000); }
   };
   const n = liveOpenOrders;
-  const label = killed !== false ? killLabel(killed) : armed ? `CONFIRM · CANCEL ${n} LIVE ORDER${n === 1 ? "" : "S"} → L0` : mode === "L0" ? "AT L0 · CANCEL OPEN" : "KILL SWITCH → L0";
+  const label = killed !== false ? killLabel(killed) : armed ? `CONFIRM · CANCEL ${n} LIVE ORDER${n === 1 ? "" : "S"} → L0` : mode === "L0" ? "AT L0 · CANCEL OPEN" : "KILL → L0";
   return (
     <button
       type="button"

@@ -1,23 +1,85 @@
+/* One shell (DESIGN 13.3): fixed header + fixed status bar; main is either a scrolling document or a fixed-height workspace. */
 .header {
-  position: fixed; top: 0; left: 0; right: 0; height: 40px; z-index: 10;
+  position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); z-index: 10;
   display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-3);
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
-.wordmark { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
-.wordmark i { font-style: normal; color: var(--accent); }
-.nav { display: flex; gap: var(--sp-3); font-family: var(--font-ui); height: 100%; }
-.nav a { color: var(--muted); display: flex; align-items: center; height: 40px; border-bottom: 2px solid transparent; }
-.nav a:hover { text-decoration: none; color: var(--text); }
-.nav a { gap: var(--sp-1); }
-.nav kbd { display: none; }
-.nav a:hover kbd, .nav a:focus-visible kbd { display: inline; }
-.count { font: 500 10px/1 var(--font-mono); color: var(--accent); position: relative; top: -5px; }
-.nav a[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
-.right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
-.themeBtn { font-size: var(--fs-sm); }
-.main { padding: 52px var(--sp-3) 36px; }
-.sheet { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-3); min-width: 420px; }
+.wordmark { font: 600 13px var(--font-mono); color: var(--text); white-space: nowrap; }
+.wordmark:hover { text-decoration: none; }
+.wordmark i { font-style: normal; color: var(--focus); }
+
+.nav { display: flex; gap: var(--sp-4); height: 100%; font: 500 var(--fs-sm) / var(--lh-sm) var(--font-ui); }
+.group { display: flex; gap: var(--sp-3); height: 100%; }
+.nav a, .menuList a { color: var(--muted); display: flex; align-items: center; gap: var(--sp-1); }
+.nav .group a { height: 100%; border-bottom: 2px solid transparent; }
+.nav a:hover, .menuList a:hover { text-decoration: none; color: var(--text); }
+.nav a[aria-current="page"], .menuList a[aria-current="page"] { color: var(--text); }
+.nav .group a[aria-current="page"] { border-bottom-color: var(--focus); }
+.nav kbd, .menuList kbd { display: none; }
+.nav a:hover kbd, .nav a:focus-visible kbd, .menuList a:hover kbd, .menuList a:focus-visible kbd { display: inline; }
+.count { font: 500 10px / 1 var(--font-mono); color: var(--focus); position: relative; top: -5px; }
+
+.more, .burger { display: none; position: relative; }
+.more summary, .burger summary { list-style: none; cursor: pointer; display: flex; align-items: center; height: var(--top-h); color: var(--muted); user-select: none; }
+.more summary::-webkit-details-marker, .burger summary::-webkit-details-marker { display: none; }
+.more[open] summary, .burger[open] summary, .more summary:hover, .burger summary:hover { color: var(--text); }
+.burger summary { font-size: var(--fs-xl); line-height: 1; padding: 0 var(--sp-1); }
+.menuList { position: absolute; top: var(--top-h); left: 0; min-width: 160px; z-index: 12; display: flex; flex-direction: column; gap: 0; padding: var(--sp-1) 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow); }
+.menuList a { padding: var(--sp-1) var(--sp-3); height: 28px; font: 500 var(--fs-sm) / var(--lh-sm) var(--font-ui); }
+.menuList a:hover { background: var(--surface-2); }
+
+/* the search trigger is a fake input that opens MarketSearch */
+.search { flex: 0 1 260px; min-width: 40px; height: 30px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-md); color: var(--muted); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); text-align: left; }
+.search:hover:not(:disabled) { background: var(--surface-2); border-color: var(--muted); }
+.search svg { flex: none; }
+.searchText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search kbd { flex: none; }
+
+.right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+.themeBtn { width: 28px; height: 28px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); font-size: var(--fs-lg); line-height: 1; }
+.themeBtn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+/* wallet */
+.wallet { height: 30px; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); font: 500 var(--fs-sm) / 1 var(--font-ui); white-space: nowrap; }
+.connect { border-color: var(--focus); }
+.chip { font-family: var(--font-mono); white-space: nowrap; }
+.balance { font-size: var(--fs-sm); white-space: nowrap; }
+.menu { display: grid; gap: var(--sp-3); }
+.menu code { font-family: var(--font-mono); word-break: break-all; }
+.row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.headErr { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+
+/* main: document pages scroll, workspace pages fill the viewport between header and status bar */
+.main { position: fixed; inset: var(--top-h) 0 var(--status-h) 0; overflow: auto; padding: var(--sp-3) var(--sp-4); }
+.doc { max-width: 1600px; margin: 0 auto; }
+.workspace { overflow: hidden; padding: var(--gap); }
+.wsInner { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.wsInner > * { flex: none; }
+.wsInner > [data-workspace] { flex: 1; min-height: 0; }
+
+.sheet { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-3); min-width: 420px; max-height: 90vh; overflow: auto; }
 .sheet::backdrop { background: var(--backdrop); }
-.sheet h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); }
-.sheet table th { position: static; background: none; text-align: left; }
+.sheet h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); line-height: var(--lh-lg); }
+.sheet table th { position: static; background: none; text-align: left; height: var(--row-h); }
+.sheet tbody tr:hover { background: none; }
 .sheet h3 { margin: var(--sp-3) 0 0; font-size: var(--fs-sm); color: var(--muted); font-weight: 600; }
+
+/* 1100–1279: the third group folds into More, the search trigger is an icon, the wallet is just the address chip */
+@media (max-width: 1279px) {
+  .g3 { display: none; }
+  .more { display: block; }
+  .search { flex: none; width: 30px; padding: 0; justify-content: center; }
+  .searchText, .search kbd, .chipNet, .balance { display: none; }
+}
+/* under 1100: one ≡ menu with all nine items; the header keeps wordmark · menu · mode · kill. Nothing is designed below 960. */
+@media (max-width: 1099px) {
+  .nav, .more { display: none; }
+  .burger { display: block; }
+  .header { gap: var(--sp-3); }
+  .right { gap: var(--sp-1); }
+}
+/* stacked fallback (< 1100 wide or < 700 tall): the workspace scrolls with the page */
+@media (max-width: 1099px), (max-height: 699px) {
+  .workspace { overflow: auto; }
+  .wsInner { height: auto; min-height: 100%; }
+}

@@ -55,7 +55,6 @@ beforeAll(async () => {
     ackAll: await import("./alerts/ack-all/route"),
     journal: await import("./journal/route"),
     status: await import("./status/route"),
-    session: await import("./session/route"),
     bus: await import("../../lib/jobs/events"),
     proxy: await import("../../proxy"),
   };
@@ -223,13 +222,9 @@ describe("GET /api/status", () => {
   });
 });
 
-describe("GET /api/session", () => {
-  it("always operator, no other fields", async () => {
-    expect(await (await h.session.GET()).json()).toEqual({ operator: true });
-  });
-
+describe("no login", () => {
   const via = async (path: string) => (await h.proxy.proxy(new (await import("next/server")).NextRequest(`http://x${path}`))).status;
   it("proxy: no login, every route open", async () => {
-    for (const p of ["/api/session", "/api/markets", "/api/views", "/api/alerts", "/api/journal", "/api/status", "/api/pods/pod_x", "/api/markets/0xabc/history"]) expect(await via(p), p).toBe(200);
+    for (const p of ["/api/markets", "/api/views", "/api/alerts", "/api/journal", "/api/status", "/api/pods/pod_x", "/api/markets/0xabc/history"]) expect(await via(p), p).toBe(200);
   });
 });

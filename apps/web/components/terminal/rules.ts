@@ -3,7 +3,7 @@ import type { OpenOrder } from "@pm/pm/exchange";
 import type { OrderPhase } from "../../hooks/useOrderFlow";
 import type { WalletStatus } from "../../hooks/useWallet";
 import { truncate } from "../fmt";
-import type { Gate } from "../public/ticket";
+import type { Gate } from "./ticket";
 import { sh, usd, type Outcome } from "./book";
 
 /** A switch while the wallet prompt is open or the send is being looked up would drop that order's outcome: block it. */

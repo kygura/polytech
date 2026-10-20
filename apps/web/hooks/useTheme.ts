@@ -1,18 +1,15 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 
-export type Theme = "dark" | "light" | "system";
+export type Theme = "dark" | "light";
 
-const apply = (t: Theme) => {
-  const light = t === "light" || (t === "system" && matchMedia("(prefers-color-scheme: light)").matches);
-  document.documentElement.dataset.theme = light ? "light" : "dark";
-};
+const apply = (t: Theme) => { document.documentElement.dataset.theme = t; };
 
-/** Stored in localStorage.theme; "system" follows prefers-color-scheme. The root layout applies it before paint. */
+/** Stored in localStorage.theme; no stored choice = dark. The root layout applies it before paint. */
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>("dark");
   useEffect(() => {
-    try { const t = localStorage.theme; if (t === "light" || t === "dark" || t === "system") setThemeState(t); else setThemeState("system"); } catch {}
+    try { setThemeState(localStorage.theme === "light" ? "light" : "dark"); } catch {}
   }, []);
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);

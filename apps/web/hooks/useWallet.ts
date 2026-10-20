@@ -29,7 +29,7 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Conn = { address: `0x${string}`; funder: Funder; exchange: ClobExchange };
 
-/** Browser wallet connection for the provider (PublicShell). Components read it through useWallet(). */
+/** Browser wallet connection for the provider (Shell). Components read it through useWallet(). */
 export function useWalletConnection(): Wallet {
   const [status, setStatus] = useState<WalletStatus>("disconnected");
   const [conn, setConn] = useState<Conn | null>(null);
@@ -110,6 +110,6 @@ export const WalletContext = createContext<(Wallet & { clob: Clob }) | null>(nul
 /** Wallet connection plus its session CLOB state (credentials, allowance, balance, orders, positions). */
 export function useWallet(): Wallet & { clob: Clob } {
   const w = useContext(WalletContext);
-  if (!w) throw new Error("useWallet must be used inside PublicShell");
+  if (!w) throw new Error("useWallet must be used inside Shell");
   return w;
 }

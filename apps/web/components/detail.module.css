@@ -21,13 +21,6 @@
 
 /* pane title with a right-aligned control (DESIGN 12.6) */
 .titleRow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-.seg { display: inline-flex; gap: 2px; font-weight: 400; }
-.seg button {
-  height: 22px; padding: 0 var(--sp-2); font: 400 var(--fs-xs)/1 var(--font-mono); color: var(--muted);
-  background: transparent; border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
-}
-.seg button[aria-checked="true"] { color: var(--text); font-weight: 600; background: var(--surface-2); border-color: var(--border); }
-.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .slipNote { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
 .slipNote b { font-weight: 400; color: var(--faint); margin-right: 2px; }

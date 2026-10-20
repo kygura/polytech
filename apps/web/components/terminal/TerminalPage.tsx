@@ -1,35 +1,35 @@
 "use client";
-// /trade and /trade/[id] (DESIGN 11): one screen, selection swaps panes in place. Rendered by the (terminal) layout, so it never remounts.
+// /trade and /trade/[id] (DESIGN 11): one screen, selection swaps panes in place. Rendered by the trade layout inside the app Shell, so it never remounts.
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { useMarketFeed, type MarketFeed } from "../../hooks/useMarketFeed";
 import type { OrderPhase } from "../../hooks/useOrderFlow";
-import { inInput } from "../../hooks/useGlobalKeys";
+import { chordPending, inInput } from "../../hooks/useGlobalKeys";
 import { usePoll } from "../../hooks/usePoll";
 import { useWallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail, PublicWatchlist } from "../../lib/public";
-import { terminalNav } from "../../lib/terminalPath";
-import { DISCLAIMER } from "../public/PublicShell";
-import { DEFAULT_TICK } from "../public/ticket";
+import { useStatusSlot } from "../ShellContext";
 import { AccountPane, type AccountTab, type TokenInfo } from "./AccountPane";
 import { BookLadder } from "./BookLadder";
 import { forOutcome, type Outcome, type TradeSide } from "./book";
 import { KeyStats, MarketHero, PriceChart } from "./ChartPane";
+import { FeedBadge } from "./FeedBadge";
 import { KeyLegend } from "./KeyLegend";
 import { MarketList } from "./MarketList";
 import { canSwitch, sellable } from "./rules";
 import { TerminalTicket, type TicketHandle } from "./TerminalTicket";
-import { TopBar } from "./TopBar";
+import { DEFAULT_TICK, DISCLAIMER } from "./ticket";
 import { TradeTape } from "./TradeTape";
 import css from "./terminal.module.css";
 
-const storedTheme = () => { try { const t = localStorage.theme; return t === "light" || t === "dark" || t === "system"; } catch { return false; } };
 const LOCK_NOTE = "Finish or check the current order first";
 
-export function TerminalPage({ fontClass }: { fontClass: string }) {
+export function TerminalPage() {
   const router = useRouter();
   const params = useParams<{ id?: string }>();
   const w = useWallet(), clob = w.clob;
+  const slot = useStatusSlot();
   const wl = usePoll<PublicWatchlist>("/api/public/watchlist", 60_000);
 
   const [picked, setPicked] = useState<string | null>(params.id ?? null); // condition ids are hex: no decoding needed
@@ -46,19 +46,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   const [lockNote, setLockNote] = useState(false);
   const switchable = canSwitch(order.phase);
   const blocked = () => setLockNote(true); // every blocked switch or navigation shows the same note
-  useEffect(() => { terminalNav.locked = !switchable; terminalNav.onBlocked = blocked; }, [switchable]); // PublicShell g-keys read it
   const searchRef = useRef<HTMLInputElement>(null), ladderRef = useRef<HTMLTableElement>(null), ticket = useRef<TicketHandle>(null);
-
-  // Dark by default on the terminal when the visitor never chose a theme (the root script leaves it dark here too).
-  // Leaving the terminal restores the normal resolution (prefers-color-scheme) for the next route.
-  useEffect(() => {
-    if (!storedTheme()) document.documentElement.dataset.theme = "dark";
-    return () => {
-      terminalNav.locked = false;
-      terminalNav.onBlocked = () => {};
-      if (!storedTheme() && matchMedia("(prefers-color-scheme: light)").matches) document.documentElement.dataset.theme = "light";
-    };
-  }, []);
 
   const all = wl.data?.rows ?? [];
   const id = picked;
@@ -138,15 +126,14 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   const pickSide = (s: TradeSide) => { if (order.locked || (s === "SELL" && !(held > 0))) return; setSide(s); };
   const pickOutcome = (o: Outcome) => { if (!order.locked) setOutcome(o); };
 
-  // Terminal keys (DESIGN 11.5). PublicShell keeps t, ?, Esc blur, g w / g a. One listener; it calls the latest handler.
+  // Terminal keys (DESIGN 11.5), mounted only on /trade. The Shell keeps t, ?, /, Esc blur and the g chords; the key that completes a chord is not a terminal key. One listener; it calls the latest handler.
   const onKey = useRef<(e: globalThis.KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "Escape") { setDrawer(false); return; }
-    if (inInput(e)) return;
+    if (inInput(e) || e.defaultPrevented || chordPending()) return;
     const k = e.key === "T" ? "T" : e.key.toLowerCase();
     const act: Record<string, () => void> = {
-      "/": () => { setDrawer(true); requestAnimationFrame(() => searchRef.current?.focus()); },
       j: () => moveCursor(1), k: () => moveCursor(-1),
       b: () => { pickSide("BUY"); focusLimit(); }, s: () => { pickSide("SELL"); focusLimit(); },
       y: () => { pickOutcome("YES"); focusLimit(); }, n: () => { pickOutcome("NO"); focusLimit(); },
@@ -155,7 +142,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
       enter: () => { if (document.activeElement === document.body && cursorId) select(cursorId); },
     };
     const f = act[k];
-    if (!f || (e.shiftKey && k !== "T" && k !== "/")) return;
+    if (!f || (e.shiftKey && k !== "T")) return;
     if (k !== "enter") e.preventDefault();
     f();
   };
@@ -165,6 +152,7 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  // The list's own filter box: arrows move the cursor, Enter selects.
   const searchKeys = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); moveCursor(e.key === "ArrowDown" ? 1 : -1); }
     else if (e.key === "Enter") { e.preventDefault(); const c = cursorId && rows.some((r) => r.conditionId === cursorId) ? cursorId : rows[0]?.conditionId; if (c) { select(c); searchRef.current?.blur(); } }
@@ -175,15 +163,17 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
   const notFound = det.status === 404;
   const empty = wl.data?.research === "disabled" ? "Research is paused on this instance. Market data still updates." : "No theses yet. Markets are scanned daily; the first research run is in progress.";
 
+  const feedAt = feed.data?.at ?? shown.current?.feed.at ?? null;
   return (
-    <div className={`term ${fontClass} ${css.grid}`}>
-      <TopBar feedStatus={feed.status} feedSource={feed.source} feedAt={feed.data?.at ?? shown.current?.feed.at ?? null} now={Date.now()} balance={clob.balance}
-        query={query} onQuery={setQuery} onSearchFocus={() => setDrawer(true)} onSearchKey={searchKeys} searchRef={searchRef} locked={!switchable} onBlocked={blocked} />
+    <div className={css.grid} data-workspace>
+      {slot && createPortal(<><KeyLegend /><span className={css.feedSeg}><FeedBadge status={feed.status} source={feed.source} at={feedAt} now={Date.now()} /></span></>, slot)}
       <div className={`${css.backdrop} ${drawer ? css.open : ""}`} onClick={() => setDrawer(false)} aria-hidden />
       <MarketList rows={rows} loading={wl.loading} error={wl.error} empty={empty} cats={cats} cat={cat} onCat={setCat}
-        selectedId={id} cursorId={cursorId} onSelect={select} open={drawer} note={lockNote ? LOCK_NOTE : null} />
+        selectedId={id} cursorId={cursorId} onSelect={select} open={drawer} note={lockNote ? LOCK_NOTE : null}
+        query={query} onQuery={setQuery} searchRef={searchRef} onSearchKey={searchKeys} />
 
       <section className={`${css.pane} ${css.chartp} ${dim ? css.dimmed : ""}`} aria-label="market">
+        <button type="button" className={css.listBtn} onClick={() => { setDrawer(true); requestAnimationFrame(() => searchRef.current?.focus()); }} aria-label="Show market list">{"☰"} Markets</button>
         <div className={css.heroBox}>
           <MarketHero meta={meta} tick={viewFeed?.tickSize ?? null} yesMid={viewFeed?.mid ?? viewDetail?.snapshot?.mid ?? null} outcome={outcome} onOutcome={pickOutcome} notFound={notFound} />
           <KeyStats book={book} vol24h={viewDetail?.snapshot?.vol24h ?? null} />
@@ -203,7 +193,6 @@ export function TerminalPage({ fontClass }: { fontClass: string }) {
       </div>
 
       <AccountPane clob={clob} connected={w.status === "connected"} tab={tab} onTab={setTab} tokens={tokens} mark={mark} tick={viewFeed?.tickSize ?? DEFAULT_TICK} />
-      <KeyLegend />
       <p className={`${css.disc} ${css.pageDisc}`}>{DISCLAIMER}</p>
     </div>
   );

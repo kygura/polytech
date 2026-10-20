@@ -1,6 +1,6 @@
 // Pure terminal helpers (DESIGN 11.2, 11.7): outcome mirroring, cents display, update-tint diffs, nudges. No React.
 import type { FeedLevel, MarketFeed } from "../../hooks/useMarketFeed";
-import { roundTick, tickDecimals } from "../public/ticket";
+import { roundTick, tickDecimals } from "./ticket";
 
 export type Outcome = "YES" | "NO";
 export type TradeSide = "BUY" | "SELL";

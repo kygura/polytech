@@ -2,6 +2,7 @@
 import { takerFeePerShare, type Side } from "@pm/core";
 import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 
+export const DISCLAIMER = "Research output, not financial advice. Trading can lose all funds sent. Polymarket is not available in some jurisdictions; you are responsible for complying with yours.";
 export const DEFAULT_TICK = 0.01; // used until the live book states the tick
 const SHARE_STEP = 100; // shares rounded down to 0.01 so the cost never exceeds the amount
 

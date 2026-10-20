@@ -1,60 +1,91 @@
+/* One palette for the whole app (DESIGN 13.1): dark by default, light via [data-theme="light"]. */
 :root {
   --bg: #0b0d10;
-  --surface: #12151a;
+  --surface: #13161b;
   --surface-2: #1a1e25;
-  --border: #262b33;
-  --text: #e6e8eb;
-  --muted: #8a919c;
-  --faint: #4b525c;
-  --pos: #3ecf8e;
-  --neg: #f0616d;
-  --warn: #f5b544;
-  --accent: #6ea8fe;
-  --mode-0: #8a919c;
-  --mode-1: #6ea8fe;
-  --mode-2: #f5b544;
-  --mode-3: #f58a44;
-  --mode-4: #f0616d;
-  --kill: #ff3b3b;
-  --on-kill: #fff;
-  --badge-s: #a58bf5;
-  --badge-c: #d97bb0;
-  --backdrop: rgb(0 0 0 / 0.5);
+  --border: #232830;
+  --border-2: #2f3540;
+  --text: #e4e7ec;
+  --muted: #8b93a1;
+  --faint: #555d6b;
+  --yes: #5b9dff; --yes-bg: rgb(91 157 255 / .14); --on-yes: #0b0d10;
+  --no: #ff9142; --no-bg: rgb(255 145 66 / .14); --on-no: #0b0d10;
+  --up: #4cc38a; --up-bg: rgb(76 195 138 / .13);
+  --down: #f0616d; --down-bg: rgb(240 97 109 / .13);
+  --focus: #9d8cff; --focus-bg: rgb(157 140 255 / .14); --on-focus: #0b0d10;
+  --tint: rgb(157 140 255 / .24);
+  --warn: #f5b544; --warn-bg: rgb(245 181 68 / .12);
+  --kill: #d92626; --on-kill: #fff;
+  --badge-s: #a58bf5; --badge-c: #d97bb0;
+  --backdrop: rgb(0 0 0 / .5);
+  --shadow: none;
 
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --font-ui: system-ui, sans-serif;
+  /* Semantic aliases: mode colours live only in ModeBadge / ModeSelector. */
+  --mode-0: var(--muted); --mode-1: var(--focus); --mode-2: var(--warn); --mode-3: var(--no); --mode-4: var(--down);
+  --bid: var(--up); --bid-bg: var(--up-bg); --ask: var(--down); --ask-bg: var(--down-bg);
+  /* Old operator names, retargeted. Delete one when its last use is rewritten. */
+  --pos: var(--up); --neg: var(--down); --accent: var(--focus);
+
+  /* Fonts come from next/font (variables set on <html> in layout.tsx). */
+  --font-ui: var(--font-inter), Inter, system-ui, sans-serif;
+  --font-mono: var(--font-jbm), "JetBrains Mono", ui-monospace, monospace;
   --fs-xs: 11px; --lh-xs: 14px;
   --fs-sm: 12px; --lh-sm: 16px;
   --fs-md: 13px; --lh-md: 18px;
   --fs-lg: 15px; --lh-lg: 20px;
   --fs-xl: 20px; --lh-xl: 24px;
+  --fs-2xl: 26px; --lh-2xl: 32px;
 
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
-  --radius: 3px;
-  --row-h: 26px;
+  --sp-0: 2px; --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
+  --gap: 6px;
+  --r-sm: 4px; --r-md: 6px; --r-lg: 8px;
+  --radius: var(--r-sm);
+
+  --top-h: 44px; --status-h: 24px; --ph-h: 34px; --hdr-h: 28px; --row-h: 26px; --row-h-2: 40px; --row-dense: 22px;
+  --input-h: 28px; --input-h-lg: 36px; --btn-h: 28px; --btn-h-lg: 40px; --legend-h: 24px;
+  --tint-ms: 600ms;
+
+  /* Old terminal names (--t-*), aliased so terminal.module.css and ChartPane keep compiling. Delete once rewritten (C1). */
+  --t-bg: var(--bg); --t-pane: var(--surface); --t-pane-2: var(--surface-2); --t-line: var(--border); --t-line-2: var(--border-2);
+  --t-text: var(--text); --t-dim: var(--muted); --t-faint: var(--faint);
+  --t-yes: var(--yes); --t-yes-bg: var(--yes-bg); --t-on-yes: var(--on-yes);
+  --t-no: var(--no); --t-no-bg: var(--no-bg); --t-on-no: var(--on-no);
+  --t-up: var(--up); --t-up-bg: var(--up-bg); --t-down: var(--down); --t-down-bg: var(--down-bg);
+  --t-bid: var(--bid); --t-bid-bg: var(--bid-bg); --t-ask: var(--ask); --t-ask-bg: var(--ask-bg);
+  --t-focus: var(--focus); --t-focus-bg: var(--focus-bg); --t-tint: var(--tint);
+  --t-warn: var(--warn); --t-warn-bg: var(--warn-bg); --t-shadow: var(--shadow);
+  --t-font-ui: var(--font-ui); --t-font-num: var(--font-mono);
+  --t-fs-xs: var(--fs-xs); --t-lh-xs: var(--lh-xs); --t-fs-sm: var(--fs-sm); --t-lh-sm: var(--lh-sm);
+  --t-fs-md: var(--fs-md); --t-lh-md: var(--lh-md); --t-fs-lg: var(--fs-lg); --t-lh-lg: var(--lh-lg);
+  --t-fs-xl: var(--fs-2xl); --t-lh-xl: var(--lh-2xl);
+  --t-sp-1: var(--sp-0); --t-sp-2: var(--sp-1); --t-sp-3: var(--gap); --t-sp-4: var(--sp-2); --t-sp-5: var(--sp-3); --t-sp-6: var(--sp-4);
+  --t-r-sm: var(--r-sm); --t-r-md: var(--r-md); --t-r-lg: var(--r-lg);
+  --t-top-h: var(--top-h); --t-ph-h: var(--ph-h); --t-row-h: var(--row-h); --t-ladder-h: var(--row-dense); --t-tape-h: var(--row-dense);
+  --t-input-h: var(--input-h-lg); --t-btn-h: var(--btn-h-lg); --t-legend-h: var(--legend-h); --t-tint-ms: var(--tint-ms);
+
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #f6f7f8;
+  --bg: #eceef2;
   --surface: #ffffff;
-  --surface-2: #eef0f3;
-  --border: #d6dae0;
-  --text: #15181c;
-  --muted: #5f6773;
-  --faint: #9aa1ab;
-  --pos: #0f8a5f;
-  --neg: #c6333f;
-  --warn: #b06f00;
-  --accent: #2563eb;
-  --mode-0: #5f6773;
-  --mode-1: #2563eb;
-  --mode-2: #b06f00;
-  --mode-3: #c2410c;
-  --mode-4: #c6333f;
-  --kill: #d00000;
-  --badge-s: #6a4bd1;
-  --badge-c: #a63a78;
+  --surface-2: #f4f5f8;
+  --border: #e1e4ea;
+  --border-2: #cfd4dc;
+  --text: #161a20;
+  --muted: #5d6573;
+  --faint: #9aa1ad;
+  --yes: #1a5fcf; --yes-bg: rgb(26 95 207 / .10); --on-yes: #fff;
+  --no: #b04800; --no-bg: rgb(176 72 0 / .10); --on-no: #fff;
+  --up: #0a7a4e; --up-bg: rgb(10 122 78 / .10);
+  --down: #c93244; --down-bg: rgb(201 50 68 / .09);
+  --focus: #5b45e0; --focus-bg: rgb(91 69 224 / .09); --on-focus: #fff;
+  --tint: rgb(91 69 224 / .16);
+  --warn: #946000; --warn-bg: rgb(148 96 0 / .10);
+  --kill: #d00000; --on-kill: #fff;
+  --badge-s: #6a4bd1; --badge-c: #a63a78;
+  --backdrop: rgb(20 24 32 / .35);
+  --shadow: 0 1px 2px rgb(20 24 32 / .06);
   color-scheme: light;
 }
 
@@ -64,101 +95,79 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 400 var(--fs-md) / var(--lh-md) var(--font-mono);
+  font: 400 var(--fs-md) / var(--lh-md) var(--font-ui);
   font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--focus); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button {
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
   padding: 2px var(--sp-2);
+  min-height: 24px;
   cursor: pointer;
   transition: background 120ms;
 }
 button:hover:not(:disabled) { background: var(--border); }
-button:disabled { color: var(--faint); cursor: not-allowed; }
-input, select {
+button:disabled { opacity: .5; cursor: not-allowed; }
+input, select, textarea {
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 2px var(--sp-2);
-  height: 24px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-2);
+  height: var(--input-h);
 }
-input[type="number"] { text-align: right; }
+textarea { height: auto; padding: var(--sp-1) var(--sp-2); }
+input[type="checkbox"], input[type="radio"] { height: auto; padding: 0; }
+input[type="number"] { text-align: right; font-family: var(--font-mono); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-bg); }
 
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 table { border-collapse: collapse; width: 100%; }
-th, td { padding: 4px 8px; height: var(--row-h); text-align: left; white-space: nowrap; }
-th { height: 28px; font-weight: 600; background: var(--surface-2); color: var(--muted); position: sticky; top: 0; z-index: 1; }
+th, td { padding: 0 var(--sp-2); height: var(--row-h); text-align: left; white-space: nowrap; }
+th { height: var(--hdr-h); font: 500 var(--fs-sm) / var(--lh-sm) var(--font-ui); background: var(--surface-2); color: var(--muted); position: sticky; top: 0; z-index: 1; }
 tbody tr { border-top: 1px solid var(--border); }
 tbody tr:hover { background: var(--surface-2); }
-.num, th.num, td.num { text-align: right; font-family: var(--font-mono); }
+/* Two-line market rows: the question wraps to two lines, the full text is in the title attribute. */
+tr.row2 > td { height: var(--row-h-2); white-space: normal; }
+.row2 .q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-family: var(--font-ui); }
 
-/* Shared shape (DESIGN 12.1.1): key caps. The terminal restyles kbd with its --t-* tokens (terminal.module.css). */
-kbd { font: 500 10px/14px var(--font-mono); padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius); color: var(--muted); background: var(--surface-2); }
+/* Numbers: mono, tabular. */
+.n, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.num, th.num, td.num { text-align: right; }
+
+kbd { font: 500 10px / 14px var(--font-mono); padding: 0 4px; border: 1px solid var(--border-2); border-bottom-width: 2px; border-radius: var(--r-sm); color: var(--muted); background: var(--surface-2); }
+button kbd { background: transparent; }
+
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-3); }
+dialog::backdrop { background: var(--backdrop); }
 
 .ui { font-family: var(--font-ui); }
 .muted { color: var(--muted); }
-.pos { color: var(--pos); }
-.neg { color: var(--neg); }
+.pos, .up { color: var(--up); }
+.neg, .down { color: var(--down); }
+.yes { color: var(--yes); }
+.no { color: var(--no); }
 .warn { color: var(--warn); }
 
-.pane { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.pane > h2 { margin: 0; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-lg); line-height: var(--lh-lg); font-weight: 600; border-bottom: 1px solid var(--border); }
+/* Panel look for the operator pages that still use .pane / h2 / .body; new code uses components/ui/Panel. */
+.pane { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); }
+.pane > h2 { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--ph-h); margin: 0; padding: 0 var(--sp-3); font: 600 var(--fs-sm) / var(--lh-sm) var(--font-ui); border-bottom: 1px solid var(--border); }
 .pane > .body { padding: var(--sp-3); }
+
+/* Document page header (DESIGN 13.3): title left, actions right. */
+.page-h { display: flex; align-items: center; gap: var(--sp-3); min-height: 40px; }
+.page-h h1 { margin: 0; font: 600 var(--fs-lg) / var(--lh-lg) var(--font-ui); }
+.page-h .r { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
 
 @keyframes blink { 50% { opacity: 0.2; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-
-/* Trading terminal tokens (DESIGN 11.1). Scoped to .term only: nothing outside /trade changes. Dark is the default. */
-.term {
-  --t-bg: #0b0d10; --t-pane: #13161b; --t-pane-2: #1a1e25; --t-line: #232830; --t-line-2: #2f3540;
-  --t-text: #e4e7ec; --t-dim: #8b93a1; --t-faint: #555d6b;
-  --t-yes: #5b9dff; --t-yes-bg: rgb(91 157 255 / .14); --t-on-yes: #0b0d10;
-  --t-no: #ff9142; --t-no-bg: rgb(255 145 66 / .14); --t-on-no: #0b0d10;
-  --t-up: #4cc38a; --t-up-bg: rgb(76 195 138 / .13); --t-down: #f0616d; --t-down-bg: rgb(240 97 109 / .13);
-  --t-bid: var(--t-up); --t-bid-bg: var(--t-up-bg); --t-ask: var(--t-down); --t-ask-bg: var(--t-down-bg);
-  --t-focus: #9d8cff; --t-focus-bg: rgb(157 140 255 / .14); --t-tint: rgb(157 140 255 / .24);
-  --t-warn: #f5b544; --t-warn-bg: rgb(245 181 68 / .12);
-  --t-shadow: none;
-  --t-font-ui: var(--font-inter), Inter, system-ui, sans-serif; --t-font-num: var(--font-jbm), "JetBrains Mono", ui-monospace, monospace;
-  --t-fs-xs: 10.5px; --t-lh-xs: 14px; --t-fs-sm: 11.5px; --t-lh-sm: 16px; --t-fs-md: 12.5px; --t-lh-md: 18px;
-  --t-fs-lg: 16px; --t-lh-lg: 22px; --t-fs-xl: 22px; --t-lh-xl: 28px;
-  --t-sp-1: 2px; --t-sp-2: 4px; --t-sp-3: 6px; --t-sp-4: 8px; --t-sp-5: 12px; --t-sp-6: 16px;
-  --t-r-sm: 4px; --t-r-md: 6px; --t-r-lg: 8px;
-  --t-top-h: 44px; --t-ph-h: 34px; --t-row-h: 24px; --t-ladder-h: 22px; --t-tape-h: 19px; --t-input-h: 36px; --t-btn-h: 40px; --t-legend-h: 24px;
-  --t-tint-ms: 600ms;
-  color-scheme: dark;
-}
-:root[data-theme="light"] .term {
-  --t-bg: #eceef2; --t-pane: #ffffff; --t-pane-2: #f4f5f8; --t-line: #e1e4ea; --t-line-2: #cfd4dc;
-  --t-text: #161a20; --t-dim: #5d6573; --t-faint: #9aa1ad;
-  --t-yes: #1f64d6; --t-yes-bg: rgb(31 100 214 / .10); --t-on-yes: #ffffff;
-  --t-no: #c25400; --t-no-bg: rgb(194 84 0 / .10); --t-on-no: #ffffff;
-  --t-up: #0c8a5a; --t-up-bg: rgb(12 138 90 / .10); --t-down: #d0364a; --t-down-bg: rgb(208 54 74 / .09);
-  --t-focus: #5b45e0; --t-focus-bg: rgb(91 69 224 / .09); --t-tint: rgb(91 69 224 / .16);
-  --t-warn: #a86b00; --t-warn-bg: rgb(168 107 0 / .10);
-  --t-shadow: 0 1px 2px rgb(20 24 32 / .06);
-  color-scheme: light;
-}
-/* Shared pieces rendered inside the terminal (RegionStatus, ConnectButton) and the base elements, re-pointed at the terminal tokens. */
-.term { background: var(--t-bg); color: var(--t-text); font: 400 var(--t-fs-md) / var(--t-lh-md) var(--t-font-ui); }
-.term .pos { color: var(--t-up); } .term .neg { color: var(--t-down); } .term .warn { color: var(--t-warn); } .term .muted { color: var(--t-dim); }
-.term a { color: var(--t-focus); }
-.term :focus-visible { outline: 2px solid var(--t-focus); outline-offset: 1px; }
-.term button { background: var(--t-pane-2); border: 1px solid var(--t-line-2); border-radius: var(--t-r-md); color: var(--t-text); }
-.term button:hover:not(:disabled) { background: var(--t-line); }
-.term button:disabled { color: var(--t-faint); }
-.term input { background: transparent; border: 0; height: auto; padding: 0; }
-.term th { background: none; position: static; }
-.term tbody tr { border-top: 0; }
-.term tbody tr:hover { background: none; }

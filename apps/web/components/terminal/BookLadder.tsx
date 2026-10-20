@@ -3,7 +3,7 @@ import { forwardRef, useRef, type KeyboardEvent } from "react";
 import type { OpenOrder } from "@pm/pm/exchange";
 import type { FeedLevel, FeedStatus, MarketFeed } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
-import { DEFAULT_TICK } from "../public/ticket";
+import { DEFAULT_TICK } from "./ticket";
 import { PaneSkeleton } from "./PaneSkeleton";
 import { cents, changedSizes, sh, type Outcome } from "./book";
 import css from "./terminal.module.css";
