@@ -12,4 +12,5 @@ export * from "./sync";
 export * from "./sets";
 export * from "./calib";
 export * as read from "./read";
+export * as terminal from "./terminal";
 export * from "./ingest";
