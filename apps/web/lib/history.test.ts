@@ -72,6 +72,12 @@ describe("loadHistory", () => {
       expect(d.snapshots).toHaveBeenCalledWith(10_000_000_000 - 24 * 3_600_000);
     }
   });
+  it("ALL on a young market asks again hourly when daily buckets are too few", async () => {
+    const pricesHistory = vi.fn(async ({ fidelity }: { fidelity?: number }) => fidelity === 60 ? Array.from({ length: 72 }, (_, i) => ({ t: i, p: 0.5 })) : [{ t: 1, p: 0.4 }, { t: 2, p: 0.5 }]);
+    const r = await loadHistory("all", deps({ pm: { pricesHistory } }));
+    expect(pricesHistory).toHaveBeenLastCalledWith({ token: "tok", interval: "max", fidelity: 60 });
+    expect(r.points).toHaveLength(72);
+  });
   it("no token: snapshots only; ALL reads everything", async () => {
     const d = deps({ tokenId: null });
     await loadHistory("all", d);

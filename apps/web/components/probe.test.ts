@@ -11,6 +11,7 @@ describe("probeUrl", () => {
     expect(probeUrl("/markets", "?q=liq:5k")).toBe("/api/markets?q=liq:5k");
     expect(probeUrl("/markets/0xabc")).toBe("/api/markets/0xabc");
     expect(probeUrl("/watchlist", "?tab=size")).toBe("/api/watchlist?tab=size");
+    expect(probeUrl("/watchlist", "?tab=alerts")).toBe("/api/alerts");
   });
   it("unknown or nested-unknown routes skip the probe", () => {
     expect(probeUrl("/runs/abc/extra")).toBeNull();

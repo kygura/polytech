@@ -7,5 +7,6 @@ export function probeUrl(pathname: string, search = ""): string | null {
   const [, root = "", id, ...rest] = pathname.split("/");
   if (root === "runs") return !id ? "/api/fleet" : rest.length ? null : `/api/pods/${id}`;
   if (OWN[root]) return OWN[root]!;
+  if (root === "watchlist" && new URLSearchParams(search).get("tab") === "alerts") return "/api/alerts"; // the alerts tab is not a watchlist tab
   return SAME.has(root) ? `/api${pathname}${search}` : null;
 }
