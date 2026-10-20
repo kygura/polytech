@@ -362,3 +362,27 @@ Vercel Hobby allows only daily crons, so a new `monitor` job (alerts) runs at th
 - CI workflow runs both on push and PR.
 - `bun run build` succeeds for `apps/web`.
 - With `PM_FIXTURES=1` and no API keys: a sweep → snapshot → screen → monitor cycle fills `market_latest` and alerts; `/api/markets?q=liq:1k.. sort:-prio` returns rows; the Screener, Runs (fake runner pod visible with agent rows and stage), Journal and alerts views render; a running pod can be cancelled.
+
+## Rev 8 — One app, one design system (2026-10-20)
+
+Owner feedback on Rev 7: the operator pages and the `/trade` terminal look like two different products stitched together (two palettes, two fonts, two shells, two market pages), the market panels truncate titles and have no usable YES/NO chart, and many flows are broken. Rev 8 replaces "two palettes, one set of shapes" (DESIGN 12.1.1) with one system and one shell.
+
+### Decisions
+
+- **No login.** The password gate, `/login`, `/api/login`, `/api/logout` and the session cookie are removed. Every page and API route is reachable without credentials. Cron routes keep `CRON_SECRET`. The TUI stops asking for a password. Risk accepted by the owner: anyone with the URL can change autonomy mode and, if `PM_PRIVATE_KEY` is set, trade the server wallet; the kill switch stays one click away in the header.
+- **No visitor mode.** The `(public)` route group, `PublicShell`, the "Sign in" link and `/trade/autonomy` are removed. `/trade` moves under the single app shell. Browser-wallet trading on `/trade` stays (wallet button lives in the shell header). The read-only `/api/public/*` routes may stay as the terminal's data API.
+- **One shell.** Every route renders inside the same header (logo, nav, market search, theme, mode badge, wallet, kill switch) and the same bottom status bar. Workspace pages (Trade) fill the viewport between them; document pages scroll.
+- **One token set.** One palette (the terminal's, dark default, light via toggle), one UI font (Inter) and one numeric font (JetBrains Mono, tabular), loaded once in the root layout. No page-scoped token namespace (`--t-*` folds into the global tokens). Theme resolution: stored choice, else dark.
+- **One market page.** `/trade/[id]` is the market page. `/markets/[id]` redirects to it. The operator's research content (thesis, edge, kill criteria, catalysts, evidence, agent estimates, research actions, metrics, flags) becomes a tab set on the market page beside positions, orders and rules.
+- **YES/NO chart.** The market chart plots YES and NO probability (NO = 1 − YES) from `/api/markets/[id]/history` (Polymarket prices-history, snapshot fallback) with 1D / 1W / 1M / ALL ranges, a crosshair tooltip (time, YES ¢, NO ¢), a 0–100 % axis with distinct ticks, the live mid as the last point, thesis fair value (p̂) and entry markers when a thesis exists.
+- **Titles never crop to one line.** Market titles wrap (at most two lines in lists, full in headers) with the full question in a tooltip.
+- **Querying markets.** The market list on `/trade` searches all tracked markets (not just the watchlist) by name; `/markets` (screener) keeps the DSL query bar and filter panel, gains YES / NO price columns and a probability bar, wraps titles, and fits its container without horizontal page overflow.
+
+### Done (Rev 8)
+
+1. `bun run typecheck`, `bun run test` and `bun run build` (apps/web `next build`) pass.
+2. With `AUTH_DISABLED` unset and no password configured, every page in the nav loads with HTTP 200 and no redirect to `/login`; `/login` is gone (404 or redirect home).
+3. A Playwright pass over every nav route (fresh PGlite DB after sweep/snapshot/screen/research jobs) shows no page errors, no failed same-origin requests, and the same header/status bar/fonts/colors on every route, including `/trade`.
+4. On `/trade/[id]` the chart shows YES and NO lines from Polymarket history with working range tabs and hover tooltip; titles are not cut to one line; the research tab shows the thesis for a researched market.
+5. `/markets/[id]` lands on `/trade/[id]`.
+6. Bugs listed in `docs/rev8-audit.md` are fixed or explicitly deferred there with a reason.
