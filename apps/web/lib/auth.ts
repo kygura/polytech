@@ -48,6 +48,9 @@ export function sessionCookie(value: string, maxAge = SESSION_TTL_S) {
   };
 }
 
+/** AUTH_DISABLED=1 (or true) turns the login off: every request is the operator. Cron keeps its CRON_SECRET. Unset = login required. */
+export const authDisabled = (v = process.env.AUTH_DISABLED) => v === "1" || v === "true";
+
 /** Constant-time string compare (hashing first hides length). */
 export function safeEqual(a: string, b: string): boolean {
   const h = (s: string) => createHash("sha256").update(s).digest();
