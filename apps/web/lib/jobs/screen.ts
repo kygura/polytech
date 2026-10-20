@@ -4,7 +4,7 @@ import {
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
-import { desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { memoClear } from "./memo";
@@ -268,16 +268,22 @@ async function writeLatest(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap
   for (const c of chunks(clear, 5000)) await d.db.update(ml).set({ priority: null, structural: null, opportunity: null }).where(inArray(ml.conditionId, c));
 }
 
-/** Rows of the most recent screen run. */
-export async function latestScreens(db: Db) {
+/** Rows of the most recent screen run (~16k at full universe): narrow with `ids` / `structural` when only a few are needed. */
+export async function latestScreens(db: Db, o: { ids?: string[]; structural?: boolean } = {}) {
+  if (o.ids && !o.ids.length) return [];
   const [{ ts }] = await db.select({ ts: max(s.screens.ts) }).from(s.screens) as [{ ts: Date | null }];
-  return ts ? db.select().from(s.screens).where(eq(s.screens.ts, ts)) : [];
+  return ts ? db.select().from(s.screens).where(and(eq(s.screens.ts, ts), o.ids ? inArray(s.screens.conditionId, o.ids) : undefined, o.structural ? eq(s.screens.structuralFlag, true) : undefined)) : [];
 }
 
 /** Top `per` by priority in each tier (so 20-40 total), muted excluded, pinned always in. */
 export async function shortlist(db: Db, per = 20): Promise<{ conditionId: string; tier: Tier; priority: number }[]> {
-  const rows = await latestScreens(db);
   const flags = new Map((await db.select().from(s.marketFlags)).map((f) => [f.conditionId, f]));
+  const [{ ts }] = await db.select({ ts: max(s.screens.ts) }).from(s.screens) as [{ ts: Date | null }];
+  if (!ts) return [];
+  const pinned = [...flags.values()].filter((f) => f.pinned).map((f) => f.conditionId);
+  // three narrow columns, priority > 0 or pinned: the full rows of a 16k-market run are too heavy to load per request
+  const rows = await db.select({ conditionId: s.screens.conditionId, tier: s.screens.tier, priority: s.screens.priority }).from(s.screens)
+    .where(and(eq(s.screens.ts, ts), or(gt(s.screens.priority, 0), pinned.length ? inArray(s.screens.conditionId, pinned) : undefined)));
   const n: Record<string, number> = {};
   return rows
     .filter((r) => !flags.get(r.conditionId)?.muted && (flags.get(r.conditionId)?.pinned || (r.priority ?? 0) > 0))
