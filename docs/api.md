@@ -32,5 +32,6 @@ Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types expo
 | GET | /api/stream | — | SSE: `event: <type>` per `lib/jobs/events.ts`, `data: <json>`; `event: ping` every 15 s. Live-execution types: `proposal.created`, `proposal.updated`, `order.updated`, `order.filled`, `order.error`, `recon.done`, `mode.changed` |
 | POST | /api/login, /api/logout | see auth | |
 | GET/POST | /api/cron/{sweep,snapshot,screen,research,paper,calibrate,propose,expire,sync,reconcile} | CRON_SECRET bearer | `{started:true, runId}` or `{skipped, reason}`. `research` also runs enabled profiles whose `every_min` elapsed since `last_run_at` (after the screener shortlist; stops on budget exhaustion) |
+| GET/POST | /api/cron/scout | CRON_SECRET bearer | `{started: boolean}`: runs `kickIfStale` (scouting chain when the last kick is older than 30 min and the kick lock is free; the chain starts after the response). Hit by `.github/workflows/scout.yml` |
 
 Web server components may call `read.*` directly (same server, no HTTP hop). Client components and the TUI use HTTP. Nothing is computed client-side except formatting.
