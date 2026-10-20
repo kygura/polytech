@@ -1,0 +1,71 @@
+/* DESIGN 13.4 PriceChart. Tokens are the unprefixed 13.1 names (--yes, --no, --focus ...). */
+.root { display: flex; flex-direction: column; height: 100%; min-height: 220px; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gap, 6px) var(--sp-2); min-height: var(--ph-h, 34px); padding: var(--sp-0, 2px) 0; }
+.legend, .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap, 6px); }
+.ctl { margin-left: auto; }
+
+.chip { display: inline-flex; align-items: center; gap: var(--sp-1, 4px); height: 22px; padding: 0 var(--sp-2, 8px); border-radius: 11px; border: 1px solid var(--border); background: transparent; color: var(--muted); font: 500 var(--fs-xs) / 1 var(--font-ui); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border-2); color: var(--text); }
+.chip[aria-pressed="false"] { text-decoration: line-through; }
+.chip:disabled { cursor: default; opacity: 1; }
+.chip:focus-visible, .seg button:focus-visible, .err:focus-visible, .empty button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.yes .dot { color: var(--yes); }
+.no .dot { color: var(--no); }
+.chip[aria-pressed="false"] .dot { opacity: .35; }
+.n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.seg { display: inline-flex; gap: 0; padding: 2px; border-radius: var(--r-md, 6px); background: var(--surface-2); }
+.seg button { height: 24px; min-width: 32px; padding: 0 var(--sp-2, 8px); border: 0; border-radius: var(--r-sm, 4px); background: transparent; color: var(--muted); font: 500 var(--fs-xs) / 1 var(--font-mono); cursor: pointer; }
+.seg button:hover { color: var(--text); }
+.seg button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border-2); }
+.src { color: var(--faint); font: 400 var(--fs-xs) / 1 var(--font-mono); }
+.err { padding: 0 var(--sp-1, 4px); border: 0; background: transparent; color: var(--down); font: 500 var(--fs-xs) / 1.4 var(--font-ui); cursor: pointer; text-decoration: underline; }
+
+.body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.svg { display: block; touch-action: pan-y; }
+.grid { stroke: var(--border); stroke-width: 1; shape-rendering: crispEdges; }
+.ylab, .xlab { fill: var(--muted); font: 400 var(--fs-xs) / 1 var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.lineYes, .lineNo { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.lineYes { stroke: var(--yes); }
+.lineNo { stroke: var(--no); }
+.focus { color: var(--focus); }
+.dash { stroke: currentColor; stroke-width: 1; stroke-dasharray: 4 3; }
+.olab { fill: currentColor; font: 500 var(--fs-xs) / 1 var(--font-mono); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.mkYes, .mkNo { stroke: var(--surface); stroke-width: 1; }
+.mkYes { fill: var(--yes); }
+.mkNo { fill: var(--no); }
+
+.liveYes { fill: var(--yes); }
+.liveNo { fill: var(--no); }
+.ring { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: ring 1.5s ease-out infinite; }
+.ringYes { stroke: var(--yes); }
+.ringNo { stroke: var(--no); }
+@keyframes ring { from { transform: scale(1); opacity: .7; } to { transform: scale(3.2); opacity: 0; } }
+
+.tagYes { fill: var(--yes); }
+.tagNo { fill: var(--no); }
+.tagTxtYes, .tagTxtNo { font: 600 var(--fs-xs) / 1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.tagTxtYes { fill: var(--on-yes); }
+.tagTxtNo { fill: var(--on-no); }
+
+.cross { stroke: var(--border-2); stroke-width: 1; }
+.dotYes, .dotNo { stroke: var(--surface); stroke-width: 1; }
+.dotYes { fill: var(--yes); }
+.dotNo { fill: var(--no); }
+.tip { position: absolute; z-index: 1; pointer-events: none; padding: 4px var(--sp-2, 8px); border: 1px solid var(--border); border-radius: var(--r-sm, 4px); background: var(--surface); font: 400 var(--fs-xs) / var(--lh-xs, 14px) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.tipYes { color: var(--yes); }
+.tipNo { color: var(--no); }
+.tipHat { color: var(--focus); }
+
+.skel { position: absolute; inset: var(--sp-2, 8px) 52px 22px 0; }
+.skel i { position: absolute; left: 0; right: 0; height: 10px; border-radius: var(--r-sm, 4px); background: var(--surface-2); }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2, 8px); height: 100%; color: var(--muted); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); }
+.empty p { margin: 0; }
+.empty button { height: 24px; padding: 0 var(--sp-2, 8px); border: 0; border-radius: var(--r-md, 6px); background: transparent; color: var(--muted); font: 500 var(--fs-sm) / 1 var(--font-ui); cursor: pointer; }
+.empty button:hover { background: var(--surface-2); color: var(--text); }
+
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) { .ring { animation: none; display: none; } }
