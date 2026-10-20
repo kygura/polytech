@@ -37,7 +37,7 @@ describe("public api", () => {
   it("watchlist: envelope with freshness + research status, projected rows, cache headers, kick via after()", async () => {
     const r = await wl.GET(get("/watchlist"));
     expect(r.status).toBe(200);
-    expect(r.headers.get("cache-control")).toBe("public, s-maxage=30, stale-while-revalidate=60");
+    expect(r.headers.get("cache-control")).toBe("private, no-store");
     const b = await r.json();
     expect(b).toMatchObject({ research: "on", snapshotAt: expect.any(Number), stale: expect.any(Boolean) });
     expect("sweptAt" in b).toBe(true);

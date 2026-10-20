@@ -90,7 +90,7 @@ export function publicMarketDetail(d: Detail, disabled = false): PublicMarketDet
 
 // ---- transport: per-IP limit + CDN cache
 export const PUBLIC_LIMIT = 60, PUBLIC_WINDOW_MS = 60_000;
-const CACHE = "public, s-maxage=30, stale-while-revalidate=60";
+const CACHE = "private, no-store"; // behind the login: no shared (CDN) copies
 
 const limited = (retryAfter: number) => Response.json({ error: "rate limited" }, { status: 429, headers: { "retry-after": String(retryAfter), "cache-control": "no-store" } });
 /** 429 Response when the caller's IP is over 60/min, else null. */
