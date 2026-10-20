@@ -5,6 +5,7 @@ import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
+import { compileFilter } from "./markets";
 import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
@@ -104,6 +105,29 @@ async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchS
     });
   const key = KEY[sort];
   return rows.sort((a, b) => (key(b) ?? -Infinity) - (key(a) ?? -Infinity) || (b.priority ?? 0) - (a.priority ?? 0)).slice(0, limit);
+}
+
+const NO_THESIS = {
+  thesisId: null, thesisAgeH: null, expired: null, capped: null, nextCatalyst: null, structural: null,
+  side: null, pMid: null, pHat: null, c: null, pPost: null, k: null, e: null, edgeC: null, r: null, payoff: null, rAnn: null, sizeUsd: null, shares: null, expectedProfit: null, rank: null,
+} as const;
+/** Fallback list before any screen/thesis exists (fresh database): open markets with a mid and a future end date, by priority, then 24h volume, then liquidity. Muted hidden. */
+export async function topMarkets(r: ReadDeps, limit = 100): Promise<WatchlistRow[]> {
+  const { db } = r, now = r.now(), m = s.markets, ml = s.marketLatest;
+  const { where, orderBy } = compileFilter({
+    price: { min: 0 }, daysToResolution: { min: 0 }, muted: false,
+    sort: [{ field: "priority", dir: "desc" }, { field: "volume24h", dir: "desc" }, { field: "liquidity", dir: "desc" }],
+  }, now);
+  const rows = await db
+    .select({ conditionId: m.conditionId, question: m.question, category: m.category, endDate: m.endDate, priority: ml.priority, mid: ml.mid, pinned: s.marketFlags.pinned })
+    .from(m).innerJoin(ml, eq(ml.conditionId, m.conditionId)).leftJoin(s.marketFlags, eq(s.marketFlags.conditionId, m.conditionId))
+    .where(where).orderBy(...orderBy).limit(limit);
+  return rows.map((x): WatchlistRow => ({
+    conditionId: x.conditionId, question: x.question, category: x.category, tier: null,
+    pinned: !!x.pinned, muted: false, shortlisted: false, researching: false,
+    priority: x.priority, midNow: x.mid, daysLeft: ((x.endDate?.getTime() ?? now) - now) / DAY, endDate: x.endDate?.getTime() ?? null,
+    ...NO_THESIS,
+  }));
 }
 
 // ---------------------------------------------------------------- market detail
