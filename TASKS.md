@@ -17,6 +17,10 @@ Destination: SPEC.md Rev 7 done list passes.
 - Routes: Screener `/markets`, Runs `/runs` + `/runs/[podId]`, Journal `/journal`; `/fleet` and `/calibration` redirect. Pod API is `/api/pods/[id]`.
 - Agent fetch without Exa goes through an SSRF-guarded `fetch_url` tool; WebFetch disallowed; polymarket.com blocked for blind roles.
 - Prior-weight refit skipped (priority is multiplicative); only the extremize refit ships.
+- Fee exponent modelled end to end (migration 0010); null exponent = 1.
+- Crowd metrics rotate: top 100 + 100 rotating markets per snapshot; others keep prior values rather than going unknown.
+- /trade WebSocket can be disabled with NEXT_PUBLIC_PM_WS=0 if an operator network blocks the WS host.
+- Verification: three reviews (server risk/reliability, pm/core + spec conformance, UI drift) → one fix loop; typecheck, 954 tests and `next build` green.
 
 ## Tasks
 | # | Task | Deps | Role / model | State |
@@ -28,9 +32,9 @@ Destination: SPEC.md Rev 7 done list passes.
 | T3c | core journal maths (drift, paper P&L, summarize, fitExtremize) | — | worker / sonnet | done |
 | T7 | DESIGN.md Rev 7 brief (shell, screener, runs, journal, alerts) | — | designer / fable | done |
 | T11 | CI workflow, clock-test fix, login lockout | — | grunt / haiku | done |
-| T4 | jobs: incremental sweep, market_latest, crowd sync, structural, monitor/alerts, journal fill, refit | T1 T2 T3* | worker / sonnet | frontier |
+| T4 | jobs: incremental sweep, market_latest, crowd sync, structural, monitor/alerts, journal fill, refit | T1 T2 T3* | worker / sonnet | done |
 | T5 | runs: agent status rows, tool-call capture, cancel, SSRF guard | T2 | worker / sonnet | done |
 | T6 | API routes: markets?q, views, alerts, journal, structural, history, status | T2 T3a | worker / sonnet | done |
 | T8 | UI: shell/nav/status bar + Screener | T6 T7 | ui-impl / sonnet | done |
-| T9 | UI: Runs, Journal, Alerts, market detail additions, /trade WS feed | T5 T6 T7 | ui-impl / sonnet | Runs, Journal, alerts done; market detail + /trade WS frontier |
-| T12 | verification gate | all | reviewer / opus | blocked |
+| T9 | UI: Runs, Journal, Alerts, market detail additions, /trade WS feed | T5 T6 T7 | ui-impl / sonnet | done |
+| T12 | verification gate | all | reviewer / opus | done (1 fix loop) |
