@@ -97,9 +97,10 @@ export function createPm(opts: PmOptions = {}) {
         continue;
       }
       if (res.ok) return res.json().catch((e: unknown) => { throw new Error(`${tag} -> network bad body ${(e as Error)?.message ?? e}`, { cause: e }); });
+      // penalize even on the last attempt: the next caller on this host (e.g. the sweep's next chunk) must still wait out the ban
+      if (res.status === 429) take[host].penalize(Math.max(MIN_429_MS, Math.min(retryAfterMs(res) ?? backoff, MAX_RETRY_AFTER_MS)));
       if ((res.status === 429 || res.status >= 500) && attempt < retries) {
-        if (res.status === 429) take[host].penalize(Math.max(MIN_429_MS, Math.min(retryAfterMs(res) ?? backoff, MAX_RETRY_AFTER_MS)));
-        else await sleep(backoff);
+        if (res.status !== 429) await sleep(backoff);
         continue;
       }
       throw new Error(`${tag} -> ${res.status} ${(await res.text()).slice(0, 200)}`);

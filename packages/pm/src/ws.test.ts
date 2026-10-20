@@ -70,6 +70,7 @@ describe("local book", () => {
 class FakeWS implements WsLike {
   static instances: FakeWS[] = [];
   static stuck = false; // simulate a socket that stays CONNECTING forever
+  static throwNext = false; // simulate a constructor failure (bad URL, no network stack)
   readyState = 0;
   sent: string[] = [];
   onopen: ((ev: unknown) => void) | null = null;
@@ -77,6 +78,7 @@ class FakeWS implements WsLike {
   onclose: ((ev: { code?: number; reason?: string }) => void) | null = null;
   onerror: ((ev: unknown) => void) | null = null;
   constructor(public url: string) {
+    if (FakeWS.throwNext) { FakeWS.throwNext = false; throw new Error("boom"); }
     FakeWS.instances.push(this);
     if (FakeWS.stuck) return;
     queueMicrotask(() => { this.readyState = 1; this.onopen?.({}); });
@@ -128,6 +130,55 @@ describe("subscribeMarket (fake socket)", () => {
     expect(status).toContain("closed:connect timeout");
     expect(FakeWS.instances.length).toBeGreaterThanOrEqual(3);
     expect(JSON.parse(FakeWS.instances.at(-1)!.sent[0]!).assets_ids).toEqual(["A"]); // eventually connected and subscribed
+  });
+  it("close() detaches the socket: a late server close emits nothing and triggers no reconnect", async () => {
+    FakeWS.instances = [];
+    const status: string[] = [];
+    const sock = subscribeMarket(["A"], { onEvent: () => {}, onStatus: (s) => status.push(s), WebSocketImpl: FakeWS, reconnectMinMs: 1, reconnectMaxMs: 2 });
+    await tick(10);
+    const ws1 = FakeWS.instances[0]!;
+    const lateClose = ws1.onclose!;
+    sock.close();
+    expect(status).toEqual(["connecting", "open", "closed"]);
+    expect(ws1.onclose).toBeNull();
+    expect(ws1.readyState).toBe(3);
+    lateClose({ code: 1006, reason: "late" }); // the server's close event arriving after ours
+    await tick(20);
+    expect(status).toEqual(["connecting", "open", "closed"]); // not re-emitted
+    expect(FakeWS.instances).toHaveLength(1);
+  });
+  it("a throwing WebSocket constructor counts as a lost connection and is retried", async () => {
+    FakeWS.instances = [];
+    FakeWS.throwNext = true;
+    const status: string[] = [];
+    const sock = subscribeMarket(["A"], { onEvent: () => {}, onStatus: (s, d) => status.push(d ? `${s}:${d}` : s), WebSocketImpl: FakeWS, reconnectMinMs: 1, reconnectMaxMs: 2 });
+    await tick(30);
+    expect(status[0]).toBe("connecting");
+    expect(status[1]).toBe("closed:connect failed: boom");
+    expect(status).toContain("open");
+    expect(FakeWS.instances).toHaveLength(1);
+    expect(JSON.parse(FakeWS.instances[0]!.sent[0]!).assets_ids).toEqual(["A"]);
+    sock.close();
+  });
+  it("subscribeBooks clears its store on disconnect so a delta after a reconnect never hits a stale book", async () => {
+    FakeWS.instances = [];
+    const seen: Book[] = [];
+    const sock = subscribeBooks(["A"], (b) => seen.push(b), { WebSocketImpl: FakeWS, pingMs: 1000, reconnectMinMs: 1, reconnectMaxMs: 2 });
+    await tick(10);
+    const frames = fx("ws-frames.json") as string[];
+    FakeWS.instances[0]!.onmessage!({ data: frames[0] });
+    expect(sock.store.books.size).toBe(2);
+    FakeWS.instances[0]!.close(); // server drop
+    expect(sock.store.books.size).toBe(0);
+    await tick(30);
+    const ws2 = FakeWS.instances[1]!;
+    const n = seen.length;
+    ws2.onmessage!({ data: frames[1] }); // delta before the fresh snapshot: dropped
+    expect(seen).toHaveLength(n);
+    expect(sock.store.books.size).toBe(0);
+    ws2.onmessage!({ data: frames[0] });
+    expect(sock.store.books.size).toBe(2);
+    sock.close();
   });
   it("subscribeBooks emits the maintained book after snapshots and deltas", async () => {
     FakeWS.instances = [];

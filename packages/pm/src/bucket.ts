@@ -6,8 +6,9 @@ export type BucketOpts = {
 };
 export type Take = (() => Promise<void>) & {
   /**
-   * HTTP 429 feedback: drops the stored tokens, so every caller queued behind pays a full refill, and makes the next caller
-   * sit out `ms` (the server's Retry-After) before anything else is sent. Never rejects anyone.
+   * HTTP 429 feedback: drops the stored tokens and makes the queue sit out `ms` (the server's Retry-After) before anything
+   * else is sent. After the pause the queue resumes at the sustained rate, one request per refill interval, never as a burst.
+   * Never rejects anyone.
    */
   penalize(ms?: number): void;
 };
@@ -25,7 +26,7 @@ export function bucket(limit: number, windowMs: number, o: BucketOpts = {}): Tak
   const rate = limit / windowMs; // tokens per ms
   let tokens = burst;
   let last = now();
-  let penalty = 0; // ms the next caller must wait (Retry-After), consumed once
+  let penalty = 0; // ms the queue must wait (Retry-After), consumed once
   let tail: Promise<void> = Promise.resolve();
   const refill = () => {
     const t = now();
@@ -33,16 +34,21 @@ export function bucket(limit: number, windowMs: number, o: BucketOpts = {}): Tak
     last = t;
   };
   const run = async () => {
-    while (penalty > 0) {
-      const ms = penalty;
-      penalty = 0; // a 429 landing during this sleep re-arms it and loops once more
-      await sleep(ms);
-      tokens = Math.min(burst, tokens + ms * rate); // credit the sleep explicitly: an injected sleep need not move the clock
-      last = now();
+    for (;;) {
+      while (penalty > 0) {
+        const ms = penalty;
+        penalty = 0; // a 429 landing during this sleep re-arms it and loops once more
+        await sleep(ms);
+        tokens = Math.min(tokens, 0); // no refill credit for the pause: the queue leaves the ban at the sustained rate, not with a burst
+        last = now();
+      }
+      refill();
+      tokens -= 1; // may go negative: the deficit is this caller's wait, the next caller queues behind it
+      if (tokens >= 0) return;
+      await sleep(Math.ceil(-tokens / rate));
+      if (penalty <= 0) return;
+      tokens += 1; // a 429 landed while we slept: hand the token back and wait the penalty out before anything goes out
     }
-    refill();
-    tokens -= 1; // may go negative: the deficit is this caller's wait, the next caller queues behind it
-    if (tokens < 0) await sleep(Math.ceil(-tokens / rate));
   };
   const take = (() => {
     const p = tail.then(run);

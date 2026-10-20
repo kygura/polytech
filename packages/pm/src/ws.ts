@@ -211,32 +211,45 @@ export function subscribeMarket(assetIds: string[], o: MarketSocketOpts): Market
   let status: SocketStatus = "connecting";
   let ping: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let connectTimer: ReturnType<typeof setTimeout> | undefined;
   let lastRx = 0;
 
   const setStatus = (s: SocketStatus, detail?: string) => { status = s; o.onStatus?.(s, detail); };
   const send = (msg: unknown) => { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)); };
   const subscribeMsg = (ids: string[]) => ({ type: "market", assets_ids: ids, custom_feature_enabled: custom });
+  const detach = (s: WsLike) => { s.onopen = s.onmessage = s.onclose = s.onerror = null; };
+  const clearTimers = () => { clearInterval(ping); clearTimeout(connectTimer); ping = connectTimer = undefined; };
+  /** The current connection is gone: emit "closed" and schedule a reconnect, unless the caller closed us (then nothing is said). */
+  const lost = (detail: string) => {
+    clearTimers();
+    ws = null;
+    if (closed) return;
+    setStatus("closed", detail);
+    const delay = Math.min(reconnectMaxMs, reconnectMinMs * 2 ** attempt++) * (0.75 + random() * 0.5);
+    retry = setTimeout(connect, delay);
+  };
 
   function connect() {
     if (closed) return;
     setStatus("connecting");
-    const sock = new WS(o.url ?? WS_MARKET_URL);
+    let sock: WsLike;
+    try {
+      sock = new WS(o.url ?? WS_MARKET_URL);
+    } catch (e) {
+      return lost(`connect failed: ${(e as Error)?.message ?? e}`);
+    }
     ws = sock;
     let dead = false;
     // Single exit path per socket: close, error, connect timeout or staleness. Does not rely on the close event of a stuck socket.
+    // A socket the caller already closed, or one that was replaced, is detached and says nothing.
     const drop = (detail: string) => {
       if (dead) return;
       dead = true;
-      clearInterval(ping);
-      clearTimeout(connectTimer);
-      if (ws === sock) ws = null;
+      detach(sock);
       try { sock.close(); } catch {}
-      setStatus("closed", detail);
-      if (closed) return;
-      const delay = Math.min(reconnectMaxMs, reconnectMinMs * 2 ** attempt++) * (0.75 + random() * 0.5);
-      retry = setTimeout(connect, delay);
+      if (ws === sock) lost(detail);
     };
-    const connectTimer = setTimeout(() => { if (sock.readyState !== 1) drop("connect timeout"); }, connectTimeoutMs);
+    connectTimer = setTimeout(() => { if (sock.readyState !== 1) drop("connect timeout"); }, connectTimeoutMs);
     sock.onopen = () => {
       if (dead) return;
       clearTimeout(connectTimer);
@@ -270,22 +283,35 @@ export function subscribeMarket(assetIds: string[], o: MarketSocketOpts): Market
     },
     get assets() { return assets; },
     get status() { return status; },
+    /** Final: detaches the socket, stops every timer, no reconnect and no further status after this one. */
     close() {
+      if (closed) return;
       closed = true;
-      clearInterval(ping);
+      clearTimers();
       clearTimeout(retry);
-      try { ws?.close(); } catch {}
+      const s = ws;
       ws = null;
+      if (s) {
+        detach(s);
+        try { s.close(); } catch {}
+      }
       setStatus("closed", "closed by caller");
     },
   };
 }
 
-/** subscribeMarket + bookStore: `onBook` fires with the current best-first book after every snapshot or delta for that token. */
+/**
+ * subscribeMarket + bookStore: `onBook` fires with the current best-first book after every snapshot or delta for that token.
+ * The store is cleared whenever the socket is not open: every (re)connect starts from fresh snapshots, so a delta can never land on a stale book.
+ */
 export function subscribeBooks(assetIds: string[], onBook: (book: Book, event: MarketEvent) => void, o: Omit<MarketSocketOpts, "onEvent"> & { onEvent?: (e: MarketEvent) => void } = {}): MarketSocket & { store: BookStore } {
   const store = bookStore();
   const sock = subscribeMarket(assetIds, {
     ...o,
+    onStatus: (s, d) => {
+      if (s !== "open") store.clear();
+      o.onStatus?.(s, d);
+    },
     onEvent: (e) => {
       o.onEvent?.(e);
       for (const t of store.apply(e)) onBook(store.get(t)!, e);

@@ -30,13 +30,15 @@ describe("fetch wrapper", () => {
     const pm = createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) });
     expect(await pm.feeRateBps("1")).toBe(400);
     expect(f).toHaveBeenCalledTimes(3);
-    expect(sleeps).toEqual([5000, 500]);
+    // 429: 5 s ban, then one clob refill interval (20 ms: a ban earns no tokens); 503: plain backoff. The injected sleep does not move the
+    // clock, so the bucket still owes two tokens (40 ms) on the last attempt; under a real clock the 500 ms backoff refills it and that wait is 0.
+    expect(sleeps).toEqual([5000, 20, 500, 40]);
   });
   it("caps retry-after at 30s", async () => {
     const f = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 429, headers: { "retry-after": "999" } })).mockResolvedValueOnce(json({ base_fee: "1" }));
     const sleeps: number[] = [];
     await createPm({ fixtures: false, fetch: f, sleep: async (ms) => void sleeps.push(ms) }).feeRateBps("1");
-    expect(sleeps).toEqual([30_000]);
+    expect(sleeps).toEqual([30_000, 20]);
   });
   it("gives up after 3 retries and does not retry 4xx", async () => {
     const f = vi.fn().mockResolvedValue(json({}, 500));
@@ -79,7 +81,7 @@ describe("pagination", () => {
     const r = await createPm({ fixtures: false, fetch: f as never, sleep: async (ms) => void sleeps.push(ms) }).walkMarkets({}, (ms) => void got.push(ms.map((x) => x.id)));
     expect(got).toEqual([["1", "2"]]);
     expect(r).toEqual({ pages: 1, complete: false });
-    expect(sleeps).toEqual([100, 5000]); // page gap, then one wait floored at 5 s; no hammering
+    expect(sleeps).toEqual([100, 5000, 34]); // page gap, then one wait floored at 5 s plus a gamma refill interval; no hammering
     expect(f).toHaveBeenCalledTimes(3);
   });
   it("walkMarkets: budget exhausted -> complete=false after the page in flight", async () => {

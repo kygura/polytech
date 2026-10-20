@@ -45,15 +45,28 @@ describe("token bucket", () => {
     await take();
     expect(c.slept).toEqual([100]);
   });
-  it("penalize(ms) honours Retry-After once for the whole queue, then resumes at the normal rate", async () => {
+  it("penalize(ms): one Retry-After sleep covers the whole queue, which then leaves paced at the rate, never as a burst", async () => {
     const c = clock();
-    const take = bucket(100, 1000, { burst: 10, now: c.now, sleep: c.sleep });
+    const take = bucket(100, 1000, { burst: 10, now: c.now, sleep: c.sleep }); // 100/s -> 10 ms per token
     take.penalize(5000);
     const order: number[] = [];
-    await Promise.all([0, 1, 2].map((i) => take().then(() => order.push(i))));
-    expect(order).toEqual([0, 1, 2]);
-    expect(c.slept).toEqual([5000]); // one Retry-After sleep covers everyone queued behind it; the refill it earned is credited
-    expect(c.now()).toBe(5000);
+    await Promise.all([0, 1, 2, 3, 4].map((i) => take().then(() => order.push(i))));
+    expect(order).toEqual([0, 1, 2, 3, 4]);
+    expect(c.slept).toEqual([5000, 10, 10, 10, 10, 10]); // the pause earns no tokens: every request after it waits a refill interval
+    expect(c.now()).toBe(5050);
+  });
+  it("a 429 landing during a deficit sleep is waited out before the request goes out", async () => {
+    const c = clock();
+    let take!: ReturnType<typeof bucket>;
+    let armed = true;
+    const sleep = async (ms: number) => {
+      await c.sleep(ms);
+      if (armed) { armed = false; take.penalize(500); } // another caller's 429 arrives while we wait for our token
+    };
+    take = bucket(10, 1000, { burst: 1, now: c.now, sleep });
+    await take();
+    await take();
+    expect(c.slept).toEqual([100, 500, 100]); // deficit wait, then the ban, then a fresh deficit wait: nothing left inside Retry-After
   });
   it("never rejects", async () => {
     const c = clock();
