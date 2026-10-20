@@ -7,14 +7,15 @@ import { catalystMs } from "./research";
 
 const CAP = 20; // alerts raised per pass; the rest become one summary alert
 const TOP_IN = 20, TOP_OUT = 30, RANK_READ = 60; // new_candidate hysteresis: enters at rank <= 20, only forgotten once it falls past 30
-const STATE = "monitor:state", AT = "monitor:at";
+const STATE = "monitor:state";
 const H = 3_600_000;
 const WEBHOOK_MS = 5_000;
 
 type Kind = "mid_move" | "catalyst_passed" | "new_candidate" | "structural" | "run_failed";
 const ORDER: Kind[] = ["mid_move", "catalyst_passed", "run_failed", "structural", "new_candidate"]; // what survives the per-pass cap, most urgent first
 type Draft = { kind: Kind; conditionId: string | null; message: string; data: Record<string, unknown> };
-type State = { top: string[]; struct: string[] };
+type State = { top: string[]; struct: string[]; pods?: string[] }; // pods: failed pod ids already alerted (a reaped pod keeps its old startedAt, so a time cursor would miss it)
+const FAILED_LOOKBACK = 7 * 24 * H, FIRST_LOOKBACK = 24 * H;
 
 const c1 = (x: number) => (x * 100).toFixed(1);
 const clip = (q: string) => (q.length > 70 ? `${q.slice(0, 67)}...` : q);
@@ -27,14 +28,13 @@ export async function monitor(d: Deps) {
   return withLock(d, "monitor", 2 * 60_000, async () => {
     const { db, kv, settings: st } = d, now = d.now(), ml = s.marketLatest;
     const { midMoveC, cooldownH } = st.alerts;
-    const since = (await kv.get<number>(AT)) ?? now - 24 * H;
     const prev = (await kv.get<State>(STATE)) ?? { top: [], struct: [] };
 
     const [th, flags, recent, failed, ranked0, flagged0] = await Promise.all([
       db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt)),
       db.select().from(s.marketFlags),
       db.select({ kind: s.alerts.kind, c: s.alerts.conditionId }).from(s.alerts).where(gte(s.alerts.createdAt, new Date(now - cooldownH * H))),
-      db.select({ id: s.pods.id, c: s.pods.conditionId, trigger: s.pods.trigger }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(since - 30 * 60_000)))),
+      db.select({ id: s.pods.id, c: s.pods.conditionId, trigger: s.pods.trigger }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(now - (prev.pods ? FAILED_LOOKBACK : FIRST_LOOKBACK))))),
       db.select({ c: ml.conditionId, mid: ml.mid, priority: ml.priority }).from(ml).where(gt(ml.priority, 0)).orderBy(desc(ml.priority), ml.conditionId).limit(RANK_READ),
       db.select({ c: ml.conditionId, kinds: ml.structural }).from(ml).where(sql`jsonb_array_length(coalesce(${ml.structural}, '[]'::jsonb)) > 0`),
     ]);
@@ -74,7 +74,8 @@ export async function monitor(d: Deps) {
       out.push({ kind: "new_candidate", conditionId: c, message: `${q(c)}: entered the top ${TOP_IN} by priority (${pr.toFixed(2)})`, data: { priority: pr, rank: top.indexOf(c) + 1 } });
     }
     // ---- pods that failed since the last pass
-    for (const f of failed) if (!muted.has(f.c))
+    const alerted = new Set(prev.pods ?? []);
+    for (const f of failed) if (!alerted.has(f.id) && !muted.has(f.c))
       out.push({ kind: "run_failed", conditionId: f.c, message: `${q(f.c)}: research pod failed (${f.trigger})`, data: { podId: f.id, trigger: f.trigger } });
 
     // dedupe: cooldown against stored alerts and within this pass; cap; the capped remainder stays "unseen" so the next pass raises it
@@ -96,8 +97,8 @@ export async function monitor(d: Deps) {
     await kv.set(STATE, {
       top: [...new Set([...top, ...prev.top.filter((c) => keepIn.has(c))])].filter((c) => !left.has(`new_candidate:${c}`)),
       struct: flagged.map((r) => r.c).filter((c) => !left.has(`structural:${c}`)),
+      pods: failed.map((f) => f.id).filter((id) => !dropped.some((x) => x.data.podId === id)), // all scanned failures count as seen (muted / deduped too), except the capped-out
     } satisfies State);
-    await kv.set(AT, now);
 
     for (const a of created) publish("alert.created", { id: a.id, kind: a.kind, conditionId: a.conditionId, message: a.message });
     await notify(created.map((a) => a.message));

@@ -11,6 +11,7 @@ export type Market = {
   tags: string[];
   endDate: number; // epoch ms
   negRiskGroup: string | null;
+  negRiskAugmented?: boolean; // neg-risk event that can still gain outcomes: Σasks<1 is not a lock
   feeRate: number | null; // null = unknown, fall back by category
   feeExponent?: number | null; // Gamma feeSchedule.exponent; null/omitted = 1
   open: boolean;

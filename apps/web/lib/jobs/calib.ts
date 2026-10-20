@@ -109,7 +109,8 @@ export async function journalNightly(d: Deps) {
   ]);
   const old = new Map(have.map((j) => [j.thesisId, j]));
   const out = new Map(outs.map((o) => [o.conditionId, o]));
-  const todo = ths.filter((t) => !(old.get(t.id)?.result && old.get(t.id)?.drift7d != null)); // finalized rows are left alone
+  // finalized rows are left alone: resolved, and either drift 7d is in or its window (plus tolerance) is over (a market that resolved earlier never gets one)
+  const todo = ths.filter((t) => { const j = old.get(t.id); return !(j?.result && (j.drift7d != null || now > t.createdAt.getTime() + DRIFT[1].ms + DRIFT[1].tol)); });
   const ids = [...new Set(todo.map((t) => t.conditionId))];
   const mk = new Map((await Promise.all(chunks(ids, 5000).map((c) => db.select({ id: s.markets.conditionId, category: s.markets.category, liquidity: s.markets.liquidity }).from(s.markets).where(inArray(s.markets.conditionId, c))))).flat().map((m) => [m.id, m]));
   const pods = [...new Set(todo.map((t) => t.podId))];

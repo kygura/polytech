@@ -111,7 +111,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
   const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
   if (!m) return null;
-  const [snap, ths, flag, scr, hist, pos, pods, latest] = await Promise.all([
+  const [snap, ths, flag, scr, hist, pos, pods, latest, st] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
     db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
     db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
@@ -120,6 +120,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.select().from(s.positions).where(and(eq(s.positions.conditionId, conditionId), eq(s.positions.paper, true))).orderBy(desc(s.positions.id)),
     db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
     db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
+    getSettings(db),
   ]);
   const t = ths[0] ?? null;
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
@@ -144,6 +145,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     thesis: t && {
       id: t.id, podId: t.podId, createdAt: t.createdAt.getTime(), expiresAt: t.expiresAt?.getTime() ?? null, side: t.side as Side, pHat: t.pHat, c: t.c, pPost: t.pPost,
       edgeC: t.edgeC, sizeUsd: t.sizeUsd, rAnn: t.rAnn, rank: t.rank, catalysts: t.catalysts, killCriteria: t.killCriteria, ...dt(t),
+      extremize: st.extremize, // the log-odds multiplier sizing applies to pYes (visitor sizing must use the same)
     },
     thesisMarkers: ths.map((x) => ({ createdAt: x.createdAt.getTime(), pHat: x.pHat, side: x.side as Side })),
     evidence: evidence.map((e) => ({ id: e.id, role: e.agentRole, claim: e.claim, quote: e.quote, url: e.url, direction: e.direction, publishedAt: e.publishedAt?.getTime() ?? null, retrievedAt: e.retrievedAt.getTime() })),

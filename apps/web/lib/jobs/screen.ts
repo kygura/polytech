@@ -86,7 +86,7 @@ export function detectStructural(
   };
   // a leg missing from the db (filtered universe) may be the winner: the Σasks<1 lock needs the true leg count
   const groups: StructuralGroup[] = [...groupBy(rows.filter((r) => r.m.negRiskGroup), (r) => r.m.negRiskGroup!)].map(([g, legs]) => ({
-    eventId: g, eventTitle: null, negRisk: true, hasInactiveMarkets: legs.length !== (groupSize?.get(g) ?? legs.length), markets: legs.map(sm),
+    eventId: g, eventTitle: null, negRisk: true, negRiskAugmented: legs.some((l) => l.m.negRiskAugmented), hasInactiveMarkets: legs.length !== (groupSize?.get(g) ?? legs.length), markets: legs.map(sm),
   }));
   groups.push({ eventId: "*", eventTitle: null, negRisk: false, markets: rows.map(sm) }); // ladders are parsed from question text, across events
   const items = findStructural(groups).filter((it) => it.net > 0);

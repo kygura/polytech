@@ -104,7 +104,7 @@ export function assess(c: Candidate, st: ReturnType<typeof toAppSettings>, now: 
   let sz: WatchCore | null;
   try {
     const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.netFlow, skew: 0 });
-    sz = sizeTrade({ bids: book.bids, asks: book.asks, pMid, pHat: t.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, crowdC: cr.c, crowdSide: cr.side, settings: st });
+    sz = sizeTrade({ bids: book.bids, asks: book.asks, pMid, pHat: t.pYes, c: t.c, daysLeft: (m.endDate - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, crowdC: cr.c, crowdSide: cr.side, settings: st, extremize: t.extremize ?? 1 });
   } catch {
     return no("BAD_INPUT"); // sizeTrade throws RangeError on out-of-range probabilities
   }

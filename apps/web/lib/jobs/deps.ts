@@ -95,6 +95,7 @@ export const toMarket = (r: MarketRow): Market => ({
   tags: r.tags,
   endDate: r.endDate?.getTime() ?? 0,
   negRiskGroup: r.negRiskGroup,
+  negRiskAugmented: r.negRiskAugmented,
   feeRate: r.feeRate,
   feeExponent: r.feeExponent,
   open: isOpenStatus(r.status),

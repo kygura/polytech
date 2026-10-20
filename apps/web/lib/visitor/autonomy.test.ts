@@ -158,3 +158,12 @@ describe("sendEntry ledger", () => {
     await expect(sendEntry(ex, e, "auto", s2, NOW)).rejects.toThrow(/corrupt/);
   });
 });
+
+describe("assess: extremize", () => {
+  it("applies the server's log-odds multiplier to pYes (same sizing as the server), none when absent", () => {
+    const withK = (k?: number): Candidate => { const c = cand(); return { ...c, detail: { ...c.detail, thesis: { ...c.detail.thesis!, pYes: 0.6, ...(k ? { extremize: k } : {}) } } }; };
+    const size = (k?: number) => (decide(input("L2", { candidates: [withK(k)] }))[0] as { sizeUsd?: number } | undefined)?.sizeUsd ?? 0;
+    expect(size(3)).toBeGreaterThan(size());
+    expect(size(1)).toBeCloseTo(size(), 9);
+  });
+});

@@ -1,7 +1,7 @@
 import { rulesHash } from "@pm/agents";
 import { bookHash, bookMetrics, classifyResolutionSource, holderMetrics, tradeMetrics, type TradeInput } from "@pm/core";
 import { insertSnapshots, pruneSnapshots, schema as s } from "@pm/db";
-import type { Market as PmMarket } from "@pm/pm";
+import type { Market as PmMarket, Trade } from "@pm/pm";
 import { and, eq, gte, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
@@ -159,7 +159,11 @@ export async function sweepUniverse(d: Deps) {
 const BOOK_LEVELS = 40; // ponytail: per side, bounds snapshot row size; sizing never walks deeper than this in practice
 const HISTORY_EVERY_MS = 3_600_000; // an unchanged book still gets one history row per hour (chart resolution, staleness proof)
 const MID_MOVE = 0.01; // market_latest.mid_changed_at bumps when the mid moves >= 1c between runs
-const CROWD_MAX = 200; // holders + trades are fetched for the top-N candidates only (thesis markets first, then screen priority, then liquidity)
+const CROWD_MAX = 200; // holders + trades are fetched for at most this many markets per run ...
+const CROWD_TOP = 100; // ... the top-priority ones (researched markets first) always, the other slots rotate
+const TRADES_CHUNK = 5; // markets per trades call (busy markets would crowd quiet ones out of a shared row cap)
+const TRADES_CAP = 1000; // rows per call; hitting it means the 24h window is incomplete
+const fnv = (str: string) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193); return h >>> 0; };
 const CROWD_DEADLINE_MS = 120_000; // from the start of the run: remaining crowd chunks are skipped (their markets keep the previous values)
 const CROWD_WAVE = 4; // concurrent data-API chunks
 
@@ -207,22 +211,37 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const oi: Record<string, number> = Object.assign({}, ...oiParts.ok);
   const prev = new Map(prevRows.map((r) => [r.conditionId, r])), lastHist = new Map(histRows.map((r) => [r.c, r.ts?.getTime() ?? 0]));
 
-  // crowd candidates: researched markets first, then by the last screen priority, then liquidity; the rest keep their previous crowd fields
+  // Crowd candidates (<= CROWD_MAX per run): researched markets and the top screen priorities first, the rest of the slots rotate through the
+  // markets never fetched (then any), pseudo-randomly per 5-minute epoch, so every market is reached over time without a per-market fetch clock.
+  // A market outside this run's set keeps its previous crowd fields and last trade; it is only "unknown" if it has never been fetched.
   const thesis = new Set(researched.map((r) => r.c));
   const rank = (m: (typeof mkts)[number]) => (thesis.has(m.conditionId) ? 1e9 : (prev.get(m.conditionId)?.priority ?? -1));
-  const cand = mkts.filter((m) => book.has(m.yesTokenId!)).sort((a, b) => rank(b) - rank(a) || (b.liquidity ?? 0) - (a.liquidity ?? 0)).slice(0, CROWD_MAX);
+  const ordered = mkts.filter((m) => book.has(m.yesTokenId!)).sort((a, b) => rank(b) - rank(a) || (b.liquidity ?? 0) - (a.liquidity ?? 0));
+  const epoch = Math.floor(now / 300_000), fresh = (m: (typeof mkts)[number]) => prev.get(m.conditionId)?.flow24h != null;
+  const cand = [...ordered.slice(0, CROWD_TOP), ...ordered.slice(CROWD_TOP).sort((a, b) => +fresh(a) - +fresh(b) || fnv(a.conditionId + epoch) - fnv(b.conditionId + epoch)).slice(0, CROWD_MAX - CROWD_TOP)];
   const candIds = cand.map((m) => m.conditionId);
   const yesOf = new Map(mkts.map((m) => [m.conditionId, m.yesTokenId!]));
   const tokCond = new Map(cand.flatMap((m) => [[m.yesTokenId!, m.conditionId], [m.noTokenId ?? "", m.conditionId]] as const));
+  // 24h of trades per market (Data API start/end are ignored, so pm.trades pages by cursor until it passes `since`). Rows come newest first across the whole
+  // chunk: a chunk that hits the row cap is re-fetched market by market; a market that still hits it has an incomplete 24h and gets no flow number at all.
+  const since = Math.floor((now - 24 * 3_600_000) / 1000);
+  const getTrades = async (cs: string[]): Promise<{ rows: Trade[]; cut: string[] }> => {
+    const rows = await d.pm.trades({ market: cs, limit: TRADES_CAP, since });
+    if (rows.length < TRADES_CAP) return { rows, cut: [] };
+    if (cs.length === 1) return { rows, cut: cs };
+    const parts = [];
+    for (const c of cs) parts.push(await getTrades([c]));
+    return { rows: parts.flatMap((p) => p.rows), cut: parts.flatMap((p) => p.cut) };
+  };
   const [tradeParts, holderParts] = await Promise.all([
-    soft("trades", chunks(candIds, 25), (c) => d.pm.trades({ market: c, limit: 500 }), CROWD_DEADLINE_MS),
+    soft("trades", chunks(candIds, TRADES_CHUNK), getTrades, CROWD_DEADLINE_MS),
     soft("holders", chunks(candIds, 20), (c) => d.pm.holders(c), CROWD_DEADLINE_MS),
   ]);
-  const tradeFailed = new Set(tradeParts.failed.flat());
+  const tradeBad = new Set([...tradeParts.failed.flat(), ...tradeParts.ok.flatMap((p) => p.cut)]); // failed chunk, skipped past the deadline, or incomplete 24h
 
   // trades -> core tradeMetrics (signed 24h flow, median ticket, large-trade flag, last trade) + netFlow in -1..1 for crowding
   const tr = new Map<string, TradeInput[]>(), gross = new Map<string, number>();
-  for (const x of tradeParts.ok.flat()) {
+  for (const x of tradeParts.ok.flatMap((p) => p.rows)) {
     const c = x.condition_id, yes = c ? yesOf.get(c) : undefined;
     if (!c || !yes) continue;
     (tr.get(c) ?? tr.set(c, []).get(c)!).push({ side: x.side?.toUpperCase() === "SELL" ? "SELL" : "BUY", size: x.size, price: x.price, ts: x.ts * 1000, outcome: x.token_id === yes ? "YES" : "NO" });
@@ -244,19 +263,23 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
     const b = book.get(m.yesTokenId!);
     const bm = b && bookMetrics(b);
     if (!b || !bm || bm.mid == null) continue;
-    const c = m.conditionId, p = prev.get(c), o = oi[c], hash = bookHash(b);
-    const fetched = isCand.has(c) && !tradeFailed.has(c);
+    const c = m.conditionId, p = prev.get(c), o = oi[c];
+    const fetched = isCand.has(c) && !tradeBad.has(c);
     const tm = fetched ? tradeMetrics(tr.get(c) ?? [], now) : null;
-    const last = tm ? tm.lastTradeTs : (p?.lastTradeTs?.getTime() ?? null);
+    const last = tm?.lastTradeTs ?? (p?.lastTradeTs?.getTime() ?? null); // no trade in the window / not fetched this run: the last one we knew
+    const unknown = isCand.has(c) ? !fetched : p?.flow24h == null; // a market outside this run's set is unknown only until it has been fetched once
     const netFlow = tm && gross.get(c) ? tm.flow24h / gross.get(c)! : 0;
+    const share = o && top10.has(c) ? Math.min(1, top10.get(c)! / o) : null;
     const h = hm.get(c);
     const midMoved = p?.mid == null || Math.abs(bm.mid - p.mid) >= MID_MOVE - 1e-9;
+    // the history row carries more than the book (oi, top-10 share, flow, volume, last trade): a change in any of them (coarsely bucketed) is a change
+    const sig = [o != null ? Math.round(Math.log1p(o) / 0.05) : "-", share != null ? Math.round(share * 100) : "-", Math.round(netFlow * 10), +unknown, m.vol24h != null ? Math.round(Math.log1p(m.vol24h) / 0.05) : "-", last ? Math.floor(last / 3_600_000) : "-"].join(",");
+    const hash = `${bookHash(b)}.${fnv(sig).toString(16)}`;
     if (!p?.bookHash || hash !== p.bookHash || now - (lastHist.get(c) ?? 0) >= HISTORY_EVERY_MS)
       hist.push({
         conditionId: c, ts: new Date(now), mid: bm.mid, bestBid: bm.bestBid, bestAsk: bm.bestAsk, depth5cUsd: bm.depth5c, vol24h: m.vol24h, oi: o ?? null,
-        top10Share: o && top10.has(c) ? Math.min(1, top10.get(c)! / o) : null,
-        lastTradeTs: last ? new Date(last) : null,
-        book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow, ...(!fetched && { flowUnknown: true }) },
+        top10Share: share, lastTradeTs: last ? new Date(last) : null,
+        book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow, ...(unknown && { flowUnknown: true }) },
       });
     latest.push({
       conditionId: c, ts: new Date(now), mid: bm.mid, bestBid: bm.bestBid, bestAsk: bm.bestAsk, spread: bm.spread, depth1c: bm.depth1c, depth2c: bm.depth2c, depth5c: bm.depth5c,

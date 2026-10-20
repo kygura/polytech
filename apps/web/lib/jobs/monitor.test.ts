@@ -17,7 +17,7 @@ const latest = (c: string, over: Partial<typeof s.marketLatest.$inferInsert> = {
   d.db.insert(s.marketLatest).values({ conditionId: c, mid: 0.5, ...over }).onConflictDoUpdate({ target: s.marketLatest.conditionId, set: { mid: 0.5, ...over } });
 const thesis = (id: string, c: string, over: Partial<typeof s.theses.$inferInsert> = {}) =>
   d.db.insert(s.theses).values({ id, conditionId: c, podId: `pod-${id}`, pHat: 0.7, c: 0.4, pPost: 0.6, side: "YES", edgeC: 5, sizeUsd: 20, createdAt: new Date(T - H), expiresAt: new Date(T + 48 * H), detail: { pYes: 0.7, pMidYes: 0.4 }, ...over });
-const clear = async () => { for (const t of [s.alerts, s.theses, s.marketLatest, s.markets, s.pods, s.marketFlags]) await d.db.delete(t); await d.kv.set("monitor:state", null); await d.kv.set("monitor:at", null); };
+const clear = async () => { for (const t of [s.alerts, s.theses, s.marketLatest, s.markets, s.pods, s.marketFlags]) await d.db.delete(t); await d.kv.set("monitor:state", null); };
 
 beforeAll(async () => {
   d = await deps({ pm: createPm({ fixtures: true }), kv: memoryKv(), now: () => T });
@@ -78,6 +78,18 @@ describe("monitor", () => {
     T += 10 * 60_000;
     expect((await run()).raised).toBe(0); // same pod is inside the overlap window but deduped
     expect(await alerts()).toHaveLength(1);
+  });
+
+  it("run_failed: a pod reaped later (old startedAt, status flipped to failed after the last pass) is still alerted, once", async () => {
+    await clear();
+    await market("m1");
+    await d.db.insert(s.pods).values({ id: "pod_slow", conditionId: "m1", status: "running", trigger: "manual", startedAt: new Date(T - 2 * 24 * H) });
+    expect((await run()).raised).toBe(0); // first pass: nothing failed yet
+    T += 30 * 60_000;
+    await d.db.update(s.pods).set({ status: "failed" }).where(eq(s.pods.id, "pod_slow")); // the research reaper marks it dead
+    expect(await run()).toMatchObject({ raised: 1, byKind: { run_failed: 1 } });
+    T += 7 * H;
+    expect((await run()).raised).toBe(0); // already alerted, even after the cooldown
   });
 
   it("structural: a market newly flagged is raised once while the flag persists; a cleared and re-set flag is a new flag after the cooldown", async () => {

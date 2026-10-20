@@ -83,6 +83,15 @@ describe("journal", () => {
     expect((await jr("t-open")).drift24h).toBeNull();
   });
 
+  it("a resolved row whose 7d window has passed is final even without drift7d (it resolved before day 7)", async () => {
+    await seed("t-early", { result: "YES", at: T - 12 * DAY });
+    await journalNightly(await fresh());
+    expect((await jr("t-early")).drift7d).toBeNull(); // no snapshots near day 7
+    await d.db.update(s.journal).set({ stake: 999 }).where(eq(s.journal.thesisId, "t-early"));
+    await journalNightly(await fresh());
+    expect((await jr("t-early")).stake).toBe(999); // not reprocessed (it would be rewritten to 25)
+  });
+
   it("is idempotent", async () => {
     const n = async () => (await d.db.select().from(s.journal)).length;
     const before = await n();
