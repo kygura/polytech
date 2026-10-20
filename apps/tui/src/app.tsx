@@ -1,6 +1,5 @@
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useEffect, useRef, useState } from "react";
-import { authHeaders } from "./auth";
 import { BASE, post, useFetch } from "./api";
 import { hhmm } from "./fmt";
 import { streamEvents } from "./sse";
@@ -47,7 +46,7 @@ export function App() {
   useEffect(() => {
     const ac = new AbortController();
     streamEvents(
-      new URL("/api/stream", BASE), authHeaders,
+      new URL("/api/stream", BASE),
       (e) => {
         if (e.event === "ping") return;
         if (/^(sweep|snapshot)\./.test(e.event)) setSweptAt(Date.now());

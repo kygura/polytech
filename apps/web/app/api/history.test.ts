@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
-process.env.JWT_SECRET = "j".repeat(40);
 delete process.env.ANTHROPIC_API_KEY;
 
 let GET: typeof import("./markets/[id]/history/route").GET, NOW = 0;

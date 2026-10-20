@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
-process.env.JWT_SECRET = "j".repeat(40);
 delete process.env.ANTHROPIC_API_KEY;
 
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), after: (f: () => unknown) => void f() }));
@@ -58,7 +57,6 @@ beforeAll(async () => {
     status: await import("./status/route"),
     session: await import("./session/route"),
     bus: await import("../../lib/jobs/events"),
-    auth: await import("../../lib/auth"),
     proxy: await import("../../proxy"),
   };
 }, 60_000);
@@ -225,18 +223,13 @@ describe("GET /api/status", () => {
   });
 });
 
-describe("GET /api/session + proxy", () => {
-  it("operator:false without a session, true with cookie or bearer; no other fields", async () => {
-    expect(await (await h.session.GET(get("/session"))).json()).toEqual({ operator: false });
-    expect(await (await h.session.GET(get("/session", { headers: { cookie: "pm_session=garbage" } }))).json()).toEqual({ operator: false });
-    const tok = await h.auth.signSession();
-    expect(await (await h.session.GET(get("/session", { headers: { cookie: `a=b; ${h.auth.SESSION_COOKIE}=${tok}` } }))).json()).toEqual({ operator: true });
-    expect(await (await h.session.GET(get("/session", { headers: { authorization: `Bearer ${tok}` } }))).json()).toEqual({ operator: true });
+describe("GET /api/session", () => {
+  it("always operator, no other fields", async () => {
+    expect(await (await h.session.GET()).json()).toEqual({ operator: true });
   });
 
   const via = async (path: string) => (await h.proxy.proxy(new (await import("next/server")).NextRequest(`http://x${path}`))).status;
-  it("proxy: /api/session public, every new route still requires auth", async () => {
-    expect(await via("/api/session")).toBe(200);
-    for (const p of ["/api/markets", "/api/views", "/api/alerts", "/api/alerts/1/ack", "/api/alerts/ack-all", "/api/journal", "/api/status", "/api/pods/pod_x", "/api/pods/pod_x/cancel", "/api/markets/0xabc/history"]) expect(await via(p), p).toBe(401);
+  it("proxy: no login, every route open", async () => {
+    for (const p of ["/api/session", "/api/markets", "/api/views", "/api/alerts", "/api/journal", "/api/status", "/api/pods/pod_x", "/api/markets/0xabc/history"]) expect(await via(p), p).toBe(200);
   });
 });

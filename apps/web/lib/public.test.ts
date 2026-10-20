@@ -1,8 +1,5 @@
 import { memoryKv } from "@pm/db";
-import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it } from "vitest";
-import { proxy } from "../proxy";
-import { signSession } from "./auth";
+import { describe, expect, it } from "vitest";
 import { publicLimit, publicMarketDetail, publicWatchRow } from "./public";
 
 /** Every key at any depth. */
@@ -66,61 +63,5 @@ describe("public rate limit", () => {
     expect(r.status).toBe(429);
     expect(r.headers.get("retry-after")).toBe("60");
     expect(await publicLimit(req("2.2.2.2"), kv)).toBeNull();
-  });
-});
-
-describe("proxy: public boundary", () => {
-  beforeEach(() => {
-    process.env.JWT_SECRET = "x".repeat(32);
-    delete process.env.VERCEL;
-  });
-  const req = (path: string, method = "GET", headers: Record<string, string> = {}) => new NextRequest(`http://localhost${path}`, { method, headers });
-  const passes = (r: Response) => r.headers.get("x-middleware-next") === "1";
-
-  it("anon /api/public/*: 401 for every method", async () => {
-    for (const p of ["/api/public/watchlist", "/api/public/markets/0xabc", "/api/public/markets/0xabc/feed"])
-      for (const m of ["GET", "HEAD", "POST"]) expect((await proxy(req(p, m))).status).toBe(401);
-  });
-  it("operator GET/HEAD /api/public/* pass; other methods 405", async () => {
-    const cookie = `pm_session=${await signSession()}`;
-    for (const p of ["/api/public/watchlist", "/api/public/markets/0xabc"]) {
-      expect(passes(await proxy(req(p, "GET", { cookie })))).toBe(true);
-      expect(passes(await proxy(req(p, "HEAD", { cookie })))).toBe(true);
-    }
-    for (const m of ["POST", "PUT", "DELETE", "PATCH"]) expect((await proxy(req("/api/public/watchlist", m, { cookie }))).status).toBe(405);
-  });
-  it("anon /trade pages -> login; nothing is public", async () => {
-    for (const p of ["/trade", "/trade/0xabc", "/trade/autonomy", "/trader", "/tradex/1"]) {
-      const r = await proxy(req(p));
-      expect(r.status).toBe(307);
-      expect(r.headers.get("location")).toBe(`http://localhost/login?next=${encodeURIComponent(p)}`);
-    }
-    for (const p of ["/api/settings", "/api/watchlist", "/api/public", "/api/publicx/watchlist", "/api/markets/0xabc", "/api/autonomy"]) expect((await proxy(req(p))).status).toBe(401);
-    const r = await proxy(req("/autonomy"));
-    expect(r.headers.get("location")).toBe("http://localhost/login?next=%2Fautonomy");
-    for (const p of ["/trade", "/trade/0xabc"]) expect(passes(await proxy(req(p, "GET", { cookie: `pm_session=${await signSession()}` })))).toBe(true);
-  });
-  it("/: anon -> login, operator unchanged", async () => {
-    const r = await proxy(req("/"));
-    expect(r.status).toBe(307);
-    expect(r.headers.get("location")).toBe("http://localhost/login?next=%2F");
-    expect(passes(await proxy(req("/", "GET", { cookie: `pm_session=${await signSession()}` })))).toBe(true);
-  });
-  it("login, session, push and cron stay reachable without a session", async () => {
-    for (const p of ["/login", "/api/login", "/api/session", "/api/proposals/abc/push", "/api/sets/abc/push"]) expect(passes(await proxy(req(p)))).toBe(true);
-    process.env.CRON_SECRET = "c".repeat(32);
-    expect(passes(await proxy(req("/api/cron/scout", "GET", { authorization: `Bearer ${"c".repeat(32)}` })))).toBe(true);
-    expect((await proxy(req("/api/cron/scout"))).status).toBe(401);
-    delete process.env.CRON_SECRET;
-  });
-  it("AUTH_DISABLED=1: everything passes without a session, cron still needs its secret, /api/public stays read-only", async () => {
-    process.env.AUTH_DISABLED = "1";
-    try {
-      for (const p of ["/", "/trade", "/markets", "/api/settings", "/api/public/watchlist"]) expect(passes(await proxy(req(p)))).toBe(true);
-      expect((await proxy(req("/api/public/watchlist", "POST"))).status).toBe(405);
-      expect((await proxy(req("/api/cron/scout"))).status).toBe(401);
-      process.env.AUTH_DISABLED = "0";
-      expect((await proxy(req("/api/settings"))).status).toBe(401); // any other value keeps the login
-    } finally { delete process.env.AUTH_DISABLED; }
   });
 });

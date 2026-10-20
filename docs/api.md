@@ -1,6 +1,6 @@
 # HTTP API contract (build 1)
 
-All routes require the session cookie or `Authorization: Bearer <jwt>` (see `apps/web/proxy.ts`), except `/api/login`, `POST /api/proposals/:id/push` (single-use token, no session), `/api/cron/*` (CRON_SECRET bearer, at least 32 bytes) and, only when `VERCEL` is set, `/.well-known/workflow/*` (Vercel verifies queue signatures; self-hosted keeps the session guard).
+No login: every route is open. `/api/cron/*` needs `Authorization: Bearer $CRON_SECRET` (at least 32 bytes); `POST /api/proposals/:id/push` and `/api/sets/:id/push` need their single-use ntfy token; `/api/public/*` is GET/HEAD only (see `apps/web/proxy.ts`).
 Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types exported there), JSON, camelCase.
 
 | Method | Path | Body / query | Returns |
@@ -30,7 +30,6 @@ Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types expo
 | POST | /api/research/profiles/preview | `{filter}` | `Match[]` `{conditionId, question, vol24h, spread, endDate, edgeC}` for active markets passing the filter; runs nothing |
 | GET | /api/research/models | — | `{models, roles}`: allowed model ids and built-in role keys |
 | GET | /api/stream | — | SSE: `event: <type>` per `lib/jobs/events.ts`, `data: <json>`; `event: ping` every 15 s. Live-execution types: `proposal.created`, `proposal.updated`, `order.updated`, `order.filled`, `order.error`, `recon.done`, `mode.changed` |
-| POST | /api/login, /api/logout | see auth | |
 | GET/POST | /api/cron/{sweep,snapshot,screen,research,paper,calibrate,propose,expire,sync,reconcile} | CRON_SECRET bearer | `{started:true, runId}` or `{skipped, reason}`. `research` also runs enabled profiles whose `every_min` elapsed since `last_run_at` (after the screener shortlist; stops on budget exhaustion) |
 | GET/POST | /api/cron/scout | CRON_SECRET bearer | `{started: boolean}`: runs `kickIfStale` (scouting chain when the last kick is older than 30 min and the kick lock is free; the chain starts after the response). Hit by `.github/workflows/scout.yml` |
 
