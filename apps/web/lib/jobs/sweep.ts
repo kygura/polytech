@@ -7,7 +7,7 @@ import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { monitor } from "./monitor";
-import { shortlist, watchlistIds } from "./screen";
+import { heuristicR, shortlist, watchlistIds } from "./screen";
 
 const MAX_FEE_FETCHES = 200;
 const WALK_BUDGET_MS = 150_000; // the cron route allows 300 s: walk <= 150 s (+ one page), fees <= FEE_DEADLINE_MS, then closing
@@ -28,7 +28,6 @@ export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; reso
     conditionId: m.condition_id,
     eventId: m.event_id ?? null,
     question: m.question,
-    rules,
     category: m.category ?? null,
     tags: m.tags,
     endDate: m.end_date ? new Date(m.end_date) : null,
@@ -43,6 +42,7 @@ export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; reso
     tickSize: m.tick_size ?? null,
     liquidity: m.liquidity ?? null,
     rulesHash: hash,
+    heuristicR: heuristicR(rules), // rules text is not stored (~1.3 KB a market): score it here, fetch it again only to classify or research
     resolutionSource: prev?.rulesHash === hash && prev.resolutionSource ? prev.resolutionSource : classifyResolutionSource(m.question, rules, m.resolution_source),
     negRiskAugmented: m.neg_risk_augmented,
   };
@@ -54,7 +54,7 @@ const moved = (c: { name: string }) =>
   sql`(excluded."${sql.raw(c.name)}" is not null and (${sql.raw(`"markets"."${c.name}"`)} is null or abs(excluded."${sql.raw(c.name)}" - ${sql.raw(`"markets"."${c.name}"`)}) > 0.05 * greatest(abs(${sql.raw(`"markets"."${c.name}"`)}), 1)))`;
 const stored = (c: { name: string }) => sql.raw(`"markets"."${c.name}"`);
 // the columns whose change justifies a write. rules is covered by rules_hash. fee_rate / fee_exponent compare the coalesced value, tick_size too.
-const SAME = [t.eventId, t.question, t.category, t.tags, t.endDate, t.negRiskGroup, t.status, t.pmId, t.yesTokenId, t.noTokenId, t.rulesHash, t.resolutionSource, t.negRiskAugmented];
+const SAME = [t.eventId, t.question, t.category, t.tags, t.endDate, t.negRiskGroup, t.status, t.pmId, t.yesTokenId, t.noTokenId, t.rulesHash, t.heuristicR, t.resolutionSource, t.negRiskAugmented];
 const changed = sql`((${sql.join(SAME.map(stored), sql`, `)}, ${stored(t.tickSize)}, ${stored(t.feeRate)}, ${stored(t.feeExponent)}) is distinct from (${sql.join(SAME.map(ex), sql`, `)}, coalesce(excluded."tick_size", ${stored(t.tickSize)}), coalesce(excluded."fee_rate", ${stored(t.feeRate)}), coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})) or ${moved(t.liquidity)} or ${moved(t.vol24h)})`;
 
 /** Insert-or-update a page of markets; rows whose meaningful columns are unchanged are not written (not returned either). Returns the written condition ids. */
@@ -63,9 +63,9 @@ export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inf
   const out = await db.insert(t).values(rows).onConflictDoUpdate({
     target: t.conditionId,
     set: {
-      eventId: ex(t.eventId), question: ex(t.question), rules: ex(t.rules), category: ex(t.category), tags: ex(t.tags),
+      eventId: ex(t.eventId), question: ex(t.question), category: ex(t.category), tags: ex(t.tags),
       endDate: ex(t.endDate), negRiskGroup: ex(t.negRiskGroup), status: ex(t.status), pmId: ex(t.pmId),
-      yesTokenId: ex(t.yesTokenId), noTokenId: ex(t.noTokenId), rulesHash: ex(t.rulesHash), resolutionSource: ex(t.resolutionSource), negRiskAugmented: ex(t.negRiskAugmented),
+      yesTokenId: ex(t.yesTokenId), noTokenId: ex(t.noTokenId), rulesHash: ex(t.rulesHash), heuristicR: ex(t.heuristicR), resolutionSource: ex(t.resolutionSource), negRiskAugmented: ex(t.negRiskAugmented),
       vol24h: sql`case when ${moved(t.vol24h)} then excluded."vol_24h" else ${stored(t.vol24h)} end`,
       liquidity: sql`case when ${moved(t.liquidity)} then excluded."liquidity" else ${stored(t.liquidity)} end`,
       tickSize: sql`coalesce(excluded."tick_size", ${stored(t.tickSize)})`,
@@ -157,6 +157,7 @@ export async function sweepUniverse(d: Deps) {
 }
 
 const BOOK_LEVELS = 40; // ponytail: per side, bounds snapshot row size; sizing never walks deeper than this in practice
+const BOOK_WINDOW = 0.1; // stored levels: within 10c of the touch (metrics come from the full book; sizing at our caps stops long before 10c)
 const HISTORY_EVERY_MS = 3_600_000; // an unchanged book still gets one history row per hour (chart resolution, staleness proof)
 const MID_MOVE = 0.01; // market_latest.mid_changed_at bumps when the mid moves >= 1c between runs
 const CROWD_MAX = 200; // holders + trades are fetched for at most this many markets per run ...
@@ -279,7 +280,11 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
       hist.push({
         conditionId: c, ts: new Date(now), mid: bm.mid, bestBid: bm.bestBid, bestAsk: bm.bestAsk, depth5cUsd: bm.depth5c, vol24h: m.vol24h, oi: o ?? null,
         top10Share: share, lastTradeTs: last ? new Date(last) : null,
-        book: { bids: b.bids.slice(0, BOOK_LEVELS), asks: b.asks.slice(0, BOOK_LEVELS), netFlow, ...(unknown && { flowUnknown: true }) },
+        book: {
+          bids: b.bids.filter((l) => bm.bestBid == null || l.price >= bm.bestBid - BOOK_WINDOW - 1e-9).slice(0, BOOK_LEVELS),
+          asks: b.asks.filter((l) => bm.bestAsk == null || l.price <= bm.bestAsk + BOOK_WINDOW + 1e-9).slice(0, BOOK_LEVELS),
+          netFlow, ...(unknown && { flowUnknown: true }),
+        },
       });
     latest.push({
       conditionId: c, ts: new Date(now), mid: bm.mid, bestBid: bm.bestBid, bestAsk: bm.bestAsk, spread: bm.spread, depth1c: bm.depth1c, depth2c: bm.depth2c, depth5c: bm.depth5c,

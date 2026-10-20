@@ -1,9 +1,10 @@
-import { fakeJudge, fakeRunner } from "@pm/agents";
+import { fakeJudge, fakeRunner, rulesHash } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, type Market } from "@pm/pm";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, sweepUniverse, type Deps } from "./index";
+import { heuristicR } from "./screen";
 
 process.env.PGLITE_DIR = "memory://";
 
@@ -73,11 +74,13 @@ describe("incremental sweep", () => {
     await d.db.update(s.markets).set({ resolutionSource: "subjective" }).where(eq(s.markets.conditionId, c)); // hash unchanged: the stored value is trusted
     expect((await sweep()).written).toBe(0);
     expect((await row(c)).resolutionSource).toBe("subjective");
-    patch.set(c, { ...patch.get(c), rules: `${(await row(c)).rules} Resolves per the Bureau of Labor Statistics CPI release.` });
+    const text = "Resolves per the Bureau of Labor Statistics CPI release, published on bls.gov.";
+    patch.set(c, { ...patch.get(c), rules: text });
     expect((await sweep()).written).toBe(1);
     const r = await row(c);
     expect(r.resolutionSource).toBe("official_data");
-    expect(r.rules).toContain("Bureau of Labor Statistics");
+    expect(r.rulesHash).toBe(rulesHash(text));
+    expect(r.heuristicR).toBe(heuristicR(text)); // the text itself is not stored, only its hash and cue score
   });
 
   it("a changed question / status / tags is written", async () => {

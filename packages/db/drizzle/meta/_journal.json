@@ -78,6 +78,20 @@
       "when": 1792515339405,
       "tag": "0010_calm_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792522468753,
+      "tag": "0011_heuristic_r",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792522469670,
+      "tag": "0012_drop_rules_text",
+      "breakpoints": true
     }
   ]
 }

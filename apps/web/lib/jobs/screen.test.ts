@@ -60,7 +60,7 @@ describe("screenAll LLM budget", () => {
 
   it("budget exhausted: screens row still written, unattempted markets take the heuristic", async () => {
     await reset();
-    const rules = new Map((await d.db.select().from(s.markets)).map((m) => [m.conditionId, m.rules ?? ""]));
+    const stored = new Map((await d.db.select().from(s.markets)).map((m) => [m.conditionId, m.heuristicR]));
     let skew = 0;
     const real = Date.now, spy = vi.spyOn(Date, "now").mockImplementation(() => real() + skew);
     await screenAll(withR(async () => ((skew += 1_000), 1)), { budgetMs: 5_000 }).finally(() => spy.mockRestore()); // each LLM call "takes" 1s: 5 calls blow the budget
@@ -70,7 +70,7 @@ describe("screenAll LLM budget", () => {
     expect(cached.length).toBe(10); // exactly one batch ran
     const done = new Set(cached.map((c) => c.conditionId));
     const rest = screens.filter((x) => !done.has(x.conditionId));
-    expect(rest.every((x) => x.r === heuristicR(rules.get(x.conditionId)!))).toBe(true);
+    expect(rest.every((x) => x.r === stored.get(x.conditionId))).toBe(true); // the sweep's score of the rules text
   });
 
   it("caps LLM calls per run", async () => {
@@ -85,7 +85,7 @@ describe("screenAll LLM budget", () => {
     await reset();
     const order: string[] = [];
     await screenAll(withR(async (r) => (order.push(r), heuristicR(r))), { maxLlm: 12 });
-    const byRules = new Map((await d.db.select().from(s.markets)).map((m) => [m.rules ?? "", m.conditionId]));
+    const byRules = new Map(await Promise.all((await d.db.select().from(s.markets)).map(async (m) => [(await d.pm.market(m.pmId!))?.rules ?? "", m.conditionId] as const))); // classifier gets the text fetched from Gamma
     const pri = new Map((await d.db.select().from(s.screens)).map((x) => [x.conditionId, x.priority ?? 0]));
     const sent = new Set(order.map((r) => byRules.get(r)!));
     const ps = (sentSide: boolean) => [...pri].filter(([c, p]) => p > 0 && sent.has(c) === sentSide).map(([, p]) => p);

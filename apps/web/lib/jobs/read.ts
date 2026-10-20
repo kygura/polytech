@@ -1,9 +1,10 @@
 import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
+import { createPm } from "@pm/pm";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
-import { DAY, dbReady, defaultNow, envExchange, type Deps } from "./deps";
+import { DAY, dbReady, defaultNow, envExchange, ruleText, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
 import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
@@ -12,8 +13,8 @@ import { getSettings, putSettings } from "./settings";
 import { reconStatus } from "./sync";
 
 /** Everything the API needs for reads. */
-export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean };
-export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null });
+export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean; pm?: Deps["pm"] }; // pm: rules text for the market detail (not stored)
+export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null, pm: createPm() });
 
 type Th = typeof s.theses.$inferSelect;
 type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string };
@@ -111,7 +112,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
   const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
   if (!m) return null;
-  const [snap, ths, flag, scr, hist, pos, pods, latest, st] = await Promise.all([
+  const [snap, ths, flag, scr, hist, pos, pods, latest, st, rules] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
     db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
     db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
@@ -121,6 +122,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
     db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
     getSettings(db),
+    r.pm ? ruleText(r.pm, m) : undefined,
   ]);
   const t = ths[0] ?? null;
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
@@ -132,7 +134,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     : [[], []];
   return {
     market: {
-      conditionId, question: m.question, rules: m.rules, category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
+      conditionId, question: m.question, rules: rules ?? "", category: m.category, tags: m.tags, eventId: m.eventId, negRiskGroup: m.negRiskGroup,
       endDate: m.endDate?.getTime() ?? null, daysLeft: ((m.endDate?.getTime() ?? now) - now) / DAY, feeRate: m.feeRate, feeExponent: m.feeExponent, tickSize: m.tickSize, status: m.status,
       yesTokenId: m.yesTokenId, noTokenId: m.noTokenId, pinned: !!flag?.pinned, muted: !!flag?.muted,
       liquidity: m.liquidity, vol24h: m.vol24h, resolutionSource: m.resolutionSource,

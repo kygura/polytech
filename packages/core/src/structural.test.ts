@@ -353,4 +353,17 @@ describe("mirrorPairs", () => {
       { conditionId: "a", question: "Q?", p: 0.5 }, { conditionId: "b", question: "Q?", p: 0.51 },
     ], 0.03)).toEqual([]);
   });
+  it("keeps the (i, j) pair order across groups", () => {
+    const r = mirrorPairs([
+      { conditionId: "a", question: "Q1", p: 0.1 }, { conditionId: "b", question: "Q2", p: 0.1 },
+      { conditionId: "c", question: "Q2", p: 0.5 }, { conditionId: "d", question: "Q1", p: 0.5 }, { conditionId: "e", question: "Q1", p: 0.9 },
+    ], 0.03);
+    expect(r.map((x) => x.a + x.b)).toEqual(["ad", "ae", "bc", "de"]);
+  });
+  it("linear in the number of markets (screen runs it over the whole universe)", () => {
+    const items = Array.from({ length: 40_000 }, (_, i) => ({ conditionId: `c${i}`, question: `Will thing ${i} happen?`, p: (i % 90) / 100 }));
+    const t0 = Date.now();
+    expect(mirrorPairs(items, 0.03)).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(2_000); // the all-pairs scan took minutes at this size
+  });
 });

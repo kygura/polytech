@@ -7,7 +7,6 @@ export const markets = pgTable("markets", {
   conditionId: text("condition_id").primaryKey(),
   eventId: text("event_id"),
   question: text("question").notNull(),
-  rules: text("rules").notNull().default(""),
   category: text("category"),
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   endDate: ts("end_date"),
@@ -22,6 +21,7 @@ export const markets = pgTable("markets", {
   tickSize: dp("tick_size"), // null = unknown, callers fall back to 0.01
   liquidity: dp("liquidity"),
   rulesHash: text("rules_hash"),
+  heuristicR: dp("heuristic_r"), // rules-text cue score from the sweep (screen R without the LLM); the text itself is fetched from Gamma on demand
   resolutionSource: text("resolution_source"), // official_data | scheduled_event | media_report | subjective | unknown
   negRiskAugmented: boolean("neg_risk_augmented").notNull().default(false),
 });

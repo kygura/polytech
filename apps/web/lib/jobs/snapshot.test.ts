@@ -37,6 +37,21 @@ describe("snapshot: market_latest in place, history only on change", () => {
     expect(rows.every((r) => r.flow24h != null && r.lastTradeTs !== undefined)).toBe(true); // all fixture markets are crowd candidates (< 200)
   });
 
+  it("stored book keeps only levels within 10c of the touch; market_latest depth still comes from the full book", async () => {
+    const [c, tok] = [...yes][0]!;
+    const far = (n: number, from: number, dir: number) => Array.from({ length: n }, (_, k) => ({ price: +(from + dir * k * 0.01).toFixed(2), size: 100 }));
+    tweak.set(tok, (b) => ({ ...b, bids: far(30, 0.4, -1), asks: far(30, 0.45, 1) }));
+    T += 3_600_000;
+    await snap();
+    const row = (await latestSnaps(d.db, [c])).get(c)!;
+    expect(row.book!.bids.every((l) => l.price >= 0.3 - 1e-9) && row.book!.asks.every((l) => l.price <= 0.55 + 1e-9)).toBe(true);
+    expect(row.book!.bids).toHaveLength(11);
+    expect((await ml(c)).depth5c).toBeGreaterThan(0);
+    tweak.delete(tok);
+    T += 3_600_000;
+    await snap();
+  });
+
   it("an identical run inserts no history, but market_latest.ts moves and latestSnaps reports the fresher age", async () => {
     const before = await hist(), c = [...yes.keys()][0]!, t0 = (await ml(c)).ts.getTime();
     T += 60_000;
