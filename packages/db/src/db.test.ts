@@ -105,3 +105,17 @@ describe("memory kv", () => {
     expect(await kv.get("k")).toBeNull();
   });
 });
+
+describe("process-wide singletons", () => {
+  it("separate module instances (next dev RSC vs route handler) share one db and one kv", async () => {
+    process.env.PGLITE_DIR = "memory://";
+    const { vi } = await import("vitest");
+    vi.resetModules();
+    const a = await import("./client"), ka = await import("./kv");
+    vi.resetModules();
+    const b = await import("./client"), kb = await import("./kv");
+    expect(b.getDb).not.toBe(a.getDb); // really two module instances
+    expect(b.getDb()).toBe(a.getDb());
+    expect(kb.getKv()).toBe(ka.getKv());
+  });
+});

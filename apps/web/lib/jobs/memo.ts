@@ -1,6 +1,7 @@
 // Short in-process TTL cache with in-flight dedupe: concurrent callers share one promise; a rejection is never cached.
 // Per instance only (serverless): it absorbs bursts of identical reads, it is not a source of truth.
-const store = new Map<string, { exp: number; v: Promise<unknown> }>();
+// globalThis: dev RSC and route-handler bundles are separate module instances, and memoClear from a write must reach the readers' store.
+const store: Map<string, { exp: number; v: Promise<unknown> }> = ((globalThis as { __pmMemo?: Map<string, { exp: number; v: Promise<unknown> }> }).__pmMemo ??= new Map());
 
 export function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = store.get(key);

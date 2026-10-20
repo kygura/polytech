@@ -38,10 +38,11 @@ export function envExchange(): Exchange | null {
   }
 }
 
-let ready: Promise<Db> | undefined;
+// globalThis: dev RSC and route-handler bundles are separate module instances; one migrate promise per process (see packages/db/src/client.ts)
+const slot = ((globalThis as { __pmReady?: { p?: Promise<Db> } }).__pmReady ??= {});
 /** getDb(), migrated once per process when running on local PGlite (a hosted DATABASE_URL is migrated with `db:migrate`). Cache cleared on reject. */
 export const dbReady = () =>
-  (ready ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((ready = undefined), Promise.reject(e))));
+  (slot.p ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((slot.p = undefined), Promise.reject(e))));
 
 /** Production wiring. Tests/seed override pieces via `over`. */
 export async function deps(over: Partial<Deps> = {}): Promise<Deps> {

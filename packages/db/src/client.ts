@@ -15,16 +15,17 @@ export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = resolve(here, "../drizzle");
 
-let db: Db | undefined;
-let migrator: (() => Promise<void>) | undefined;
-let closer: (() => Promise<void>) | undefined;
+// Process-wide, not module-level: `next dev` gives RSC pages and route handlers separate module instances, and a second PGlite on the same dir
+// reads/writes a different in-memory copy and aborts on migrate. globalThis is shared by all of them (same pattern as the event bus).
+type Conn = { db?: Db; migrator?: () => Promise<void>; closer?: () => Promise<void> };
+const conn: Conn = ((globalThis as { __pmDb?: Conn }).__pmDb ??= {});
 
 /**
  * DATABASE_URL → any Postgres over TCP via postgres-js (Supabase pooler, Neon, self-hosted); else PGlite at <repo>/.data/pglite (PGLITE_DIR overrides, `memory://` for tests).
  * prepare:false keeps it safe behind transaction-mode poolers (Supavisor :6543, PgBouncer); small pool + idle timeout suit serverless instances.
  */
 export function getDb(): Db {
-  if (db) return db;
+  if (conn.db) return conn.db;
   const url = process.env.DATABASE_URL;
   if (url) {
     const sql = postgres(url, { prepare: false, max: 5, idle_timeout: 20, connect_timeout: 10 });
@@ -35,27 +36,28 @@ export function getDb(): Db {
       const next = sql.options.serializers[oid];
       sql.options.serializers[oid] = (v: unknown) => (v instanceof Date ? (oid === 1082 ? v.toISOString().slice(0, 10) : v.toISOString()) : next!(v));
     }
-    migrator = () => migratePg(d, { migrationsFolder });
-    closer = () => sql.end({ timeout: 5 });
-    return (db = d);
+    conn.migrator = () => migratePg(d, { migrationsFolder });
+    conn.closer = () => sql.end({ timeout: 5 });
+    return (conn.db = d);
   }
   const dir = process.env.PGLITE_DIR ?? resolve(here, "../../../.data/pglite");
   if (!dir.startsWith("memory://")) mkdirSync(dirname(dir), { recursive: true }); // PGlite only creates the leaf dir
   const client = new PGlite(dir);
   const d = drizzlePglite({ client, schema });
-  migrator = () => migratePglite(d, { migrationsFolder });
-  closer = () => client.close();
-  return (db = d);
+  conn.migrator = () => migratePglite(d, { migrationsFolder });
+  conn.closer = () => client.close();
+  return (conn.db = d);
 }
 
 export async function migrate(): Promise<Db> {
   const d = getDb();
-  await migrator!();
+  await conn.migrator!();
   return d;
 }
 
 /** Release the pool (CLI scripts; postgres-js keeps the process alive otherwise). */
 export async function closeDb(): Promise<void> {
-  await closer?.();
-  db = migrator = closer = undefined;
+  const close = conn.closer;
+  conn.db = conn.migrator = conn.closer = undefined;
+  await close?.();
 }
