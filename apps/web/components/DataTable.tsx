@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import css from "./DataTable.module.css";
 import { inInput } from "../hooks/useGlobalKeys";
 import { minTableWidth, scrollTopForRow, virtualWindow, type VirtualOpts } from "./virtual";
@@ -29,10 +29,12 @@ export type DataTableProps<T> = {
   rowClass?: (row: T) => string | undefined;
   /** Opt-in windowing for long lists: fixed-height rows, every column needs a `width`, only the visible slice renders between two spacer rows. `renderExpanded` is ignored. */
   virtual?: VirtualOpts;
+  /** Inside a Panel: drop the table's own border, radius and background (the Panel is the frame). */
+  flush?: boolean;
 };
 
 /** The one table. Real <table>, sticky header, aria-sort buttons, j/k/Enter, selection bar. */
-export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey, onSelect, onOpen, renderExpanded, muted, keys = true, label, rowClass, virtual }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey, onSelect, onOpen, renderExpanded, muted, keys = true, label, rowClass, virtual, flush }: DataTableProps<T>) {
   const ref = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, h: 600 });
   const idx = selectedKey == null ? -1 : rows.findIndex((r) => rowKey(r) === selectedKey);
@@ -59,6 +61,8 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
     if (!keys) return;
     const h = (e: KeyboardEvent) => {
       if (inInput(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // Enter on a button/link/menu item (a sort header, the view menu) activates that control; it does not also open the selected row
+      if (e.key === "Enter" && (e.target as HTMLElement | null)?.closest("button, a, summary, [role^=menuitem], dialog")) return;
       if (e.key === "j" || e.key === "k") {
         if (!rows.length) return;
         const n = e.key === "j" ? Math.min(rows.length - 1, idx + 1) : Math.max(0, idx - 1);
@@ -78,8 +82,8 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
   const toggle = (id: string, additive: boolean) => onSort?.({ id, dir: sort?.id === id && sort.dir === "asc" ? "desc" : "asc" }, additive);
 
   return (
-    <div ref={ref} className={css.wrap} style={virtual?.height ? { height: virtual.height } : undefined}>
-      <table className={`${css.table} ${virtual ? css.virtual : ""} ${muted ? css.muted : ""}`} aria-label={label} style={virtual ? { minWidth: minTableWidth(columns) } : undefined}
+    <div ref={ref} className={flush ? `${css.wrap} ${css.flush}` : css.wrap} style={virtual?.height ? { height: virtual.height } : undefined}>
+      <table className={`${css.table} ${virtual ? css.virtual : ""} ${muted ? css.muted : ""}`} aria-label={label} style={virtual ? ({ minWidth: minTableWidth(columns), "--vrow": `${rh}px` } as CSSProperties) : undefined}
         aria-rowcount={virtual ? rows.length + 1 : undefined}>
         <thead>
           <tr>
@@ -90,7 +94,7 @@ export function DataTable<T>({ columns, rows, rowKey, sort, onSort, selectedKey,
                   aria-sort={c.sortable ? (active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none") : undefined}>
                   {c.sortable ? (
                     <button type="button" className={css.sortBtn} onClick={(e) => toggle(c.id, e.shiftKey)}>
-                      {c.header}{active ? (sort!.dir === "asc" ? " ▲" : " ▼") : ""}
+                      {c.header}{active && <span className={css.arrow} aria-hidden>{sort!.dir === "asc" ? "▲" : "▼"}</span>}
                     </button>
                   ) : c.header}
                 </th>

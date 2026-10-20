@@ -1,10 +1,14 @@
-.wrap { overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+/* The one table (DESIGN 13.2). The wrapper is the scroll container; the page never scrolls because of a table. */
+.wrap { overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); }
+.flush { border: 0; border-radius: 0; background: none; }
 .table { table-layout: auto; }
-.sortBtn { background: none; border: 0; padding: 0; color: inherit; font-weight: 600; cursor: pointer; }
-.sortBtn:hover { color: var(--text); background: none; }
+.sortBtn { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; min-height: 0; padding: 0; background: none; border: 0; border-radius: 0; color: inherit; font: inherit; cursor: pointer; }
+.sortBtn:hover:not(:disabled) { color: var(--text); background: none; text-decoration: underline; }
+.sortBtn:focus-visible { outline-offset: 2px; }
+.arrow { font-size: 8px; line-height: 1; color: var(--text); }
 .row { cursor: pointer; border-left: 2px solid transparent; }
-.selected { background: var(--surface-2); border-left-color: var(--accent); }
-.selected:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+tbody tr.selected, tbody tr.selected:hover { background: var(--focus-bg); border-left-color: var(--focus); }
+.selected:focus-visible, .row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .muted td { color: var(--muted); }
 .muted td .pos, .muted td .neg, .muted td .warn { color: var(--muted); }
 .expanded { background: var(--surface); cursor: default; }
@@ -12,11 +16,13 @@
 .truncate { max-width: 56ch; overflow: hidden; text-overflow: ellipsis; }
 .tag { color: var(--muted); font-size: var(--fs-xs); margin-left: var(--sp-1); }
 
-/* virtual mode: fixed layout, exact 26px rows (separate borders so a 1px rule never changes a row's height), selection bar as an inset shadow */
+/* virtual mode: fixed layout, exact row height (`--vrow`, set from `virtual.rowHeight`; separate borders so a 1px rule never changes a row's height), selection bar as an inset shadow */
 .virtual { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
-.virtual th, .virtual td { overflow: hidden; text-overflow: ellipsis; }
-.virtual td { height: var(--row-h); border-top: 1px solid var(--border); }
+.virtual th, .virtual td { overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.virtual th { border-bottom: 1px solid var(--border); }
+.virtual td { height: var(--vrow, var(--row-h)); border-top: 1px solid var(--border); }
+.virtual tbody tr:first-child td { border-top-color: transparent; }
 .virtual .row { border-left: 0; }
-.virtual .selected > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.virtual .selected > td:first-child { box-shadow: inset 2px 0 0 var(--focus); }
 .spacer, .spacer:hover { background: none; border: 0; pointer-events: none; }
 .virtual .spacer > td { padding: 0; border: 0; }

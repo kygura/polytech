@@ -229,8 +229,8 @@ describe("virtual window", () => {
 });
 
 describe("columns", () => {
-  it("default set is the DESIGN 12.2 order and all ids exist", () => {
-    expect(DEFAULT_COLS).toEqual(["flags", "market", "mid", "sprd", "liq", "vol24", "d2", "days", "stale", "top1", "src", "prio", "opp", "edge"]);
+  it("default set is the DESIGN 13.5 order (no 24h change: the rows carry no d24c yet) and all ids exist", () => {
+    expect(DEFAULT_COLS).toEqual(["flags", "market", "yes", "no", "prob", "sprd", "liq", "vol24", "days", "prio", "edge"]);
     const ids = COLUMNS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(DEFAULT_COLS.every((c) => ids.includes(c))).toBe(true);
@@ -251,6 +251,7 @@ describe("columns", () => {
     expect(cleanCols(["mid", "nope", "mid", "liq"])).toEqual(["mid", "liq"]);
     expect(cleanCols([])).toEqual(DEFAULT_COLS);
     expect(cleanCols("x")).toEqual(DEFAULT_COLS);
+    expect(cleanCols("flags,market,mid,sprd,liq,vol24,d2,days,stale,top1,src,prio,opp,edge".split(","))).toEqual(DEFAULT_COLS); // saved copy of the Rev 7 default moves on
   });
   it("compact usd fits the narrow cells", () => {
     expect(usdShort(950)).toBe("950");

@@ -2,6 +2,7 @@
 import type { Filter } from "@pm/core";
 import { useId, useState, type ReactNode } from "react";
 import { addChip, fmtBound, parseBound, removeChip, setBound, toggleValue, triGet, triSet, type FlagField, type ListField, type RangeField, type TagKind, type Tri } from "./filter";
+import { Panel } from "../ui";
 import css from "./screener.module.css";
 
 type Edit = (f: Filter) => void;
@@ -71,8 +72,7 @@ function Section({ title, disabled, children }: { title: string; disabled: boole
 export function FilterPanel({ filter: f, disabled, onEdit, onClose, known }: { filter: Filter; disabled: boolean; onEdit: Edit; onClose: () => void; known: { tags: string[]; categories: string[] } }) {
   const R = (field: RangeField, label: string) => <RangeRow f={f} field={field} label={label} onEdit={onEdit} />;
   return (
-    <aside className={css.panel} aria-label="Filters">
-      <div className={css.panelHead}><span>Filters</span><button type="button" onClick={onClose} aria-label="Hide filters" title="Hide filters (f)">{"‹"}</button></div>
+    <Panel as="aside" className={css.filters} title="Filters" right={<button type="button" className={css.hideBtn} onClick={onClose} aria-label="Hide filters" title="Hide filters (f)">{"‹"}</button>}>
       {disabled && <div className={css.panelNote} role="status">query has errors</div>}
       <Section title="Liquidity & volume" disabled={disabled}>{R("liquidity", "liq")}{R("volume24h", "vol24h")}</Section>
       <Section title="Book" disabled={disabled}>{R("depth2c", "depth")}{R("spread", "spread")}{R("price", "price")}</Section>
@@ -95,6 +95,6 @@ export function FilterPanel({ filter: f, disabled, onEdit, onClose, known }: { f
         <TagInput f={f} kind="tags" label="tag" known={known.tags} onEdit={onEdit} />
         <TagInput f={f} kind="categories" label="cat" known={known.categories} onEdit={onEdit} />
       </Section>
-    </aside>
+    </Panel>
   );
 }

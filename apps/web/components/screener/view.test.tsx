@@ -16,8 +16,15 @@ const props = (rows: ScreenerRow[], text = "days:2..120 sort:-prio") => ({ initi
 describe("ScreenerView SSR", () => {
   it("renders bar, count, default columns, badges and cells", () => {
     const h = renderToString(<ScreenerView {...props([row(1)])} />);
-    for (const s of ["mkts</span>", "12.0k", "Will thing 1 happen?", "D±2¢", "Edge¢", "+3.4", "0.70", "0.0123", "5d", "off", 'aria-label="Query"', "[c] cols", "Default", 'title="no trade for 5d"']) expect(h).toContain(s);
+    for (const s of ["markets", "12.0k", "Will thing 1 happen?", "YES¢", "NO¢", ">42¢<", ">58¢<", 'aria-label="YES 42%"', "Edge¢", "+3.4", "0.70", "Cols", "Default", 'title="no trade for 5d"', "Thesis: YES, edge +3.4¢", 'title="Will thing 1 happen?"']) expect(h).toContain(s);
     expect(h).toContain('aria-sort="descending"'); // sort:-prio
+    expect(h).not.toContain("D±2¢"); // picker-only
+  });
+  it("a saved view's own columns win", () => {
+    const p = props([row(1)]);
+    const h = renderToString(<ScreenerView {...p} views={[{ id: "v1", name: "v", query: p.defaultText, columns: ["market", "d2", "stale", "src", "opp"] }]} initial={{ ...p.initial, viewId: "v1" }} />);
+    for (const s of ["D±2¢", "0.0123", "5d", "off"]) expect(h).toContain(s);
+    expect(h).not.toContain("YES¢");
   });
   it("invalid query: error line, panel disabled, rows kept", () => {
     const h = renderToString(<ScreenerView {...props([row(1)], "liq:5k spred:<1")} />);

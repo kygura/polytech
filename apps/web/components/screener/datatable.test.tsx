@@ -21,6 +21,14 @@ describe("DataTable virtual", () => {
     expect(h).toContain('aria-rowcount="1001"');
     expect(h).toContain("min-width:280px"); // 80 + flex floor 200
     expect(h).toContain("height:400px");
+    expect(h).toContain("--vrow:26px");
+  });
+  it("virtual row height follows `rowHeight` (two-line rows are 40px) and `flush` drops the frame", () => {
+    const f = renderToStaticMarkup(<DataTable columns={cols} rows={rows} rowKey={(r) => r.id} flush virtual={{ rowHeight: 40, overscan: 20, height: "100%" }} />);
+    expect(f).toContain("--vrow:40px");
+    expect(f).toContain(`height:${(1000 - count(f, /<tr[^>]*aria-rowindex/g)) * 40}px`);
+    expect(f).toContain("flush");
+    expect(html()).not.toContain("flush");
   });
   it("without `virtual` every row renders and nothing else changes", () => {
     const h = html();
