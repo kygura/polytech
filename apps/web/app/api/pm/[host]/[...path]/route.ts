@@ -27,7 +27,7 @@ async function relay(req: Request, { params }: { params: Promise<{ host: string;
   // L2 HMAC signs the SDK's relative path ("/order"), so the upstream path must be exactly the part after /api/pm/<host>.
   const target = `${base}/${path.map(encodeURIComponent).join("/")}${new URL(req.url).search}`;
   const headers = new Headers();
-  for (const [k, v] of h) if (k === "content-type" || k.startsWith("poly_")) headers.set(k, v); // no cookie/host/x-forwarded-*
+  for (const [k, v] of h) if (k === "content-type" || k === "accept" || k === "user-agent" || k.startsWith("poly_")) headers.set(k, v); // no cookie/host/x-forwarded-*
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();
   try {
     const r = await fetch(target, { method: req.method, headers, body, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
