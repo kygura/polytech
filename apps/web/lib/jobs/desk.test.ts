@@ -97,6 +97,8 @@ describe("paper orders", () => {
     const orders = await d.db.select().from(s.orders).where(and(eq(s.orders.conditionId, id), eq(s.orders.thesisId, "manual")));
     expect(orders).toHaveLength(4);
     expect(orders.every((o) => o.paper && o.status === "paper_filled")).toBe(true);
+    const book = await read.paperBook(d);
+    expect(book.fills.filter((f) => f.conditionId === id).map((f) => [f.action, f.side, f.manual])).toEqual([["SELL", "YES", true], ["SELL", "YES", true], ["BUY", "YES", true], ["BUY", "YES", true]]);
   });
 
   it("refuses what it cannot fill: no position to sell, a limit nobody meets, no amount", async () => {

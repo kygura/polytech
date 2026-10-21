@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useTradingMode } from "../hooks/useTradingMode";
 import { MeterBar } from "./MeterBar";
 import { SseIndicator, type SseStatus } from "./SseIndicator";
-import { ageTone, fmtAge, runsLabel, spendLabel, SNAPSHOT_CADENCE_MS, SWEEP_CADENCE_MS, utcClock, type OpStatus } from "./statusbar";
+import { ageTone, fmtAge, runsLabel, spendLabel, SNAPSHOT_CADENCE_MS, SWEEP_CADENCE_MS, tradingLabel, utcClock, type OpStatus } from "./statusbar";
+import { TRADING_HELP } from "./TradingModeSwitch";
 import css from "./StatusBar.module.css";
 
-/** Fixed bottom bar (DESIGN 12.1.5, 13.3): sse | runs | spend | ingest ages | alerts | (slot: /trade key legend + feed) | [g…] clock. `status` null = not loaded yet or /api/status failing: segments show `—`. `slotRef` receives the slot element that workspace pages portal into. */
+/** Fixed bottom bar (DESIGN 12.1.5, 13.3): sse | trading mode | runs | spend | ingest ages | alerts | (slot: /trade key legend + feed) | [g…] clock. `status` null = not loaded yet or /api/status failing: segments show `—`. `slotRef` receives the slot element that workspace pages portal into. */
 export function StatusBar({ status, sse, lastEventAt, chord, onAlerts, slotRef }: { status: OpStatus | null; sse: SseStatus; lastEventAt: number | null; chord: boolean; onAlerts: () => void; slotRef?: (el: HTMLElement | null) => void }) {
   const [now, setNow] = useState<number | null>(null); // null until mounted: no server/client clock mismatch
   useEffect(() => {
@@ -19,9 +21,11 @@ export function StatusBar({ status, sse, lastEventAt, chord, onAlerts, slotRef }
   const spend = spendLabel(status?.spendUsd ?? null, status?.capUsd ?? null);
   const showMeter = status?.spendUsd != null && status.capUsd != null && status.capUsd > 0;
   const unacked = status?.unacked ?? 0;
+  const trading = tradingLabel(useTradingMode().mode);
   return (
     <footer className={css.bar} data-sse={sse} aria-label="status bar">
       <span className={css.seg}><SseIndicator status={sse} lastEventAt={lastEventAt} /></span>
+      <span className={`${css.seg} ${trading.warn ? css.live : ""}`} title={TRADING_HELP} aria-label={`your trades: ${trading.warn ? "live, real money" : "paper, no real money"}`}>{trading.text}</span>
       <Link href="/runs" className={`${css.seg} ${status && status.runs > 0 ? css.text : ""}`} title={status?.pods.length ? status.pods.join("\n") : undefined}>
         {status ? runsLabel(status.runs) : "runs —"}
       </Link>

@@ -15,7 +15,8 @@ const Slip = ({ c }: { c: number | null }) => (c == null ? dash : <span classNam
 const COLS: Column<Fill>[] = [
   { id: "ts", header: "ts", align: "r", cell: (f) => `${mmdd(f.ts)} ${hm(f.ts)}` },
   { id: "market", header: "Market", align: "l", cell: (f) => <MarketCell><MarketTitle id={f.conditionId} question={f.question} />{f.paper && <span className={css.chip}>PAPER</span>}</MarketCell> },
-  { id: "side", header: "Side", align: "l", cell: (f) => (f.side ? <span className={f.side === "YES" ? "yes" : "no"}>{f.side}</span> : dash) },
+  // manual trades (Trade page) also sell; autonomy fills are always buys
+  { id: "side", header: "Side", align: "l", cell: (f) => (f.side ? <span className={f.side === "YES" ? "yes" : "no"}>{f.action === "SELL" ? "SELL " : ""}{f.side}</span> : dash) },
   { id: "price", header: "Price", align: "r", cell: (f) => <NumCell value={f.price} fmt="p" /> },
   { id: "size", header: "Size", align: "r", cell: (f) => <NumCell value={f.size} fmt="int" /> },
   { id: "fee", header: "Fee", align: "r", cell: (f) => f.fee.toFixed(2) },

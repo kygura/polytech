@@ -1,0 +1,26 @@
+/* Autonomy page parts (DESIGN 13.6): mode list, current-mode line, limit rows with a hint under the name. */
+.lead { margin: 0; max-width: 90ch; color: var(--muted); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); }
+.body { display: grid; gap: var(--sp-3); }
+.now { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.nowText { font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); }
+.note { margin: 0; max-width: 90ch; color: var(--muted); font: 400 var(--fs-sm) / var(--lh-sm) var(--font-ui); }
+.intro { margin: 0; padding: var(--sp-2) var(--sp-3); max-width: 90ch; color: var(--muted); font: 400 var(--fs-sm) / var(--lh-sm) var(--font-ui); border-bottom: 1px solid var(--border); }
+
+.modes { display: grid; gap: var(--sp-1); }
+.modeOpt { display: grid; grid-template-columns: 136px 1fr auto; align-items: center; gap: var(--sp-3); min-height: 32px; padding: var(--sp-1) var(--sp-3); text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); }
+.modeOpt:hover:not(:disabled) { background: var(--surface-2); }
+.modeOpt[aria-checked="true"] { background: var(--surface-2); cursor: default; }
+/* keep full contrast when disabled (the global :disabled .5 would drop it below 4.5:1); the row says why */
+.modeOpt:disabled { opacity: 1; }
+.modeOpt:disabled .modeName { color: var(--muted); }
+.modeName { font: 600 var(--fs-sm) / var(--lh-sm) var(--font-mono); white-space: nowrap; }
+.modeDesc { color: var(--muted); font: 400 var(--fs-sm) / var(--lh-sm) var(--font-ui); }
+.modeOpt[aria-checked="true"] .modeDesc { color: var(--text); }
+.modeNow { font: 500 var(--fs-xs) / var(--lh-xs) var(--font-mono); color: var(--muted); }
+
+/* limit tables: name over a one-line hint */
+.limits td { vertical-align: middle; padding-top: var(--sp-1); padding-bottom: var(--sp-1); height: auto; }
+.limits td:first-child { white-space: normal; }
+.name { display: block; font: 500 var(--fs-md) / var(--lh-md) var(--font-ui); }
+.hint { display: block; max-width: 72ch; color: var(--muted); font: 400 var(--fs-xs) / var(--lh-xs) var(--font-ui); }
+.meterCell { width: 18%; min-width: 80px; }

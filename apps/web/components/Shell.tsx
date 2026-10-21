@@ -22,6 +22,7 @@ import { ModeBadge } from "./ModeBadge";
 import { StatusSlotContext } from "./ShellContext";
 import { STALE_MS, StaleBanner } from "./StaleBanner";
 import { StatusBar } from "./StatusBar";
+import { TradingModeSwitch } from "./TradingModeSwitch";
 import css from "./Shell.module.css";
 
 // DESIGN 13.3: label, href, `g` chord. Three groups; the third collapses into "More" under 1280px.
@@ -159,7 +160,10 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
             <button type="button" className={css.themeBtn} onClick={toggle} aria-label="toggle theme (t)" title="toggle theme (t)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><circle cx="8" cy="8" r="6" /><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" /></svg>
             </button>
-            <ModeBadge mode={mode} size="lg" />
+            <TradingModeSwitch />
+            <Link href="/autonomy" className={css.modeLink} title="Autonomy mode: what the system does on its own. Change it in Autonomy (g a).">
+              <ModeBadge mode={mode} size="lg" />
+            </Link>
             <ApprovalsBadge pendingCount={status.pendingCount ?? 0} recon={status.recon} flaggedSets={status.flaggedSets ?? 0} />
             <ConnectButton />
             <KillSwitchButton mode={mode} liveOpenOrders={status.liveOpenOrders ?? 0} onKill={kill} />

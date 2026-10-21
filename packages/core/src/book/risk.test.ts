@@ -35,6 +35,7 @@ describe("checkOrder", () => {
   });
   it("daily realized loss at limit blocks", () => {
     expect(rules(checkOrder(order, { ...empty, dailyRealizedLoss: 100 }, limits))).toEqual(["DAILY_LOSS"]);
+    expect(rules(checkOrder(order, { ...empty, dailyRealizedLoss: 100 }, { ...limits, dailyLoss: 0 }))).toEqual([]); // 0 = off
     expect(checkOrder(order, { ...empty, dailyRealizedLoss: 99 }, limits).ok).toBe(true);
   });
   it("collects several", () => {

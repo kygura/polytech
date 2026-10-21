@@ -302,12 +302,15 @@ export async function paperBook(r: ReadDeps) {
       thesisId: tid ?? null, modeledE: e, viaOutcome: closed && (resolvedAt.get(p.conditionId) ?? Infinity) <= p.closedAt!.getTime(),
     };
   });
-  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.orders.modeAtSend, "L1")).orderBy(desc(s.fills.id)).limit(200);
+  // L1 autonomy fills and manual paper trades (modeAtSend "manual", from the Trade page)
+  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question, yesToken: s.markets.yesTokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId))
+    .where(and(eq(s.orders.paper, true), inArray(s.orders.modeAtSend, ["L1", "manual"]))).orderBy(desc(s.fills.id)).limit(200);
   const T = new Map((await db.select().from(s.theses).where(inArray(s.theses.id, [...new Set(fl.map((x) => x.o.thesisId))]))).map((t) => [t.id, t]));
-  const fills = fl.map(({ f, o, q }) => {
+  const fills = fl.map(({ f, o, q, yesToken }) => {
     const t = T.get(o.thesisId), k = t ? (dt(t).k ?? null) : null;
     return {
-      ts: f.ts.getTime(), conditionId: o.conditionId, question: q, side: (t?.side ?? null) as Side | null, price: f.price, size: f.size, fee: f.fee, modeledK: k,
+      ts: f.ts.getTime(), conditionId: o.conditionId, question: q, side: (t?.side ?? (o.tokenId === yesToken ? "YES" : "NO")) as Side,
+      action: o.side as "BUY" | "SELL", manual: o.modeAtSend === "manual", price: f.price, size: f.size, fee: f.fee, modeledK: k,
       slipC: k == null ? null : (f.price + f.fee / f.size - k) * 100, paper: true, violations: o.status.includes("!") ? o.status.split("!")[1]!.split(",") : [],
     };
   });

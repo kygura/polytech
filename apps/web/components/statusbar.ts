@@ -60,6 +60,9 @@ export function spendLabel(spent: number | null, cap: number | null): { text: st
   return { text: `${capped ? "cap reached" : "spend"} ${usd(spent)} / ${usd(cap)}`, capped };
 }
 
+/** Trading-mode segment: the viewer's own trades (useTradingMode). Live reads upper-case and warns, so it never relies on colour. */
+export const tradingLabel = (m: "paper" | "live") => (m === "live" ? { text: "LIVE", warn: true } : { text: "paper", warn: false });
+
 export function runsLabel(runs: number): string { return runs > 0 ? `runs ${runs} active` : "runs idle"; }
 
 /** `live · 14:02:11`, `reconnecting · 3s`, `offline · retrying` (DESIGN 12.1.1). */
