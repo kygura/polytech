@@ -7,9 +7,9 @@ export const NEW_ID = "new";
 const every = (m: number | null) => (m == null ? "manual" : m % 1440 === 0 ? `every ${m / 1440}d` : m % 60 === 0 ? `every ${m / 60}h` : `every ${m}m`);
 const row2 = () => "row2";
 
-/** Profile list (240px rail). `On` is a switch that PUTs immediately; disabled for the dirty selected profile. Schedule and last run sit under the name. */
-export function ProfileTable({ profiles, selected, onSelect, onToggle, lockedId, matchCounts, onOpen }: {
-  profiles: Profile[]; selected: string | null; onSelect: (id: string) => void; onToggle: (p: Profile) => void; lockedId: string | null; matchCounts: Record<string, number>; onOpen: () => void;
+/** Profile list (240px rail). `keys` false while the tab is hidden. `On` is a switch that PUTs immediately; disabled for the dirty selected profile. Schedule and last run sit under the name. */
+export function ProfileTable({ profiles, selected, onSelect, onToggle, lockedId, matchCounts, onOpen, keys = true }: {
+  profiles: Profile[]; selected: string | null; onSelect: (id: string) => void; onToggle: (p: Profile) => void; lockedId: string | null; matchCounts: Record<string, number>; onOpen: () => void; keys?: boolean;
 }) {
   const cols: Column<Profile>[] = [
     { id: "name", header: "Name", align: "l", cell: (p) => (
@@ -27,5 +27,5 @@ export function ProfileTable({ profiles, selected, onSelect, onToggle, lockedId,
     ) },
     { id: "match", header: "Match", align: "r", title: "markets matched by the last preview", cell: (p) => matchCounts[p.id] == null ? <span className="muted">{"—"}</span> : matchCounts[p.id] },
   ];
-  return <DataTable columns={cols} rows={profiles} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} onOpen={onOpen} label="research profiles" rowClass={row2} />;
+  return <DataTable columns={cols} rows={profiles} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} onOpen={onOpen} keys={keys} label="research profiles" rowClass={row2} />;
 }

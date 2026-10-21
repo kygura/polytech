@@ -1,0 +1,9 @@
+/* DESIGN 13.2 addition: Switch. 24px target, label in --muted, on = --focus track. */
+.sw { display: inline-flex; align-items: center; gap: var(--sp-2); height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); font: 500 var(--fs-sm) / 1 var(--font-ui); cursor: pointer; white-space: nowrap; }
+.sw:hover { background: var(--surface-2); color: var(--text); }
+.track { position: relative; width: 26px; height: 14px; border-radius: 7px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border-2); flex: none; transition: background 120ms; }
+.track i { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform 120ms; }
+.sw[aria-checked="true"] { color: var(--text); }
+.sw[aria-checked="true"] .track { background: var(--focus); box-shadow: none; }
+.sw[aria-checked="true"] .track i { transform: translateX(12px); background: var(--on-focus); }
+@media (prefers-reduced-motion: reduce) { .track, .track i { transition: none; } }
