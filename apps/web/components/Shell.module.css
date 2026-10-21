@@ -15,8 +15,6 @@
 .nav a:hover, .menuList a:hover { text-decoration: none; color: var(--text); }
 .nav a[aria-current="page"], .menuList a[aria-current="page"] { color: var(--text); }
 .nav .group a[aria-current="page"] { border-bottom-color: var(--focus); }
-.nav kbd, .menuList kbd { display: none; }
-.nav a:hover kbd, .nav a:focus-visible kbd, .menuList a:hover kbd, .menuList a:focus-visible kbd { display: inline; }
 .count { font: 500 10px / 1 var(--font-mono); color: var(--focus); position: relative; top: -5px; }
 
 .more, .burger { display: none; position: relative; }

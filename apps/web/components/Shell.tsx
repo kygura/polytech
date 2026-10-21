@@ -123,11 +123,11 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
     } catch (e) { setKillErr((e as Error).message); }
   };
 
-  const link = ([label, href, key]: NavItem) => {
+  const link = ([label, href]: NavItem) => {
     const n = label === "Runs" ? count("live runs", bar.status?.runs) : label === "Watchlist" ? count("unacked alerts", bar.status?.unacked) : null;
     return (
       <Link key={href} href={href} aria-current={path === href || path.startsWith(href + "/") ? "page" : undefined}>
-        {label}{n}<kbd aria-hidden>g {key}</kbd>
+        {label}{n}
       </Link>
     );
   };
