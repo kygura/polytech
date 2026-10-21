@@ -17,7 +17,7 @@ export async function post(url: string, body?: unknown) {
 export function useDesk() {
   const [queue, setQueue] = useState<QItem[]>([]);
   const [notStarted, setNotStarted] = useState<NotStarted[]>([]);
-  const [pending, setPending] = useState<(QItem & { at: number })[]>([]); // 202 received, pod not yet in the poll
+  const [pending, setPending] = useState<(QItem & { at: number; known: string[] })[]>([]); // 202 received, pod not yet in the poll
   const [inFlight, setInFlight] = useState<QItem[]>([]);
   const [cancelling, setCancelling] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -33,12 +33,14 @@ export function useDesk() {
 
   useEffect(() => { if (runs) setPending((p) => { const n = unseen(p, runs, Date.now()); return n.length === p.length ? p : n; }); }, [runs]);
 
+  const runsRef = useRef(runs);
+  runsRef.current = runs;
   const begin = useCallback(async (it: QItem) => {
-    const at = Date.now();
+    const at = Date.now(), known = (runsRef.current ?? []).filter((r) => r.conditionId === it.id).map((r) => r.podId);
     const res = await post(`/api/markets/${encodeURIComponent(it.id)}/research`);
     const o = startOutcome(res?.status ?? null, res?.j);
     setInFlight((s) => s.filter((x) => x.id !== it.id));
-    if (o.kind === "started") { setPending((p) => [...p, { ...it, at }]); refresh(); }
+    if (o.kind === "started") { setPending((p) => [...p, { ...it, at, known }]); refresh(); }
     else if (o.kind === "requeue") { held.current = lastAt.current; setQueue((q) => [it, ...q.filter((x) => x.id !== it.id)]); }
     else setNotStarted((n) => [{ ...it, reason: o.reason, at: Date.now() }, ...n.filter((x) => x.id !== it.id)]);
   }, [refresh]);

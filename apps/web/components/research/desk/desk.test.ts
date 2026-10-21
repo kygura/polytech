@@ -70,9 +70,9 @@ describe("queue", () => {
     expect(startOutcome(null, null).kind).toBe("not_started");
   });
   it("a start counts as running until the poll shows its pod", () => {
-    const p = [{ id: "a", at: 10_000 }, { id: "b", at: 10_000 }];
-    expect(unseen(p, [{ conditionId: "a", startedAt: 5_000 }], 12_000)).toEqual(p); // older pod of the same market
-    expect(unseen(p, [{ conditionId: "a", startedAt: 10_500 }], 12_000)).toEqual([p[1]]);
+    const p = [{ id: "a", at: 10_000, known: ["pod_old"] }, { id: "b", at: 10_000, known: [] }];
+    expect(unseen(p, [{ conditionId: "a", podId: "pod_old" }], 12_000)).toEqual(p); // older pod of the same market
+    expect(unseen(p, [{ conditionId: "a", podId: "pod_new" }], 12_000)).toEqual([p[1]]); // whatever the server clock says
     expect(unseen(p, [], 80_000)).toEqual([]);
   });
 });
@@ -83,5 +83,13 @@ describe("triageBadge", () => {
     expect(triageBadge(v)).toEqual({ text: "Skip", tone: "muted", why: "Spread over 10¢: entry cost eats the edge\nX" });
     expect(triageBadge({ ...v, verdict: "research", score: 0.83, failedRules: [], reason: "clear resolution" })).toEqual({ text: "Worth researching 0.8", tone: "up", why: "clear resolution" });
     expect(triageBadge(undefined)).toBeNull();
+  });
+});
+
+describe("no-trade verdicts", () => {
+  it("a thesis sized at $0 or with no positive edge reads as no trade", () => {
+    const v = { side: "YES" as const, pYes: 0.36, midAtThesis: 0.34, edgeC: -1.1, sizeUsd: 0, confidence: 0.4, thesis: null };
+    expect(resultText({ verdict: v, judge: null })).toBe("Fair value 36¢ vs 34¢ at research — no trade: the gap does not survive fees and confidence");
+    expect(lastText({ status: "done", stage: "done", agents: { total: 5, done: 5, failed: 0 }, verdict: v, judge: null })).toBe("Fair 36¢ · no trade");
   });
 });

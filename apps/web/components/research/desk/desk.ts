@@ -70,6 +70,8 @@ export function resultText(r: Pick<Run, "verdict" | "judge">): string {
   const v = r.verdict;
   if (v) {
     const fair = v.pYes != null ? `Fair value ${c(v.pYes)}${v.midAtThesis != null ? ` vs ${c(v.midAtThesis)} at research` : ""} · ` : "";
+    // a thesis sized at $0 is the judge's view with no trade in it: the gap does not survive fees and confidence
+    if (v.sizeUsd < 1 || v.edgeC <= 0) return `${fair.replace(/ · $/, "")} — no trade: the gap does not survive fees and confidence`;
     return `${fair}Edge ${signedC(v.edgeC)} on ${v.side} · Suggested $${Math.round(v.sizeUsd)}`;
   }
   if (r.judge?.pYes != null) return `Fair value ${c(r.judge.pYes)} — no edge worth trading`;
@@ -81,7 +83,8 @@ export function lastText(r: Pick<Run, "status" | "stage" | "agents" | "verdict" 
   if (r.status === "running") return `Running ${progress(r)}%`;
   if (r.status === "failed") return "Failed";
   if (r.status === "cancelled") return "Cancelled";
-  if (r.verdict) return `Edge ${signedC(r.verdict.edgeC)} ${r.verdict.side}`;
+  if (r.verdict && r.verdict.sizeUsd >= 1 && r.verdict.edgeC > 0) return `Edge ${signedC(r.verdict.edgeC)} ${r.verdict.side}`;
+  if (r.verdict?.pYes != null) return `Fair ${c(r.verdict.pYes)} · no trade`;
   return r.judge?.pYes != null ? `Fair ${c(r.judge.pYes)} · no edge` : "No edge";
 }
 
@@ -117,11 +120,11 @@ export function startOutcome(status: number | null, j: { error?: string; reason?
 }
 
 /**
- * Starts sent but not yet seen in the live poll. A start is seen once the poll holds a run for that market that began after it was sent
- * (2 s clock slack), or after 60 s (the pod row may never appear).
+ * Starts sent but not yet seen in the live poll. A start is seen once the poll holds a run for that market that was not there when it was
+ * sent (`known` pod ids; no clock comparison, so browser/server clock skew cannot hold a slot), or after 60 s (the pod row may never appear).
  */
-export function unseen<P extends { id: string; at: number }>(pending: P[], runs: Pick<Run, "conditionId" | "startedAt">[], now: number) {
-  return pending.filter((p) => now - p.at < 60_000 && !runs.some((r) => r.conditionId === p.id && r.startedAt >= p.at - 2_000));
+export function unseen<P extends { id: string; at: number; known: string[] }>(pending: P[], runs: Pick<Run, "conditionId" | "podId">[], now: number) {
+  return pending.filter((p) => now - p.at < 60_000 && !runs.some((r) => r.conditionId === p.id && !p.known.includes(r.podId)));
 }
 
 /** The highest-volume `n` of `rows`. */
