@@ -56,6 +56,10 @@ describe("db (pglite memory)", () => {
     expect((await db.select().from(s.journal))[0]).toMatchObject({ thesisId: "t-r7", brierModel: 0.1, result: null });
     await db.update(s.pods).set({ cancelRequestedAt: now, status: "cancelled", stage: "agents" }).where(eq(s.pods.id, "p1"));
     expect((await db.select().from(s.pods).where(eq(s.pods.id, "p1")))[0]).toMatchObject({ status: "cancelled", stage: "agents", cancelRequestedAt: now });
+    // rev 9
+    await db.update(s.pods).set({ error: "TIMEOUT: x" }).where(eq(s.pods.id, "p1"));
+    await db.insert(s.triage).values({ conditionId: "c1", verdict: "skip", score: 0, reason: "thin book", failedRules: ["THIN_BOOK"] });
+    expect((await db.select().from(s.triage))[0]).toMatchObject({ failedRules: ["THIN_BOOK"], model: null });
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);
   });
