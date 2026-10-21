@@ -28,16 +28,24 @@ export function getDb(): Db {
   if (conn.db) return conn.db;
   const url = process.env.DATABASE_URL;
   if (url) {
-    const sql = postgres(url, { prepare: false, max: 5, idle_timeout: 20, connect_timeout: 10 });
+    const opts = { prepare: false, idle_timeout: 20, connect_timeout: 10 } as const;
+    // postgres-js pipelines extra queries onto busy connections; behind Supavisor's transaction mode the replies can come back crossed
+    // (a one-row max(ts) result once landed in a theses select and broke /watchlist). max_pipeline 0 keeps one query per connection.
+    // That also stops sql.begin from reserving its connection (UNSAFE_TRANSACTION), so transactions run on a small client of their own.
+    const sql = postgres(url, { ...opts, max: 5, max_pipeline: 0 } as postgres.Options<{}>); // max_pipeline is read at runtime but missing from the typings
+    const txSql = postgres(url, { ...opts, max: 2 });
+    drizzlePg({ client: txSql }); // only for its parser/serializer setup on txSql.options
+    sql.begin = txSql.begin;
     const d = drizzlePg({ client: sql, schema });
     // drizzle makes date/time serializers pass-through (it maps column values itself), but raw sql`${new Date()}` params skip that mapping
     // and postgres-js then rejects the Date. neon-http and PGlite accept Dates, so restore that for timestamp/timestamptz/date.
-    for (const oid of [1114, 1184, 1082]) {
-      const next = sql.options.serializers[oid];
-      sql.options.serializers[oid] = (v: unknown) => (v instanceof Date ? (oid === 1082 ? v.toISOString().slice(0, 10) : v.toISOString()) : next!(v));
-    }
+    for (const c of [sql, txSql])
+      for (const oid of [1114, 1184, 1082]) {
+        const next = c.options.serializers[oid];
+        c.options.serializers[oid] = (v: unknown) => (v instanceof Date ? (oid === 1082 ? v.toISOString().slice(0, 10) : v.toISOString()) : next!(v));
+      }
     conn.migrator = () => migratePg(d, { migrationsFolder });
-    conn.closer = () => sql.end({ timeout: 5 });
+    conn.closer = () => Promise.all([sql.end({ timeout: 5 }), txSql.end({ timeout: 5 })]).then(() => undefined);
     return (conn.db = d);
   }
   const dir = process.env.PGLITE_DIR ?? resolve(here, "../../../.data/pglite");
