@@ -1,0 +1,6 @@
+/* Settings / Autonomy form parts. Hints sit under the input in the FormGroup grid's second column. */
+.hint { grid-column: 2; margin-top: calc(var(--sp-1) - var(--sp-2)); max-width: 64ch; color: var(--muted); font: 400 var(--fs-xs) / var(--lh-xs) var(--font-ui); white-space: normal; }
+.intro { grid-column: 1 / -1; margin: 0; max-width: 80ch; color: var(--muted); font: 400 var(--fs-sm) / var(--lh-sm) var(--font-ui); }
+.cell { display: inline-flex; flex-direction: column; gap: 2px; }
+.cell input[type="number"] { width: 96px; }
+.err { color: var(--down); font: 400 var(--fs-xs) / var(--lh-xs) var(--font-ui); white-space: normal; }

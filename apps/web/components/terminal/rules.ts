@@ -46,7 +46,7 @@ export function buttonState(i: ButtonIn): ButtonState {
     const g = GATE[i.gate], connecting = i.wallet === "connecting";
     const off = !!g.off || i.wallet === "unavailable" || connecting;
     const base = s({
-      label: i.gate === "disconnected" && i.wallet === "unavailable" ? "No wallet found" : i.gate === "disconnected" && connecting ? "Connecting…" : g.button,
+      label: i.gate === "disconnected" && i.wallet === "unavailable" ? "Install a wallet" : i.gate === "disconnected" && connecting ? "Connecting…" : g.button,
       word: i.gate.replace(/_/g, " "), spin: !!g.spin || connecting, off, look: i.gate === "disconnected" ? "connect" : off ? "off" : "act",
       line: { text: g.copy },
       action: i.gate === "disconnected" ? "connect" : i.gate === "wrong_network" ? "switchChain" : i.gate === "creds_needed" ? "enable" : i.gate === "allowance_needed" ? "approve" : null,

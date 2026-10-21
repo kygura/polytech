@@ -46,3 +46,4 @@
 /* still used by SteerDrawer (market page) */
 .primary { border-color: var(--focus); }
 .hint { color: var(--muted); font-size: var(--fs-xs); margin-left: 2px; }
+.fhint { grid-column: 2; margin-top: calc(-1 * var(--sp-1)); font-size: var(--fs-xs); line-height: var(--lh-xs); max-width: 72ch; }

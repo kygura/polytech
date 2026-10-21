@@ -212,6 +212,49 @@ export async function fleet(r: ReadDeps) {
   };
 }
 
+// ---------------------------------------------------------------- research desk
+const DEFAULT_AGENTS = 5; // rules, source, base_rate, news, red_team (custom roles add rows as they start)
+
+/** Research runs for the desk: everything running plus the last day's runs (or the given markets'), with agent progress, failure reason and verdict. */
+export async function researchLive(r: ReadDeps, o: { ids?: string[]; limit?: number } = {}) {
+  const { db } = r, now = r.now();
+  const st = await getSettings(db);
+  const where = o.ids?.length ? inArray(s.pods.conditionId, o.ids) : gte(s.pods.startedAt, new Date(now - DAY));
+  const pods = await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId))
+    .where(where).orderBy(desc(s.pods.startedAt)).limit(o.limit ?? 40);
+  const pids = pods.map((x) => x.p.id);
+  const [runs, ths, judged] = pids.length
+    ? await Promise.all([
+        db.select({ podId: s.agentRuns.podId, role: s.agentRuns.role, status: s.agentRuns.status }).from(s.agentRuns).where(inArray(s.agentRuns.podId, pids)),
+        db.select().from(s.theses).where(inArray(s.theses.podId, pids)),
+        db.select({ podId: s.agentRuns.podId, out: s.agentRuns.outputJson }).from(s.agentRuns).where(and(inArray(s.agentRuns.podId, pids), eq(s.agentRuns.role, "judge"), eq(s.agentRuns.status, "ok"))),
+      ])
+    : [[], [], []];
+  const th = new Map(ths.map((t) => [t.podId, t]));
+  const judge = new Map(judged.map((j) => [j.podId, j.out as { p_hat?: number; thesis?: string; confidence?: number } | null]));
+  const day = new Date(now).toISOString().slice(0, 10);
+  const sp = (await db.select().from(s.spend).where(eq(s.spend.day, day)))[0];
+  const [{ n: podsToday }] = (await db.select({ n: sql<number>`count(*)::int` }).from(s.pods).where(gte(s.pods.startedAt, new Date(`${day}T00:00:00Z`)))) as [{ n: number }];
+  return {
+    budget: {
+      running: pods.filter((x) => x.p.status === "running").length, maxRunning: st.budget.maxConcurrentSandboxes,
+      podsToday, maxPodsPerDay: st.budget.maxPodsPerDay, spendTodayUsd: sp?.anthropicUsd ?? 0, dailySpendCapUsd: st.budget.dailySpendCapUsd,
+    },
+    runs: pods.map(({ p, q }) => {
+      const ag = runs.filter((a) => a.podId === p.id && a.role !== "judge");
+      const t = th.get(p.id), d = t ? dt(t) : null;
+      return {
+        podId: p.id, conditionId: p.conditionId, question: q, trigger: p.trigger, status: p.status, stage: p.stage ?? null, error: p.error ?? null,
+        startedAt: p.startedAt.getTime(),
+        agents: { total: Math.max(DEFAULT_AGENTS, ag.length), done: ag.filter((a) => a.status === "ok").length, failed: ag.filter((a) => a.status !== "ok" && a.status !== "running").length },
+        // a finished pod without a thesis found no edge worth sizing (or the judge's p-hat matched the price)
+        verdict: t ? { side: t.side as Side, pYes: d?.pYes ?? null, midAtThesis: d?.pMidYes ?? null, edgeC: t.edgeC, sizeUsd: t.sizeUsd, confidence: t.c, thesis: d?.thesis ?? null } : null,
+        judge: !t && judge.get(p.id) ? { pYes: judge.get(p.id)!.p_hat ?? null, thesis: judge.get(p.id)!.thesis ?? null } : null, // done, but no trade cleared the sizing
+      };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------- calibration
 export async function calibration(r: ReadDeps, o: { category?: string; model?: string; sinceDays?: number } = {}) {
   const all = await forecastRows(r.db);
@@ -259,12 +302,15 @@ export async function paperBook(r: ReadDeps) {
       thesisId: tid ?? null, modeledE: e, viaOutcome: closed && (resolvedAt.get(p.conditionId) ?? Infinity) <= p.closedAt!.getTime(),
     };
   });
-  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.orders.modeAtSend, "L1")).orderBy(desc(s.fills.id)).limit(200);
+  // L1 autonomy fills and manual paper trades (modeAtSend "manual", from the Trade page)
+  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question, yesToken: s.markets.yesTokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId))
+    .where(and(eq(s.orders.paper, true), inArray(s.orders.modeAtSend, ["L1", "manual"]))).orderBy(desc(s.fills.id)).limit(200);
   const T = new Map((await db.select().from(s.theses).where(inArray(s.theses.id, [...new Set(fl.map((x) => x.o.thesisId))]))).map((t) => [t.id, t]));
-  const fills = fl.map(({ f, o, q }) => {
+  const fills = fl.map(({ f, o, q, yesToken }) => {
     const t = T.get(o.thesisId), k = t ? (dt(t).k ?? null) : null;
     return {
-      ts: f.ts.getTime(), conditionId: o.conditionId, question: q, side: (t?.side ?? null) as Side | null, price: f.price, size: f.size, fee: f.fee, modeledK: k,
+      ts: f.ts.getTime(), conditionId: o.conditionId, question: q, side: (t?.side ?? (o.tokenId === yesToken ? "YES" : "NO")) as Side,
+      action: o.side as "BUY" | "SELL", manual: o.modeAtSend === "manual", price: f.price, size: f.size, fee: f.fee, modeledK: k,
       slipC: k == null ? null : (f.price + f.fee / f.size - k) * 100, paper: true, violations: o.status.includes("!") ? o.status.split("!")[1]!.split(",") : [],
     };
   });

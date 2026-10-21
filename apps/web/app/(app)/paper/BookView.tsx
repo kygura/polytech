@@ -62,7 +62,7 @@ function LiveTab({ book, now }: { book: LiveBook; now: number }) {
   const pnl = positions.reduce((a, p) => a + (p.unrealizedUsd ?? 0), 0);
   const recon = <ReconStatus recon={book.recon} now={now} />;
   if (!positions.length && !openOrders.length && !fills.length)
-    return <Panel title="Live book" right={recon}><p className={`${pg.hint} ${pg.line}`}>No live trades yet. Approvals appear at L2.</p></Panel>;
+    return <Panel title="Live book" right={recon}><p className={`${pg.hint} ${pg.line}`}>No live trades yet. The system trades the server wallet from Autonomy L2 up; at L2 each trade waits for your approval.</p></Panel>;
   return (
     <div className={pg.stack}>
       <Panel title="Live book" label="live P&L" right={recon}>

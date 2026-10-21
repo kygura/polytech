@@ -43,7 +43,7 @@ export const anthropicJudge =
       () =>
         client.messages.create({
           model: useModel,
-          max_tokens: 2000,
+          max_tokens: 16_000, // thinking shares this budget: 2k truncated the JSON
           system: [{ type: "text", text: JUDGE_PROMPT, cache_control: { type: "ephemeral" } }],
           messages: [
             {
@@ -51,7 +51,7 @@ export const anthropicJudge =
               content: `Question: ${brief.question}${focusLine(brief)}\n\nAGENT RESULTS:\n${JSON.stringify(outputs)}\n\nCURRENT BOOK:\n${JSON.stringify(book)}`,
             },
           ],
-          output_config: { format: { type: "json_schema", schema: jsonSchema(JudgeOut) } },
+          output_config: { effort: "high", format: { type: "json_schema", schema: jsonSchema(JudgeOut) } },
         }, { signal }),
       { ...backoff, deadline },
     );

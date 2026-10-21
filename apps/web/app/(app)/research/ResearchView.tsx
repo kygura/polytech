@@ -1,6 +1,6 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { EmptyState } from "../../../components/EmptyState";
 import { ErrorBar } from "../../../components/ErrorBar";
 import { FormGroup } from "../../../components/FormGroup";
@@ -20,6 +20,8 @@ import { chordKey, inInput } from "../../../hooks/useGlobalKeys";
 import cx from "./research.module.css";
 
 const API = "/api/research/profiles";
+const HOME = "/research?tab=automate";
+const at = (id: string) => `${HOME}&p=${encodeURIComponent(id)}`;
 const idle: PreviewState = { state: "idle", matches: null, at: null, limit: 10, hint: "" };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const byName = (a: Profile, b: Profile) => a.name.localeCompare(b.name);
@@ -33,8 +35,10 @@ async function call(method: string, url: string, body?: unknown) {
 }
 const why = (x: Awaited<ReturnType<typeof call>>) => (x ? String(x.j?.error ?? x.r.status) : "network error");
 
-/** Container: URL-selected profile, one draft, all fetches. Presentational pieces live in components/research. */
-export function ResearchView({ profiles, categories, models, researchDisabled }: { profiles: Profile[]; categories: string[]; models: readonly string[]; researchDisabled: boolean }) {
+/** Automate tab container: URL-selected profile, one draft, all fetches. Presentational pieces live in components/research. `active` = the tab is shown (page keys only act then). */
+export function ResearchView({ profiles, categories, models, researchDisabled, tabs, active, live }: {
+  profiles: Profile[]; categories: string[]; models: readonly string[]; researchDisabled: boolean; tabs: ReactNode; active: boolean; live: ReactNode;
+}) {
   const router = useRouter();
   const sel = useSearchParams().get("p");
   const [list, setList] = useState(profiles);
@@ -75,7 +79,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     setSaved(d); setDraft(d);
   }, [key, current?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const go = (id: string | null) => { setPending(null); router.push(id ? `/research?p=${id}` : "/research", { scroll: false }); };
+  const go = (id: string | null) => { setPending(null); router.push(id ? at(id) : HOME, { scroll: false }); };
   const nav = (id: string) => { if (id === key) return; dirty ? setPending({ id }) : go(id); };
   const rejected = (j: { issues?: { path: (string | number)[]; message: string }[] } | null) => { if (j?.issues) { setErrors(mapIssues(j.issues)); return true; } return false; };
 
@@ -90,7 +94,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     const p = toProfile(res.j), d = fromProfile(p);
     setErrors({}); setList((l) => [...l.filter((x) => x.id !== p.id), p].sort(byName));
     loaded.current = { key: p.id, at: p.updatedAt };
-    if (isNew) { skipReset.current = p.id; router.replace(`/research?p=${p.id}`, { scroll: false }); }
+    if (isNew) { skipReset.current = p.id; router.replace(at(p.id), { scroll: false }); }
     setSaved(d); setDraft(d); setStatus({ tone: "up", text: `saved ${hm(Date.now())}` });
     router.refresh();
   };
@@ -123,7 +127,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     setBusy(false);
     if (!res?.r.ok) { setFail({ text: `Delete failed: ${why(res)}`, retry: remove }); return; }
     setList(rest); setSaved(draft);
-    router.replace(rest.length ? `/research?p=${(rest[i] ?? rest[i - 1])!.id}` : "/research", { scroll: false });
+    router.replace(rest.length ? at((rest[i] ?? rest[i - 1])!.id) : HOME, { scroll: false });
     router.refresh();
   };
 
@@ -141,11 +145,11 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
   };
 
   // Latest handlers for the window listeners below.
-  const h = useRef({ runPreview, run, nav, key });
-  h.current = { runPreview, run, nav, key };
+  const h = useRef({ runPreview, run, nav, key, active });
+  h.current = { runPreview, run, nav, key, active };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (inInput(e) || chordKey(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!h.current.active || inInput(e) || chordKey(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "n") { e.preventDefault(); h.current.nav(NEW_ID); }
       else if (e.key === "p" && h.current.key) void h.current.runPreview();
       else if (e.key === "x") void h.current.run();
@@ -155,13 +159,13 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
   }, []);
   // Dirty: swallow the g-nav chord (it would drop the draft) and warn on tab close.
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || !active) return;
     const g = (e: KeyboardEvent) => { if (e.key === "g" && !inInput(e) && !e.metaKey && !e.ctrlKey && !e.altKey) { e.stopPropagation(); setPending({ id: null }); } };
     const unload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("keydown", g, true);
     window.addEventListener("beforeunload", unload);
     return () => { window.removeEventListener("keydown", g, true); window.removeEventListener("beforeunload", unload); };
-  }, [dirty]);
+  }, [dirty, active]);
   useEffect(() => { editor.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: "center" }); }, [errors]);
 
   const rows: Profile[] = isNew ? [{ id: NEW_ID, name: "(new)", enabled: false, filter: {} as Profile["filter"], steering: draft.steering, everyMin: null, lastRunAt: null, updatedAt: 0 }, ...list] : list;
@@ -173,8 +177,13 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
     <div className={pg.stack}>
       <div className="page-h">
         <h1>Research</h1>
+        {tabs}
         <div className="r"><Button variant="primary" onClick={() => nav(NEW_ID)}>+ New profile <kbd>n</kbd></Button></div>
       </div>
+      <p className={pg.hint}>
+        Profiles pick markets by filter and research them on a schedule, with the same analysts and judge as the Desk. Each profile has a filter (which markets),
+        steering (which analysts and models, a cost cap) and a schedule. Runs from profiles show in Live runs below. The screener shortlist keeps running either way.
+      </p>
       {researchDisabled && (
         <div className={`${ui.bar} ${ui.barWarn}`} role="status"><span className="warn">Research is disabled on this server. Profiles can be edited but nothing will run.</span></div>
       )}
@@ -187,7 +196,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
       ) : (
       <div className={cx.split}>
         <Panel title="Profiles" label="profiles" right={<span className="n">{list.length}</span>} className={cx.list}>
-          <Flat><ProfileTable profiles={rows} selected={key} onSelect={nav} onToggle={toggle} lockedId={dirty ? key : null} matchCounts={counts} onOpen={() => document.querySelector<HTMLInputElement>('[aria-label="profile name"]')?.focus()} /></Flat>
+          <Flat><ProfileTable keys={active} profiles={rows} selected={key} onSelect={nav} onToggle={toggle} lockedId={dirty ? key : null} matchCounts={counts} onOpen={() => document.querySelector<HTMLInputElement>('[aria-label="profile name"]')?.focus()} /></Flat>
         </Panel>
         <div className={cx.work} ref={editor} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); void save(); } }}>
           {!key ? (
@@ -225,6 +234,7 @@ export function ResearchView({ profiles, categories, models, researchDisabled }:
         </div>
       </div>
       )}
+      {live}
     </div>
   );
 }

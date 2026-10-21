@@ -26,10 +26,12 @@ export async function classifyR(rulesText: string, client: Client, model = model
     () =>
       client.messages.create({
         model,
-        max_tokens: 400,
+        max_tokens: 1000,
+        // a one-shot rating: thinking would only eat the budget. Only Haiku accepts "disabled"; Opus/Sonnet 5.5 reject it with a 400.
+        ...(model.includes("haiku") ? { thinking: { type: "disabled" as const } } : {}),
         system: [{ type: "text", text: R_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: rulesText }],
-        output_config: { format: { type: "json_schema", schema: jsonSchema(RResult) } },
+        output_config: { effort: "low", format: { type: "json_schema", schema: jsonSchema(RResult) } },
       }, req),
     backoff,
   );

@@ -9,10 +9,14 @@ import { FlaggedSetBar } from "../../../components/FlaggedSetBar";
 import { EventLog } from "../../../components/EventLog";
 import { GatePanel } from "../../../components/GatePanel";
 import { KillSwitchButton } from "../../../components/KillSwitchButton";
-import { ModeSelector } from "../../../components/ModeSelector";
+import { ModeBadge } from "../../../components/ModeBadge";
+import { MODE_HELP, ModeSelector } from "../../../components/ModeSelector";
 import { RiskLimits } from "../../../components/RiskLimits";
+import { useSettingsForm } from "../../../components/SettingsForm";
 import { killError, postKill, type Proposal, type Recon, type SetView } from "../../../components/live";
 import type { read } from "../../../lib/jobs";
+import type { AppSettings } from "../../../lib/jobs/settings";
+import css from "../../../components/autonomy.module.css";
 import pg from "../../../components/page.module.css";
 import { Panel } from "../../../components/ui";
 
@@ -21,9 +25,12 @@ type Proposals = { pending: Proposal[]; recent: Proposal[]; sets?: { pending: Se
 const JSON_H = { "content-type": "application/json" };
 
 const EX_WHY = "L2–L4 need a configured exchange (PM_PRIVATE_KEY on the server).";
+const SIZING = ["bankroll", "kelly", "capFrac", "minEdge", "limits.categoryThreshold"];
+const L3 = ["limits.l3"];
 
-export function AutonomyView({ data, proposals }: { data: Autonomy; proposals: Proposals }) {
+export function AutonomyView({ data, proposals, settings }: { data: Autonomy; proposals: Proposals; settings: AppSettings }) {
   const router = useRouter();
+  const f = useSettingsForm(settings);
   const [err, setErr] = useState<string | null>(null);
   const [killErr, setKillErr] = useState<string | null>(null);
   const [sending, setSending] = useState<Set<string>>(new Set());
@@ -70,25 +77,46 @@ export function AutonomyView({ data, proposals }: { data: Autonomy; proposals: P
   const setsShown = { ...sets, pending: sets.pending.map((s) => (sending.has(s.id) && s.state === "pending" ? { ...s, state: "sending" } : s)) };
   const flagged = sets.recent.filter((s) => s.state === "flagged");
 
+  const nPending = pending.length + sets.pending.length;
+  const cats = data.categories.map((c) => c.category);
+
   return (
     <div className={pg.stack}>
-      <div className="page-h">
-        <h1>Autonomy</h1>
-        <div className="r">
-          <ModeSelector mode={data.mode} enabledModes={enabled} reasons={{ L2: EX_WHY, L3: EX_WHY, L4: EX_WHY }} onChange={setMode} />
-        </div>
-      </div>
-      {!ex && <p className={pg.hint} style={{ marginTop: "calc(-1 * var(--sp-2))" }}>{EX_WHY}</p>}
+      <div className="page-h"><h1>Autonomy</h1></div>
+      <p className={css.lead}>What the system does on its own, and the limits it works inside. Trades you place yourself follow the Paper / Live switch in the header, not this mode.</p>
       {err && <ErrorBar message={err} onDismiss={() => setErr(null)} />}
+      {f.msg && <ErrorBar message={f.msg} onDismiss={() => f.setMsg(null)} />}
       {killErr && <ErrorBar message={killErr} onRetry={() => void kill()} onDismiss={() => setKillErr(null)} />}
       {flagged.length > 0 && <div id="flagged">{flagged.map((s) => <FlaggedSetBar key={s.id} set={s} onAck={ack} />)}</div>}
-      <ApprovalsPane mode={data.mode} pending={pending} recent={proposals.recent} sets={setsShown} l3={data.limits.l3} recon={data.recon} onDecide={decide} />
+      <Panel title="Mode" pad>
+        <div className={css.body}>
+          <div className={css.now}><ModeBadge mode={data.mode} size="lg" /><span className={css.nowText}>{MODE_HELP[data.mode]}</span></div>
+          {nPending > 0 && <p className={css.note}><a href="#approvals">{nPending} trade{nPending === 1 ? "" : "s"} waiting for your approval {"↓"}</a></p>}
+          <ModeSelector mode={data.mode} enabledModes={enabled} reasons={{ L2: EX_WHY, L3: EX_WHY, L4: EX_WHY }} onChange={setMode} />
+          {!ex && <p className={css.note}>{EX_WHY}</p>}
+          <p className={css.note}>An idea qualifies when its edge is at least 2¢ after fees, the judge&apos;s confidence is above the minimum set under Sizing, and the order book is under a minute old. The mode also drops on its own after the daily loss limit, 3 order errors, prices older than 5 min, a balance mismatch or a research outage; the event log says why.</p>
+        </div>
+      </Panel>
+      {f.group("Sizing", SIZING, <>
+        {f.num("bankroll", "bankroll B", { unit: "USD", hint: "The money sizing works from. Trade sizes and the % caps scale with it. Example 1,000." })}
+        {f.num("kelly", "Kelly fraction", { hint: "Share of the full Kelly bet to use, 0 to 1. 0.25 (quarter Kelly) is a common cautious choice." })}
+        {f.num("capFrac", "per-trade cap", { unit: "% of B", scale: 100, hint: "No trade is sized above this share of B. Typical 5." })}
+        {f.num("minEdge", "min edge", { unit: "¢", scale: 100, hint: "Edge a trade must keep after fees and price impact; the size shrinks until it does. Typical 2." })}
+        {f.num("limits.categoryThreshold", "min judge confidence", { hint: "An idea qualifies only when the judge's confidence (0 to 1) is above this. Typical 0.3." })}
+      </>, { intro: "How big each trade is, on paper and live. The watchlist's suggested sizes use the same numbers." })}
+      <RiskLimits form={f} usage={data.usage} />
+      {f.group("Small-auto caps (L3)", L3, <>
+        {f.num("limits.l3.perTradeUsd", "per-trade ceiling", { unit: "USD", hint: "Largest order L3 sends without asking. Typical 25." })}
+        {f.num("limits.l3.dailyNotional", "daily auto total", { unit: "USD", hint: "Most L3 sends on its own per day. After that, orders wait for approval. Typical 150." })}
+        {f.multi("limits.l3.categoryAllowlist", "allowed categories", cats, "Only these categories send on their own. Empty means none do: every order waits for approval.")}
+        {f.check("limits.l3.structuralAuto", "structural sets", "Let L3 send neg-risk sets (every outcome of one event) on its own. Off: sets wait for approval.")}
+      </>, { intro: "At L3 an order goes out without you only when it fits all four. Anything else falls back to approval, as in L2.", saveLabel: "Save L3 caps" })}
       <CategoryOverrides rows={data.categories} mode={data.mode} onChange={setOverride} />
-      <RiskLimits limits={data.limits} usage={data.usage} />
       <GatePanel gates={data.gates} />
+      <ApprovalsPane mode={data.mode} pending={pending} recent={proposals.recent} sets={setsShown} l3={data.limits.l3} recon={data.recon} onDecide={decide} />
       <Panel title="Kill switch" pad>
         <KillSwitchButton mode={data.mode} liveOpenOrders={data.liveOpenOrders ?? 0} onKill={kill} wide />
-        <p className={pg.hint} style={{ margin: "var(--sp-2) 0 0" }}>Drops to L0 and cancels all open orders. Immediate. No undo. Logged to autonomy_events.</p>
+        <p className={pg.hint} style={{ margin: "var(--sp-2) 0 0" }}>Drops to L0 Observe and cancels every open live order. Immediate, no undo, logged below. The same button sits in the header on every page.</p>
       </Panel>
       <EventLog events={data.events} />
     </div>

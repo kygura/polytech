@@ -19,6 +19,7 @@ a.seg.capped { color: var(--down); }
 .ingest b.warn { color: var(--warn); }
 .ingest b.neg { color: var(--neg); }
 .ingest b.muted { color: var(--muted); }
+.live { color: var(--warn); font-weight: 600; }
 .alerts { background: none; border: 0; padding: 0; font: inherit; color: inherit; height: 22px; }
 .alerts:hover:not(:disabled) { background: none; color: var(--text); }
 .alerts.alertsWarn { color: var(--warn); }

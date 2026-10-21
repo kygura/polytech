@@ -158,7 +158,7 @@ export function ApprovalsPane({ mode, pending, recent, sets = { pending: [], rec
   const toggle = (id: string) => setOpen((o) => { const x = new Set(o); x.has(id) ? x.delete(id) : x.add(id); return x; });
 
   if (belowL2 && !n)
-    return <div id="approvals"><Panel title="Pending approvals"><p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Approvals appear at L2 Approve each.</p></Panel></div>;
+    return <div id="approvals"><Panel title="Pending approvals"><p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Nothing to approve. At L2, and at L3 for orders over the caps, each real trade waits here until you approve or reject it.</p></Panel></div>;
 
   const rows: Row[] = [
     ...sets.pending.flatMap((s): Row[] => [{ k: "s", s }, ...(open.has(s.id) ? s.legs.map((l, i): Row => ({ k: "leg", s, l, i })) : [])]),

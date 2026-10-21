@@ -2,6 +2,7 @@
 import { MODES, type Mode } from "@pm/core";
 import { ModeBadge } from "./ModeBadge";
 import { Panel, Table } from "./ui";
+import css from "./autonomy.module.css";
 
 export type CategoryRow = { category: string; override: Mode | null; effective: Mode };
 const rank = (m: Mode) => MODES.indexOf(m);
@@ -10,6 +11,7 @@ const rank = (m: Mode) => MODES.indexOf(m);
 export function CategoryOverrides({ rows, mode, onChange }: { rows: CategoryRow[]; mode: Mode; onChange: (category: string, override: Mode) => void }) {
   return (
     <Panel title="Category overrides">
+      <p className={css.intro}>Hold one category at a lower mode than the global one, for example politics at L0 while the rest trades on paper. An override can only lower a category's mode, never raise it.</p>
       <Table label="category overrides">
         <thead><tr><th scope="col">Category</th><th scope="col">Override</th><th scope="col">Effective</th></tr></thead>
         <tbody>

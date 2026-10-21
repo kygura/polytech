@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Market } from "@pm/core";
 import { AgentOutput } from "@pm/core";
 import { DEFAULT_STEERING, type Steering } from "@pm/core";
-import { AnthropicOutageError, anthropicJudge, userPrompt, isOverloadText, PodFailedError, PodTimeoutError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
+import { AnthropicOutageError, anthropicJudge, apiRunner, userPrompt, isOverloadText, PodFailedError, PodTimeoutError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
 
 const mk = (q: string): Market => ({
@@ -247,8 +247,50 @@ describe("pickRunner", () => {
     expect((await pickRunner({ VERCEL_ENV: "production" })).runner).toBe(disabledRunner);
     expect((await pickRunner({ NODE_ENV: "production", PM_FIXTURES: "1" })).kind).toBe("fake");
     expect((await pickRunner({ NODE_ENV: "development" })).kind).toBe("fake");
-    expect((await pickRunner({ ANTHROPIC_API_KEY: "k" })).kind).toBe("local");
-    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", VERCEL_OIDC_TOKEN: "t" })).kind).toBe("sandbox");
-    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", VERCEL_TOKEN: "t", VERCEL_TEAM_ID: "x", VERCEL_PROJECT_ID: "p" })).kind).toBe("sandbox");
+    // the Messages API runner is the default: the Agent SDK's native binary is not in a Vercel function bundle
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k" })).kind).toBe("api");
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", VERCEL_OIDC_TOKEN: "t" })).kind).toBe("api");
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", PM_RUNNER: "agent-sdk" })).kind).toBe("local");
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", PM_RUNNER: "sandbox" })).kind).toBe("api"); // no creds: falls back
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", PM_RUNNER: "sandbox", VERCEL_OIDC_TOKEN: "t" })).kind).toBe("sandbox");
+    expect((await pickRunner({ ANTHROPIC_API_KEY: "k", PM_RUNNER: "sandbox", VERCEL_TOKEN: "t", VERCEL_TEAM_ID: "x", VERCEL_PROJECT_ID: "p" })).kind).toBe("sandbox");
+  });
+});
+
+describe("apiRunner", () => {
+  const brief = { question: "Q?", rules: "r", tags: [], end_date: "2026-12-31T00:00:00Z", siblings: [] };
+  const out = { role: "news", probability: 0.4, confidence: 0.5, key_facts: [], risks: [], notes: "n" };
+  const usage = { input_tokens: 10, output_tokens: 5, server_tool_use: { web_search_requests: 1 } };
+  const opts = { model: "claude-sonnet-5-5", timeoutMs: 5_000, exaCallCap: 3 };
+  /** Fake client: answers each request with the next scripted message and records the messages it was sent. */
+  const scripted = (...replies: object[]) => {
+    const sent: unknown[][] = [];
+    const client = { messages: { stream: (req: { messages: unknown[] }) => { sent.push([...req.messages]); const r = replies.shift(); return { finalMessage: async () => r } } } };
+    return { client: client as never, sent };
+  };
+
+  it("resumes pause_turn, records server tool calls, returns the submit_result input", async () => {
+    const { client, sent } = scripted(
+      { stop_reason: "pause_turn", usage, content: [{ type: "server_tool_use", id: "s1", name: "web_search", input: { query: "q" } }, { type: "web_search_tool_result", tool_use_id: "s1", content: { type: "web_search_tool_result_error", error_code: "unavailable" } }] },
+      { stop_reason: "tool_use", usage, content: [{ type: "tool_use", id: "t1", name: "submit_result", input: out }] },
+    );
+    const r = await apiRunner(client)("news", brief, opts);
+    expect(r.output).toEqual(out);
+    expect(r.toolCalls).toEqual([expect.objectContaining({ name: "web_search", ok: false })]);
+    expect(r.usage.costUsd).toBeGreaterThan(0.02); // two searches at $0.01 plus tokens
+    expect(sent[1]).toHaveLength(2); // the paused assistant turn went back as-is, no extra user message
+  });
+
+  it("nudges a turn that ends without submit_result, then gives up", async () => {
+    const text = { stop_reason: "end_turn", usage, content: [{ type: "text", text: "done" }] };
+    const { client, sent } = scripted(text, { stop_reason: "tool_use", usage, content: [{ type: "tool_use", id: "t", name: "submit_result", input: out }] });
+    expect((await apiRunner(client)("news", brief, opts)).output).toEqual(out);
+    expect(JSON.stringify(sent[1]!.at(-1))).toContain("submit_result");
+    await expect(apiRunner(scripted(text, text, text, text, text, text, text).client)("news", brief, opts)).rejects.toThrow("never called submit_result");
+  });
+
+  it("maps the timer abort to TIMEOUT", async () => {
+    const client = { messages: { stream: (_: unknown, o: { signal: AbortSignal }) => ({ finalMessage: () => new Promise((_r, rej) => o.signal.addEventListener("abort", () => rej(new Error("aborted")))) }) } };
+    await expect(apiRunner(client as never)("news", brief, { ...opts, timeoutMs: 20 })).rejects.toThrow("TIMEOUT");
   });
 });

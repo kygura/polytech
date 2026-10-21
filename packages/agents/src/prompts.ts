@@ -33,5 +33,7 @@ export const JUDGE_PROMPT = `You are the judge of a forecasting pod. You receive
 
 export const R_PROMPT = `You rate how researchable a prediction market is from its resolution rules alone. Return: R (0..1, can public sources settle it), objective_source (bool: a named objective source decides it), scheduled_event (bool: resolves on a dated, scheduled event), public_data_release (bool: a public data release decides it), rule_ambiguity (0..1, higher = more ambiguous), note (one short sentence).`;
 
+export const TRIAGE_PROMPT = `You triage prediction markets before an expensive research pod looks at them. Decide whether a few hours of public-source research could plausibly find a fair probability different from the crowd's. You get the question, category, days left and the resolution rules; not the price. Say "research" when an objective, checkable source settles it (official data, a filing, a schedule, a court docket, a vote count) or base rates apply, and the outcome is not pure noise. Say "skip" for coin flips (single sports plays, minute-by-minute price moves), questions settled by subjective judgment or vague media consensus, and anything that resolves on private information. Return verdict, score (0..1, how much research could move fair value) and reason (one plain sentence under 20 words).`;
+
 export const focusLine = (b: Brief) => (b.focus ? `\n\nOperator focus: ${b.focus}` : "");
 export const userPrompt = (b: Brief) => `Brief:\n${JSON.stringify({ ...b, focus: undefined }, null, 2)}${focusLine(b)}`;

@@ -129,3 +129,72 @@ export async function findPlaced(ex: Pick<ClobExchange, "openOrders" | "trades">
     return { kind: "unknown" };
   }
 }
+
+// ---- paper ticket: an estimate from the live book, the same depth walk POST /api/paper/order does on a fresh snapshot
+
+type Lv = { price: number; size: number };
+const feeOf = (rate: number, p: number, exp: number) => (p > 0 && p < 1 ? takerFeePerShare(rate, p, exp) : 0);
+
+export type BuyEstimate = { shares: number; avg: number; spent: number; fee: number; complete: boolean; payout: number; profit: number };
+/** Spend `usd` up the asks (best first), only at or under `limit` when given. null = nothing fills. Fee at the average price, as the server books it. */
+export function buyEstimate(asks: Lv[], usd: number, feeRate: number, feeExp = 1, limit?: number | null): BuyEstimate | null {
+  if (!(usd > 0)) return null;
+  let left = usd, shares = 0;
+  for (const a of [...asks].filter((l) => l.size > 0 && (limit == null || l.price <= limit + 1e-9)).sort((x, y) => x.price - y.price)) {
+    if (left <= 1e-9) break;
+    const take = Math.min(a.size, left / a.price);
+    shares += take;
+    left -= take * a.price;
+  }
+  if (!(shares > 0)) return null;
+  const spent = usd - Math.max(left, 0), avg = spent / shares, fee = feeOf(feeRate, avg, feeExp) * shares;
+  return { shares, avg, spent, fee, complete: left <= 1e-6, payout: shares, profit: shares - spent - fee };
+}
+
+export type SellEstimate = { shares: number; avg: number; proceeds: number; fee: number; complete: boolean; pnl: number | null };
+/** Sell `shares` into the bids (best first), only at or over `limit`. `avgCost` (per share, fees in) gives the realized P&L. */
+export function sellEstimate(bids: Lv[], shares: number, feeRate: number, feeExp = 1, limit?: number | null, avgCost?: number | null): SellEstimate | null {
+  if (!(shares > 0)) return null;
+  let left = shares, got = 0;
+  for (const b of [...bids].filter((l) => l.size > 0 && (limit == null || l.price >= limit - 1e-9)).sort((x, y) => y.price - x.price)) {
+    if (left <= 1e-9) break;
+    const take = Math.min(b.size, left);
+    got += take * b.price;
+    left -= take;
+  }
+  const sold = shares - Math.max(left, 0);
+  if (!(sold > 1e-9)) return null;
+  const avg = got / sold, fee = feeOf(feeRate, avg, feeExp) * sold, proceeds = got - fee;
+  return { shares: sold, avg, proceeds, fee, complete: left <= 1e-9, pnl: avgCost == null ? null : proceeds - sold * avgCost };
+}
+
+/** Open paper shares of a token and their share-weighted average cost (Detail.positions rows). */
+export function paperHeld(rows: { tokenId: string; size: number; avgCost: number; closedAt: number | null }[], tokenId: string | null): { shares: number; avgCost: number | null } {
+  const open = tokenId ? rows.filter((r) => r.tokenId === tokenId && r.closedAt == null && r.size > 0) : [];
+  const shares = open.reduce((t, r) => t + r.size, 0);
+  return { shares, avgCost: shares > 0 ? open.reduce((t, r) => t + r.size * r.avgCost, 0) / shares : null };
+}
+
+export type PaperFill = { ok: true; side: "BUY" | "SELL"; outcome: "YES" | "NO"; shares: number; avgPrice: number; fee: number; usd: number; partial: boolean; realizedPnl?: number };
+/** The result line after POST /api/paper/order. */
+export function fillText(r: PaperFill, c: (p: number) => string): string {
+  const sh = r.shares.toLocaleString("en-US", { maximumFractionDigits: 2 }), fee = r.fee > 0.005 ? ` · fee $${r.fee.toFixed(2)}` : "";
+  const pnl = r.realizedPnl == null ? "" : ` · ${r.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(r.realizedPnl).toFixed(2)} realized`;
+  const verb = r.side === "BUY" ? "Bought" : "Sold";
+  return `${r.partial ? "Partly filled: " : ""}${verb} ${sh} ${r.outcome} at ${c(r.avgPrice)}¢${fee}${pnl}${r.partial ? " — the book ran out at your price" : ""}`;
+}
+
+/** Paper fields: dollars to spend (BUY) or shares to sell, an optional limit (cents typed) inside the tick range. */
+export function validatePaper(o: { side: "BUY" | "SELL"; usd: number | null; shares: number | null; held: number; limit: number | null; limitOn: boolean; tick: number; outcome: Side }): FieldErrors {
+  const e: FieldErrors = {};
+  if (o.limitOn) {
+    const pe = priceError(o.limit, o.tick, o.side);
+    if (pe) e.price = pe;
+  }
+  if (o.side === "BUY") {
+    if (o.usd == null || !(o.usd > 0)) e.amount = "Enter an amount in dollars";
+  } else if (!(o.held > 0)) e.shares = `You hold no paper ${o.outcome} shares`;
+  else if (o.shares == null || !(o.shares > 0)) e.shares = "Enter shares to sell";
+  else if (o.shares > o.held + 1e-9) e.shares = `You hold ${Math.floor(o.held * SHARE_STEP) / SHARE_STEP} ${o.outcome} shares`;
+  return e;
+}

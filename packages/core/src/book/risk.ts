@@ -42,6 +42,6 @@ export function checkOrder(o: Order, x: Exposure, l: Limits): { ok: boolean; vio
   over("PER_CATEGORY", (x.byCategory[o.category] ?? 0) + o.sizeUsd, l.perCategory);
   over("TOTAL_OPEN", x.totalOpen + o.sizeUsd, l.totalOpen);
   over("DAILY_NOTIONAL", x.dailyNotional + o.sizeUsd, l.dailyNotional);
-  if (!(x.dailyRealizedLoss < l.dailyLoss)) v.push({ rule: "DAILY_LOSS", limit: l.dailyLoss, value: x.dailyRealizedLoss });
+  if (l.dailyLoss > 0 && !(x.dailyRealizedLoss < l.dailyLoss)) v.push({ rule: "DAILY_LOSS", limit: l.dailyLoss, value: x.dailyRealizedLoss });
   return { ok: v.length === 0, violations: v };
 }

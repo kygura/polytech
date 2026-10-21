@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findPlaced, onTick, onTickUp, roundTick, tickDecimals, placeTicketOrder, quote, sellQuote, ticketGate, validate, validateSell } from "./ticket";
+import { buyEstimate, fillText, findPlaced, onTick, onTickUp, paperHeld, roundTick, sellEstimate, tickDecimals, placeTicketOrder, quote, sellQuote, ticketGate, validate, validatePaper, validateSell } from "./ticket";
 
 const nowait = async () => {};
 describe("ticket quote + validate", () => {
@@ -157,5 +157,57 @@ describe("findPlaced fill direction", () => {
   it("validateSell min size uses the floored shares actually sent", () => {
     expect(validateSell({ price: 0.5, shares: 5.004, held: 9, tick: 0.01, outcome: "YES", minShares: 5 })).toEqual({});
     expect(validateSell({ price: 0.5, shares: 4.999, held: 9, tick: 0.01, outcome: "YES", minShares: 5 }).shares).toBe("Minimum order is 5 shares");
+  });
+});
+
+describe("paper estimates", () => {
+  const asks = [{ price: 0.42, size: 100 }, { price: 0.4, size: 50 }, { price: 0.45, size: 1000 }];
+  const bids = [{ price: 0.38, size: 20 }, { price: 0.39, size: 30 }];
+  it("buy walks the asks best first, fee at the average price", () => {
+    const e = buyEstimate(asks, 62, 0, 1)!;
+    expect(e.shares).toBeCloseTo(50 + 42 / 0.42, 9);
+    expect(e.avg).toBeCloseTo(62 / e.shares, 9);
+    expect(e.complete).toBe(true);
+    expect(e.profit).toBeCloseTo(e.shares - 62, 9);
+    const f = buyEstimate(asks, 62, 0.04, 1)!;
+    expect(f.fee).toBeCloseTo(0.04 * f.avg * (1 - f.avg) * f.shares, 9);
+    expect(f.profit).toBeCloseTo(f.shares - 62 - f.fee, 9);
+  });
+  it("buy: a limit stops the walk; nothing at the limit = null", () => {
+    const e = buyEstimate(asks, 100, 0, 1, 0.4)!;
+    expect(e).toMatchObject({ shares: 50, complete: false });
+    expect(e.spent).toBeCloseTo(20, 9);
+    expect(buyEstimate(asks, 100, 0, 1, 0.3)).toBeNull();
+    expect(buyEstimate(asks, 0, 0)).toBeNull();
+  });
+  it("sell walks the bids best first; P&L against the average cost", () => {
+    const e = sellEstimate(bids, 40, 0, 1, null, 0.35)!;
+    expect(e.shares).toBe(40);
+    expect(e.avg).toBeCloseTo((30 * 0.39 + 10 * 0.38) / 40, 9);
+    expect(e.pnl).toBeCloseTo(e.proceeds - 40 * 0.35, 9);
+    expect(sellEstimate(bids, 100, 0)!).toMatchObject({ shares: 50, complete: false, pnl: null });
+    expect(sellEstimate(bids, 10, 0, 1, 0.5)).toBeNull();
+  });
+  it("paperHeld: open rows of the token, share-weighted cost", () => {
+    const rows = [{ tokenId: "y", size: 10, avgCost: 0.4, closedAt: null }, { tokenId: "y", size: 30, avgCost: 0.5, closedAt: null }, { tokenId: "y", size: 5, avgCost: 0.1, closedAt: 1 }, { tokenId: "n", size: 9, avgCost: 0.6, closedAt: null }];
+    expect(paperHeld(rows, "y")).toEqual({ shares: 40, avgCost: (4 + 15) / 40 });
+    expect(paperHeld(rows, "x")).toEqual({ shares: 0, avgCost: null });
+    expect(paperHeld(rows, null)).toEqual({ shares: 0, avgCost: null });
+  });
+  it("validatePaper", () => {
+    const o = { side: "BUY" as const, usd: 10, shares: null, held: 0, limit: null, limitOn: false, tick: 0.01, outcome: "YES" as const };
+    expect(validatePaper(o)).toEqual({});
+    expect(validatePaper({ ...o, usd: null })).toEqual({ amount: "Enter an amount in dollars" });
+    expect(validatePaper({ ...o, limitOn: true, limit: 1.2 }).price).toMatch(/between/);
+    expect(validatePaper({ ...o, limitOn: true, limit: 0.42 })).toEqual({});
+    expect(validatePaper({ ...o, side: "SELL", shares: 5 })).toEqual({ shares: "You hold no paper YES shares" });
+    expect(validatePaper({ ...o, side: "SELL", shares: 50, held: 40.257 })).toEqual({ shares: "You hold 40.25 YES shares" });
+    expect(validatePaper({ ...o, side: "SELL", shares: 40, held: 40 })).toEqual({});
+  });
+  it("fillText", () => {
+    const c = (p: number) => (p * 100).toFixed(1);
+    expect(fillText({ ok: true, side: "BUY", outcome: "YES", shares: 118.234, avgPrice: 0.423, fee: 0.4, usd: 50, partial: false }, c)).toBe("Bought 118.23 YES at 42.3¢ · fee $0.40");
+    expect(fillText({ ok: true, side: "SELL", outcome: "NO", shares: 10, avgPrice: 0.6, fee: 0, usd: 6, partial: true, realizedPnl: -1.5 }, c))
+      .toBe("Partly filled: Sold 10 NO at 60.0¢ · −$1.50 realized — the book ran out at your price");
   });
 });

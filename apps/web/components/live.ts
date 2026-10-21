@@ -110,8 +110,8 @@ export function reconText(r: Recon | null | undefined, now: number): Shown & { g
 
 /** Button result text (8.3). */
 export function killLabel(r: KillResult | null): string {
-  if (!r || (r.cancelled === 0 && r.failed.length === 0)) return "KILLED · L0";
-  return `KILLED · L0 · ${r.cancelled} cancelled${r.failed.length ? ` · ${r.failed.length} FAILED` : ""}`;
+  if (!r || (r.cancelled === 0 && r.failed.length === 0)) return "Stopped · autopilot off";
+  return `Stopped · ${r.cancelled} cancelled${r.failed.length ? ` · ${r.failed.length} failed` : ""}`;
 }
 
 /** ErrorBar text when any cancel failed (8.3); null when all went through. */

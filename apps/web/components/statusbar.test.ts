@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageTone, fmtAge, nextRetry, parseStatus, runsLabel, spendLabel, sseDetail, utcClock } from "./statusbar";
+import { ageTone, fmtAge, nextRetry, parseStatus, runsLabel, spendLabel, sseDetail, tradingLabel, utcClock } from "./statusbar";
 
 describe("status bar helpers", () => {
   it("parseStatus accepts a run count or a list, epoch or ISO times, and rejects junk", () => {
@@ -26,6 +26,10 @@ describe("status bar helpers", () => {
     expect(spendLabel(25, 25).capped).toBe(true);
     expect(spendLabel(null, 25).text).toBe("spend —");
     expect(spendLabel(3, 0)).toEqual({ text: "spend $3.00", capped: false });
+  });
+  it("tradingLabel: paper is quiet, LIVE warns in words", () => {
+    expect(tradingLabel("paper")).toEqual({ text: "paper", warn: false });
+    expect(tradingLabel("live")).toEqual({ text: "LIVE", warn: true });
   });
   it("runsLabel / sseDetail / retry countdown / clock", () => {
     expect([runsLabel(0), runsLabel(2)]).toEqual(["runs idle", "runs 2 active"]);

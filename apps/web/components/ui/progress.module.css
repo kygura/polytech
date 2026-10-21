@@ -1,0 +1,7 @@
+/* Progress (DESIGN 13.2 addition). Tokens only. */
+.track { display: block; height: 6px; width: 100%; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.fill { display: block; height: 100%; border-radius: 3px; transition: width 400ms ease-out; }
+.live { background: var(--focus); }
+.up { background: var(--up); }
+.down { background: var(--down); }
+.muted { background: var(--muted); }

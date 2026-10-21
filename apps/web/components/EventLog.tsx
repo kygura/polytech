@@ -2,13 +2,15 @@ import type { Mode } from "@pm/core";
 import { ModeBadge } from "./ModeBadge";
 import { hms, mmdd } from "./fmt";
 import { Panel, Table } from "./ui";
+import css from "./autonomy.module.css";
 
 export type AutonomyEvent = { id: number; ts: number; fromMode: Mode; toMode: Mode; scope: string; reason: string; actor: string };
 
 /** Newest first (API order). Refused requests (EXECUTION_DISABLED) are marked in --warn with text, not color only. */
 export function EventLog({ events }: { events: AutonomyEvent[] }) {
   return (
-    <Panel title="Events" right={<span className="n">{events.length}</span>}>
+    <Panel title="Event log" right={<span className="n">{events.length}</span>}>
+      <p className={css.intro}>Every mode change, newest first: yours, the kill switch, and automatic drops after a loss limit, order errors or stale data.</p>
       <Table label="autonomy events">
         <thead><tr><th scope="col">ts</th><th scope="col">from → to</th><th scope="col">scope</th><th scope="col">reason</th><th scope="col">actor</th></tr></thead>
         <tbody>

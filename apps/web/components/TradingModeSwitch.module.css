@@ -1,0 +1,12 @@
+/* Header Paper | Live (DESIGN 13.3 right cluster). Paper is calm; Live is filled --warn and reads LIVE, so it never relies on colour alone. */
+.sw { display: inline-flex; flex: none; }
+.sw[data-mode="paper"] button[aria-checked="true"] { color: var(--focus); }
+.sw[data-mode="live"] > div { box-shadow: inset 0 0 0 1px var(--warn); }
+.sw[data-mode="live"] button[aria-checked="true"] { background: var(--warn); color: var(--on-focus); box-shadow: none; font-weight: 600; }
+
+.dlg { width: min(420px, calc(100vw - 32px)); }
+.dlg h2 { margin: 0 0 var(--sp-2); font: 600 var(--fs-lg) / var(--lh-lg) var(--font-ui); }
+.dlg p { margin: 0 0 var(--sp-2); font: 400 var(--fs-md) / var(--lh-md) var(--font-ui); }
+.acts { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-3); }
+.acts .goLive { background: var(--warn); border-color: var(--warn); color: var(--on-focus); }
+.acts .goLive:hover:not(:disabled) { background: var(--warn); filter: brightness(1.1); }

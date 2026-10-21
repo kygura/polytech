@@ -30,8 +30,8 @@ describe("phase 6 display rules", () => {
   });
 
   it("kill result text", () => {
-    expect(killLabel({ cancelled: 0, failed: [] })).toBe("KILLED · L0");
-    expect(killLabel({ cancelled: 2, failed: [{ orderId: "0x3fa1bc", error: "e" }] })).toBe("KILLED · L0 · 2 cancelled · 1 FAILED");
+    expect(killLabel({ cancelled: 0, failed: [] })).toBe("Stopped · autopilot off");
+    expect(killLabel({ cancelled: 2, failed: [{ orderId: "0x3fa1bc", error: "e" }] })).toBe("Stopped · 2 cancelled · 1 failed");
     expect(killError({ cancelled: 3, failed: [] })).toBeNull();
     expect(killError({ cancelled: 2, failed: [{ orderId: "0x3fa1bc", error: "timeout" }] })).toBe("Kill: 1 live order not cancelled (ord 0x3fa1…: timeout). Cancel it on Polymarket or retry.");
   });

@@ -15,13 +15,15 @@ import { ConnectButton } from "./ConnectButton";
 import { ErrorBar } from "./ErrorBar";
 import { killError, postKill, type Recon } from "./live";
 import { useTheme } from "../hooks/useTheme";
+import { useTradingMode } from "../hooks/useTradingMode";
 import { KillSwitchButton } from "./KillSwitchButton";
 import { MarketSearch } from "./MarketSearch";
 import { probeUrl } from "./probe";
-import { ModeBadge } from "./ModeBadge";
+import { AutopilotChip } from "./AutopilotChip";
 import { StatusSlotContext } from "./ShellContext";
 import { STALE_MS, StaleBanner } from "./StaleBanner";
 import { StatusBar } from "./StatusBar";
+import { TradingModeSwitch } from "./TradingModeSwitch";
 import css from "./Shell.module.css";
 
 // DESIGN 13.3: label, href, `g` chord. Three groups; the third collapses into "More" under 1280px.
@@ -46,6 +48,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   useEffect(() => setMode(initialMode), [initialMode]);
   const sheet = useRef<HTMLDialogElement>(null);
   const { toggle } = useTheme();
+  const trading = useTradingMode(); // the wallet button only matters for live trades
   const wallet = useWalletConnection(); // the one wallet provider: header button and the /trade ticket read it through useWallet()
   const clob = useClob(wallet.exchange);
   const walletValue = useMemo(() => ({ ...wallet, clob }), [wallet, clob]);
@@ -159,9 +162,10 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
             <button type="button" className={css.themeBtn} onClick={toggle} aria-label="toggle theme (t)" title="toggle theme (t)">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><circle cx="8" cy="8" r="6" /><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" /></svg>
             </button>
-            <ModeBadge mode={mode} size="lg" />
+            <TradingModeSwitch />
+            <AutopilotChip mode={mode} />
             <ApprovalsBadge pendingCount={status.pendingCount ?? 0} recon={status.recon} flaggedSets={status.flaggedSets ?? 0} />
-            <ConnectButton />
+            {trading.mode === "live" && <ConnectButton />}
             <KillSwitchButton mode={mode} liveOpenOrders={status.liveOpenOrders ?? 0} onKill={kill} />
           </div>
         </header>

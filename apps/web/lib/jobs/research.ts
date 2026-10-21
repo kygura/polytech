@@ -55,6 +55,15 @@ const failedRecently = async (db: Deps["db"], now: number) =>
 // ponytail: a timed-out agent/judge reports no usage, so charge a flat guess per model (150k in/10k out agent, 20k in/2k out judge) so the daily cap cannot undercount; read real usage if the runner ever reports partials.
 const timeoutUsd = (model: string, judge = false) => (judge ? costUsd(model, 20_000, 2_000) : costUsd(model, 150_000, 10_000));
 
+/** A failed pod's message: the first agent errors when too few agents finished (the pod's own message only says "pod failed"). */
+function podError(e: unknown): string {
+  if (e instanceof PodFailedError && !(e.cause instanceof PodTimeoutError)) {
+    const errs = [...new Set(e.agents.flatMap((a) => (!a.ok && !a.skipped ? [a.error] : [])))];
+    if (errs.length) return `${e.agents.filter((a) => !a.ok).length}/${e.agents.length} agents failed: ${errs.slice(0, 2).join(" | ")}`;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** Budget check -> pod -> judge -> sizing against the latest stored book -> `theses` row. */
 export async function researchMarket(d: Deps, conditionId: string, trigger: Trigger = "manual", opts: ResearchOpts = {}): Promise<ResearchResult> {
   return withLock(d, `research:${conditionId}`, 30 * 60_000, async (): Promise<ResearchResult> => {
@@ -83,9 +92,10 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       const [{ n: running }] = await db.select({ n: count() }).from(s.pods).where(eq(s.pods.status, "running")) as [{ n: number }];
       const sp = (await db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0];
       const ok = canStartPod(
-        { podsToday, activeSandboxes: running * conc, spendTodayUsd: sp?.anthropicUsd ?? 0 },
+        // sandboxes: each agent holds a microVM, so the cap counts agents. API runner: nothing to hold, the cap counts pods.
+        { podsToday, activeSandboxes: d.runnerKind === "sandbox" ? running * conc : running, spendTodayUsd: sp?.anthropicUsd ?? 0 },
         { maxPodsPerDay: st.budget.maxPodsPerDay, maxConcurrentSandboxes: st.budget.maxConcurrentSandboxes, dailySpendCapUsd: st.budget.dailySpendCapUsd },
-        conc,
+        d.runnerKind === "sandbox" ? conc : 1,
       );
       if (!ok.ok) return { skipped: true, reason: ok.reason! };
       await db.insert(s.pods).values({ id: podId, conditionId, startedAt: new Date(now), status: "running", trigger, profileId: opts.profileId ?? null, steering: steering ?? null, stage: "rules" });
@@ -148,11 +158,12 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
             ok.reduce((t, a) => t + a.run.sandboxS, 0) + lost.length * (POD_AGENTS_MS / 1000));
         }
         await db.update(s.agentRuns).set({ status: "failed", finishedAt: new Date(d.now()) }).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.status, "running"))); // the judge row
-        await db.update(s.pods).set({ status: "failed" }).where(eq(s.pods.id, podId));
         const lowered = outage ? await outageDowngrade(d) : null;
         const timedOut = e instanceof PodFailedError && (e.cause instanceof PodTimeoutError || e.agents.some((a) => !a.ok && a.error.startsWith("TIMEOUT")));
         const reason = outage ? "ANTHROPIC_OUTAGE" : timedOut ? "TIMEOUT" : "POD_FAILED";
-        publish("pod.failed", { podId, conditionId, reason, error: scrub(String(e instanceof Error ? e.message : e)), downgradedTo: lowered });
+        const error = scrub(podError(e));
+        await db.update(s.pods).set({ status: "failed", error: `${reason}: ${error}`.slice(0, 500) }).where(eq(s.pods.id, podId));
+        publish("pod.failed", { podId, conditionId, reason, error, downgradedTo: lowered });
         return { podId, status: "failed", reason };
       } finally {
         clearInterval(poll);
@@ -207,7 +218,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       publish("pod.done", { podId, conditionId, thesisId });
       return { podId, status: "done", thesisId };
     } catch (e) {
-      await db.update(s.pods).set({ status: "failed" }).where(and(eq(s.pods.id, podId), eq(s.pods.status, "running"))); // never leave a pod `running`
+      // never leave a pod `running`
+      await db.update(s.pods).set({ status: "failed", error: `ERROR: ${scrub(podError(e))}`.slice(0, 500) }).where(and(eq(s.pods.id, podId), eq(s.pods.status, "running")));
       throw e;
     }
   });
@@ -242,7 +254,8 @@ type Todo = { id: string; trigger: Trigger; opts?: ResearchOpts };
 /** Pods in waves of maxConcurrentSandboxes/5; stops at the first budget refusal or outage, or when no pod can finish before `deadline`
  *  (epoch ms; shared by everything one host invocation runs, default = one function window from now). */
 async function runWaves(d: Deps, picked: Todo[], deadline = d.now() + POD_WINDOW_MS) {
-  const wave = Math.max(1, Math.floor(d.settings.budget.maxConcurrentSandboxes / 5));
+  const cap = d.settings.budget.maxConcurrentSandboxes;
+  const wave = Math.max(1, d.runnerKind === "sandbox" ? Math.floor(cap / 5) : cap); // same unit as the gate in researchMarket
   const res = { candidates: picked.length, done: 0, failed: 0, stopped: null as string | null, theses: [] as string[] };
   for (let i = 0; i < picked.length && !res.stopped; i += wave) {
     // a pod started now would be killed with the host function; the rest waits for the next run

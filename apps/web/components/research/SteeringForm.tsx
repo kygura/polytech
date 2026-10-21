@@ -2,6 +2,7 @@ import { BUILTIN_ROLES, type Steering } from "@pm/core";
 import type { ReactNode } from "react";
 import { Field } from "../Field";
 import ui from "../ui.module.css";
+import { Hint } from "./Hint";
 import { NumInput } from "./NumInput";
 import cx from "../../app/(app)/research/research.module.css";
 
@@ -45,6 +46,7 @@ export function SteeringForm({ value: v, onChange, errors, models, compact, cust
           <span className={`${cx.counter} ${qLen > MAX_Q ? cx.counterOver : qLen > MAX_Q * 0.9 ? cx.counterWarn : ""}`}>{qLen}/{MAX_Q}</span>
         </span>
       </Field>
+      <Hint>Optional. Every analyst and the judge read it, e.g. &ldquo;focus on the court schedule&rdquo;.</Hint>
       <Field label="roles" error={errors.roles} htmlFor={`${idp}-r-${BUILTIN_ROLES[0]}`}>
         <span className={cx.roles} role="group" aria-label="roles">
           {BUILTIN_ROLES.map((r) => (
@@ -64,7 +66,8 @@ export function SteeringForm({ value: v, onChange, errors, models, compact, cust
           <span className={`${cx.tag} muted`} title="the judge always runs">judge always runs</span>
         </span>
       </Field>
-      {!compact && (
+      <Hint>rules reads the resolution rules, source finds primary sources, base_rate checks how often this kind of event happens, news reads recent coverage, red_team argues the other side.</Hint>
+      {!compact && (<>
         <Field label="custom roles" error={errors.customRoles} htmlFor={`${idp}-c-0`}>
           <span className={cx.custom}>
             {v.customRoles.map((r, i) => (
@@ -81,10 +84,11 @@ export function SteeringForm({ value: v, onChange, errors, models, compact, cust
             </span>
           </span>
         </Field>
-      )}
+        <Hint>Extra analysts you write yourself: a short key and the instructions it follows. Each one adds cost.</Hint>
+      </>)}
       {compact
-        ? <More summary={`models (${nSet} set)`}>{modelRows}</More>
-        : modelRows}
+        ? <More summary={`models (${nSet} set)`}>{modelRows}<Hint>default = the model the server picks for that role.</Hint></More>
+        : <>{modelRows}<Hint>Model per analyst and for the judge. default = the model the server picks for that role.</Hint></>}
       <Field label="max cost" unit="USD" error={errors.maxCostUsd} htmlFor={`${idp}-cost`}>
         <NumInput id={`${idp}-cost`} value={v.maxCostUsd} disabled={disabled} step="0.01" min={0} onChange={(n) => set({ maxCostUsd: n })} />
         <span className="muted ui">queued roles are skipped once reached; judge still runs</span>
@@ -92,7 +96,9 @@ export function SteeringForm({ value: v, onChange, errors, models, compact, cust
       {!compact && (
         <More summary="Advanced">
           <Field label="Exa call cap" error={errors.exaCallCap} htmlFor={`${idp}-exa`}><NumInput id={`${idp}-exa`} value={v.exaCallCap} step="1" min={0} onChange={(n) => set({ exaCallCap: n })} /></Field>
+          <Hint>Most web searches per analyst. Blank = server default.</Hint>
           <Field label="max turns" error={errors.maxTurns} htmlFor={`${idp}-turns`}><NumInput id={`${idp}-turns`} value={v.maxTurns} step="1" min={1} onChange={(n) => set({ maxTurns: n })} /></Field>
+          <Hint>Most steps an analyst may take before it must answer. Blank = server default.</Hint>
         </More>
       )}
     </>

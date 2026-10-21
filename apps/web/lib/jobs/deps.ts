@@ -1,4 +1,4 @@
-import { anthropicJudge, classifyR, disabledJudge, fakeJudge, isProd, pickRunner, type AgentRunner, type Judge } from "@pm/agents";
+import { anthropicJudge, anthropicTriage, modelFor, classifyR, disabledJudge, fakeJudge, heuristicTriage, isProd, pickRunner, type AgentRunner, type RunnerKind, type Judge, type Triage } from "@pm/agents";
 import { feeExponentOf, feeRateFor, type Market, type Snapshot } from "@pm/core";
 import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
@@ -12,7 +12,11 @@ export type Deps = {
   now: () => number; // epoch ms
   settings: AppSettings;
   runner: AgentRunner;
+  /** "sandbox" = one microVM per agent (counts against maxConcurrentSandboxes); others run agents as plain API calls. */
+  runnerKind?: RunnerKind;
   judge: Judge;
+  /** Pre-research verdict (Haiku); heuristic from the rules text without a key. */
+  triage: Triage;
   /** LLM researchability R in 0..1; absent => deterministic heuristic from rules text. */
   rScore?: (rules: string, deadline?: number) => Promise<number>;
   /** Live CLOB exchange; null = not configured (L2 refused). */
@@ -49,14 +53,19 @@ export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
   const db = over.db ?? (await dbReady());
   const key = process.env.ANTHROPIC_API_KEY;
   const client = key && !over.judge ? new (await import("@anthropic-ai/sdk")).default() : undefined;
+  const settings = over.settings ?? (await getSettings(db));
+  const picked = over.runner ? null : await pickRunner();
   return {
     db,
     kv: over.kv ?? getKv(),
     pm: over.pm ?? createPm(),
     now: over.now ?? defaultNow,
-    settings: over.settings ?? (await getSettings(db)),
-    runner: over.runner ?? (await pickRunner()).runner,
+    settings,
+    runner: over.runner ?? picked!.runner,
+    runnerKind: over.runnerKind ?? picked?.kind,
     judge: over.judge ?? (client ? anthropicJudge(client) : process.env.PM_FIXTURES !== "1" && isProd(process.env) ? disabledJudge : fakeJudge),
+    // screen.ts imports this module: load it lazily (no import cycle at module init)
+    triage: over.triage ?? (client ? anthropicTriage(client, modelFor("triage", settings.models)) : heuristicTriage((await import("./screen")).heuristicR)),
     rScore: over.rScore ?? (client ? async (rules, deadline) => (await classifyR(rules, client, undefined, { deadline }, { timeout: 15_000, maxRetries: 0 })).R : undefined),
     exchange: over.exchange !== undefined ? over.exchange : envExchange(),
   };

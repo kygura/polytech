@@ -1,6 +1,7 @@
 import { gateParts, type Gate } from "./live";
 import { MeterBar } from "./MeterBar";
 import { Panel, Table } from "./ui";
+import css from "./autonomy.module.css";
 
 export type { Gate };
 const CRITERIA: Record<Gate["gate"], string> = {
@@ -14,6 +15,7 @@ const progress = (detail: string) => { const m = /(\d+)\/(\d+)/.exec(detail); re
 export function GatePanel({ gates }: { gates: Gate[] }) {
   return (
     <Panel title="Gates" right="advisory; skipping is logged">
+      <p className={css.intro}>A gate is the track record to build before moving up a mode. L2 unlocks after 50 resolved forecasts beat the market's own accuracy (Brier score); L3 and L4 need live trades that matched the model. You can switch without meeting a gate; the skip is logged.</p>
       <Table label="gates">
         <thead><tr><th scope="col">Gate</th><th scope="col">Criteria</th><th scope="col" style={{ width: "20%" }}>Progress</th><th scope="col">Status</th></tr></thead>
         <tbody>
