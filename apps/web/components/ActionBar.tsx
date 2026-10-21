@@ -4,21 +4,28 @@ import { chordKey, inInput } from "../hooks/useGlobalKeys";
 import { Button } from "./ui";
 import { ResearchRunning } from "./ResearchRunning";
 import { SteerDrawer, type SteerProfile } from "./SteerDrawer";
+import { refusalText } from "./terminal/research";
 import { ALLOWED_MODELS } from "@pm/core";
 import css from "./detail.module.css";
 
-type Props = { conditionId: string; pinned: boolean; muted: boolean; running: { startedAt: number } | null; question: string; researchDisabled: boolean; onChanged: () => void };
+type Props = {
+  conditionId: string; pinned: boolean; muted: boolean; running: { startedAt: number } | null; question: string; researchDisabled: boolean; onChanged: () => void;
+  /** The page owns starting research (button, progress and errors live elsewhere): `r` calls this and the Research button is not shown. */
+  onResearch?: () => void;
+};
 
-/** POST /api/markets/:id/research: null on success, else the reason (also the Research tab's empty-state button). */
+/** POST /api/markets/:id/research: null on success, else why not, in plain words (409 skip reasons mapped, see `refusalText`). */
 export async function startResearch(conditionId: string): Promise<string | null> {
   try {
     const r = await fetch(`/api/markets/${conditionId}/research`, { method: "POST" });
-    return r.ok ? null : (await r.json().catch(() => null))?.error ?? `research failed: ${r.status}`;
-  } catch { return "research failed: network error"; }
+    if (r.ok) return null;
+    const j = (await r.json().catch(() => null)) as { error?: string; reason?: string } | null;
+    return j?.reason ? refusalText(j.reason, j.error) : j?.error ? `Research did not start: ${j.error.replace(/^research failed:\s*/i, "")}` : `Research did not start (server answered ${r.status})`;
+  } catch { return "Research did not start: could not reach the server"; }
 }
 
 /** Research (r, one click), Steer… (⇧S, drawer), Pin (p), Mute (m). Mutations go through /api; `onChanged` refetches the page's market data. */
-export function ActionBar({ conditionId, pinned: pinnedProp, muted: mutedProp, running, question, researchDisabled, onChanged }: Props) {
+export function ActionBar({ conditionId, pinned: pinnedProp, muted: mutedProp, running, question, researchDisabled, onChanged, onResearch }: Props) {
   // The detail refetch can take a second or two: show the new flag at once, drop the guess when the server's value arrives.
   const [guess, setGuess] = useState<{ pinned?: boolean; muted?: boolean }>({});
   useEffect(() => setGuess({}), [pinnedProp, mutedProp, conditionId]);
@@ -49,6 +56,7 @@ export function ActionBar({ conditionId, pinned: pinnedProp, muted: mutedProp, r
     onChanged();
   };
   const research = async () => {
+    if (onResearch) { onResearch(); return; }
     if (busy || running || researchDisabled) return;
     setBusy(true);
     setErr(await startResearch(conditionId));
@@ -72,14 +80,14 @@ export function ActionBar({ conditionId, pinned: pinnedProp, muted: mutedProp, r
   const lock = busy || !!running || researchDisabled;
   return (
     <div className={css.actions} role="toolbar" aria-label="market actions">
-      <Button variant="ghost" size="sm" onClick={research} disabled={lock} title={off ?? "Re-research this market (r)"}>Research<kbd>r</kbd></Button>
-      <Button variant="ghost" size="sm" onClick={() => setSteer(true)} disabled={lock} title={off ?? "Steer and research this market (Shift S)"}>Steer{"…"}<kbd>{"⇧S"}</kbd></Button>
-      <Button variant="ghost" size="sm" onClick={() => void flag({ pinned: !pinned })} aria-pressed={pinned} title={`${pinned ? "Unpin" : "Pin"} (p)`}>
+      {!onResearch && <Button variant="ghost" size="sm" onClick={research} disabled={lock} title={off ?? "Re-research this market (r)"}>Research<kbd>r</kbd></Button>}
+      <Button variant="ghost" size="sm" onClick={() => setSteer(true)} disabled={lock} title={off ?? "Research with your own instructions: focus, sources, models (Shift S)"}>Steer{"…"}<kbd>{"⇧S"}</kbd></Button>
+      <Button variant="ghost" size="sm" onClick={() => void flag({ pinned: !pinned })} aria-pressed={pinned} title={`${pinned ? "Unpin" : "Pin"}: pinned markets come first in the market list (p)`}>
         {pinned && <span className={css.pinDot} aria-hidden />}{pinned ? "Unpin" : "Pin"}<kbd>p</kbd>
       </Button>
-      <Button variant="ghost" size="sm" onClick={() => void flag({ muted: !muted })} aria-pressed={muted} title={`${muted ? "Unmute" : "Mute"} (m)`}>{muted ? "Unmute" : "Mute"}<kbd>m</kbd></Button>
+      <Button variant="ghost" size="sm" onClick={() => void flag({ muted: !muted })} aria-pressed={muted} title={`${muted ? "Unmute" : "Mute"}: muted markets are hidden from the watchlist and raise no alerts (m)`}>{muted ? "Unmute" : "Mute"}<kbd>m</kbd></Button>
       {err && <span className="down" role="alert">{err}</span>}
-      {(running || busy) && <ResearchRunning elapsedS={running ? Math.max(0, (now - running.startedAt) / 1000) : undefined} />}
+      {!onResearch && (running || busy) && <ResearchRunning elapsedS={running ? Math.max(0, (now - running.startedAt) / 1000) : undefined} />}
       <SteerDrawer conditionId={conditionId} question={question} profiles={profiles} models={ALLOWED_MODELS} open={steer} onClose={() => { setSteer(false); onChanged(); }} />
     </div>
   );

@@ -8,13 +8,14 @@ import { useCategories, useMarketList } from "../../hooks/useMarketList";
 import type { OrderPhase } from "../../hooks/useOrderFlow";
 import { chordPending, inInput } from "../../hooks/useGlobalKeys";
 import { usePoll } from "../../hooks/usePoll";
+import { useTradingMode } from "../../hooks/useTradingMode";
 import { useWallet } from "../../hooks/useWallet";
 import { DEFAULT_RANGE, parseRange, type Range } from "../../lib/history";
 import type { PublicMarketDetail } from "../../lib/public";
 import { ActionBar, startResearch } from "../ActionBar";
 import type { Detail } from "../detail";
 import { ProbChart, type ChartOrder } from "../market/ProbChart";
-import { Panel } from "../ui";
+import { Panel, Switch } from "../ui";
 import { useStatusSlot } from "../ShellContext";
 import { type TokenInfo } from "./AccountPane";
 import { BookLadder } from "./BookLadder";
@@ -25,14 +26,17 @@ import { KeyLegend } from "./KeyLegend";
 import { isMarketId } from "./marketList";
 import { KeyStats, MarketHeader, type HeaderFlags, type HeaderMeta } from "./MarketHeader";
 import { MarketList } from "./MarketList";
+import { OurView } from "./OurView";
+import { viewState, type LiveResp } from "./research";
 import { canSwitch, sellable } from "./rules";
 import { TerminalTicket, type TicketHandle } from "./TerminalTicket";
-import { DEFAULT_TICK, DISCLAIMER } from "./ticket";
+import { DEFAULT_TICK, DISCLAIMER, paperHeld } from "./ticket";
 import { TradeTape } from "./TradeTape";
 import css from "./terminal.module.css";
 
 const LOCK_NOTE = "Finish or check the current order first";
 const LAST_KEY = "pm.trade.last";
+const PRO_KEY = "pm.trade.pro"; // "1" = Pro view (order book, trades, stats, key legend); default simple
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage is optional */ } },
@@ -44,6 +48,7 @@ export function TerminalPage() {
   if (params.id != null && !isMarketId(params.id)) notFound(); // /trade/autonomy and friends: a 404, not a feed request
   const w = useWallet(), clob = w.clob;
   const slot = useStatusSlot();
+  const { paper: paperMode } = useTradingMode();
 
   const [picked, setPicked] = useState<string | null>(params.id ?? null); // condition ids are hex: no decoding needed
   const [query, setQuery] = useState("");
@@ -59,6 +64,10 @@ export function TerminalPage() {
   const [pick, setPick] = useState<{ price: number; n: number } | null>(null);
   const [order, setOrder] = useState<{ phase: OrderPhase["s"]; locked: boolean }>({ phase: "idle", locked: false });
   const [lockNote, setLockNote] = useState(false);
+  const [pro, setPro] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [startErr, setStartErr] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const switchable = canSwitch(order.phase);
   const blocked = () => setLockNote(true); // every blocked switch or navigation shows the same note
   const searchRef = useRef<HTMLInputElement>(null), ladderRef = useRef<HTMLTableElement>(null), ticket = useRef<TicketHandle>(null);
@@ -67,10 +76,12 @@ export function TerminalPage() {
   useEffect(() => {
     const t = store.get(TAB_KEY);
     if (isTab(t)) setTab(t);
+    if (store.get(PRO_KEY) === "1") setPro(true);
     const r = parseRange(new URLSearchParams(location.search).get("range") ?? undefined);
     if (r) setRange(r);
   }, []);
   const chooseTab = useCallback((t: BottomTab) => { setTab(t); store.set(TAB_KEY, t); }, []);
+  const chooseView = useCallback((p: boolean) => { setPro(p); store.set(PRO_KEY, p ? "1" : "0"); }, []);
   const chooseRange = useCallback((r: Range) => {
     setRange(r);
     const u = new URL(location.href);
@@ -89,9 +100,23 @@ export function TerminalPage() {
   const [fast, setFast] = useState(false);
   const full = usePoll<Detail>(id ? `/api/markets/${encodeURIComponent(id)}` : null, fast ? 10_000 : 60_000);
   const research = full.data?.market.conditionId === id ? full.data : null;
-  const running = research?.pod?.status === "running" ? research.pod : null;
-  useEffect(() => setFast(!!running), [running]);
+  // Research progress for Our view: the market's latest runs, every 3 s while one is running.
+  const [liveFast, setLiveFast] = useState(false);
+  const lv = usePoll<LiveResp>(id ? `/api/research/live?ids=${id}` : null, liveFast ? 3_000 : 60_000);
+  const run = lv.data?.runs.find((r) => r.conditionId === id) ?? null; // newest first
+  const view = research ? viewState({ thesis: research.thesis, pod: research.pod, agents: research.agents, run }) : null;
+  const running = view?.k === "running" ? { startedAt: view.startedAt } : null;
+  useEffect(() => { setFast(!!running); setLiveFast(!!running); }, [!!running]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (liveFast) lv.refresh(); }, [liveFast]); // eslint-disable-line react-hooks/exhaustive-deps -- re-arm the poll at 3 s
   const changed = useCallback(() => { det.refresh(); full.refresh(); }, [det.refresh, full.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A run that finishes while watched: refetch the detail for the new thesis / agents.
+  const was = useRef<string | null>(null);
+  useEffect(() => {
+    const k = run ? `${run.podId}|${run.status}` : null;
+    if (was.current && k && was.current !== k && was.current.endsWith("|running")) changed();
+    was.current = k;
+  }, [run?.podId, run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setStartErr(null), [id]);
 
   // Keep the previous market on screen, dimmed, until the new feed's first payload (no flash of empty panes).
   const shown = useRef<{ detail: PublicMarketDetail | null; feed: MarketFeed } | null>(null);
@@ -113,6 +138,8 @@ export function TerminalPage() {
   }
   const tokenId = detail ? (outcome === "YES" ? detail.market.yesTokenId : detail.market.noTokenId) : null;
   const held = sellable(tokenId ? clob.positions[tokenId] ?? 0 : 0, clob.orders, tokenId);
+  const paperPos = paperHeld(research?.positions ?? [], tokenId);
+  const heldNow = paperMode ? paperPos.shares : held;
   const ownOrders = tokenId ? clob.orders.filter((o) => o.tokenId === tokenId) : [];
   const chartOrders = detail ? clob.orders.flatMap((o): ChartOrder[] => {
     const out: Outcome | null = o.tokenId === detail.market.yesTokenId ? "YES" : o.tokenId === detail.market.noTokenId ? "NO" : null;
@@ -175,9 +202,38 @@ export function TerminalPage() {
     document.getElementById(`mrow-${n}`)?.scrollIntoView({ block: "nearest" });
   }, [rows, cursorId, id, switchable]);
 
-  const focusLimit = () => requestAnimationFrame(() => ticket.current?.focusLimit());
-  const pickSide = (s: TradeSide) => { if (order.locked || (s === "SELL" && !(held > 0))) return; setSide(s); };
+  const focusTicket = () => requestAnimationFrame(() => ticket.current?.focus());
+  const pickSide = (s: TradeSide) => { if (order.locked || (s === "SELL" && !(heldNow > 0))) return; setSide(s); };
   const pickOutcome = (o: Outcome) => { if (!order.locked) setOutcome(o); };
+  // Our view "Buy YES": outcome + Buy + the suggested stake in the ticket; the visitor still places it.
+  const buy = (o: Outcome, usd: number | null) => {
+    if (order.locked) return;
+    setOutcome(o);
+    setSide("BUY");
+    if (usd != null) ticket.current?.prefill({ side: "BUY", usd });
+    else focusTicket();
+  };
+  const focusLadder = () => (ladderRef.current?.querySelector('[tabindex="0"]') as HTMLElement | null)?.focus();
+
+  const researchDisabled = detail?.research === "disabled" || viewDetail?.research === "disabled";
+  const doResearch = async () => {
+    if (!id || starting || running || researchDisabled) return;
+    setStarting(true);
+    setStartErr(null);
+    const err = await startResearch(id);
+    setStartErr(err);
+    setStarting(false);
+    changed();
+    lv.refresh();
+  };
+  const cancelRun = async (podId: string) => {
+    setCancelling(true);
+    const r = await fetch(`/api/pods/${encodeURIComponent(podId)}/cancel`, { method: "POST" }).catch(() => null);
+    if (!r || (!r.ok && r.status !== 409)) setStartErr("Could not cancel the run. Try again.");
+    setCancelling(false);
+    lv.refresh();
+    changed();
+  };
 
   // Page keys (DESIGN 13.7), mounted only on /trade. The Shell keeps t, ?, /, Esc blur and the g chords; the key that completes a chord is not a page key.
   // p / m / r / ⇧S are the ActionBar's, [ ] f the chart's. One listener; it calls the latest handler.
@@ -190,10 +246,12 @@ export function TerminalPage() {
     const tabs: BottomTab[] = ["research", "positions", "orders", "rules"];
     const act: Record<string, () => void> = {
       j: () => moveCursor(1), k: () => moveCursor(-1),
-      b: () => { pickSide("BUY"); focusLimit(); }, s: () => { pickSide("SELL"); focusLimit(); },
-      y: () => { pickOutcome("YES"); focusLimit(); }, n: () => { pickOutcome("NO"); focusLimit(); },
-      l: () => (ladderRef.current?.querySelector('[tabindex="0"]') as HTMLElement | null)?.focus(),
-      T: () => focusLimit(), e: () => setExpanded((x) => !x),
+      b: () => { pickSide("BUY"); focusTicket(); }, s: () => { pickSide("SELL"); focusTicket(); },
+      y: () => { pickOutcome("YES"); focusTicket(); }, n: () => { pickOutcome("NO"); focusTicket(); },
+      // l in the simple view opens Pro view first (the ladder only exists there)
+      l: () => { if (pro) focusLadder(); else { chooseView(true); requestAnimationFrame(() => requestAnimationFrame(focusLadder)); } },
+      v: () => chooseView(!pro),
+      T: () => focusTicket(), e: () => setExpanded((x) => !x),
       "1": () => chooseTab(tabs[0]!), "2": () => chooseTab(tabs[1]!), "3": () => chooseTab(tabs[2]!), "4": () => chooseTab(tabs[3]!),
       enter: () => { if (document.activeElement === document.body && cursorId) select(cursorId); },
     };
@@ -225,13 +283,15 @@ export function TerminalPage() {
   const tick = viewFeed?.tickSize ?? research?.market.tickSize ?? null;
   const thesis = research?.thesis ?? null;
   const pHat = thesis ? thesis.pYes ?? (thesis.side === "YES" ? thesis.pHat : 1 - thesis.pHat) : null;
-  const researchDisabled = detail?.research === "disabled" || viewDetail?.research === "disabled";
   const snap = viewDetail?.snapshot;
+  const t0 = tick ?? DEFAULT_TICK;
+  const askOf = (o: Outcome) => (viewFeed ? forOutcome(viewFeed, o).asks[0]?.price ?? null : null);
 
   const feedAt = feed.data?.at ?? shown.current?.feed.at ?? null;
+  const feedBadge = <span className={css.feedSeg}><FeedBadge status={feed.status} source={feed.source} at={feedAt} now={now} /></span>;
   return (
-    <div className={`${css.grid} ${expanded ? css.x : ""}`} data-workspace>
-      {slot && createPortal(<><KeyLegend /><span className={css.feedSeg}><FeedBadge status={feed.status} source={feed.source} at={feedAt} now={now} /></span></>, slot)}
+    <div className={`${css.grid} ${pro ? css.pro : css.simple} ${expanded ? css.x : ""}`} data-workspace>
+      {slot && createPortal(pro ? <><KeyLegend />{feedBadge}</> : feedBadge, slot)}
       <div className={`${css.backdrop} ${drawer ? css.open : ""}`} onClick={() => setDrawer(false)} aria-hidden />
       <MarketList rows={rows} total={list.total} loading={list.loading} error={list.error} onRetry={list.retry} now={now} cats={cats} cat={cat} onCat={setCat}
         selectedId={id} cursorId={cursorId} onSelect={select} open={drawer} live={id ? { id, price: yes } : null} note={lockNote ? LOCK_NOTE : null}
@@ -240,29 +300,36 @@ export function TerminalPage() {
       <Panel label="market" className={`${css.centerp} ${dim ? css.dimmed : ""}`}>
         <div className={css.centerIn}>
           <button type="button" className={css.listBtn} onClick={() => { setDrawer(true); requestAnimationFrame(() => searchRef.current?.focus()); }} aria-label="Show market list">{"☰"} Markets</button>
-          <MarketHeader meta={meta} tick={tick} yes={yes} outcome={outcome} onOutcome={pickOutcome} notFound={notFoundMarket} flags={flags} now={now}
-            actions={id && research ? <ActionBar conditionId={id} pinned={research.market.pinned} muted={research.market.muted} running={running} question={research.market.question} researchDisabled={researchDisabled} onChanged={changed} /> : null} />
-          <KeyStats book={book} vol24h={snap?.vol24h ?? row?.vol24h ?? null} oi={snap?.oi ?? null} depth5c={snap?.depth5cUsd ?? null} />
+          <MarketHeader meta={meta} tick={tick} yes={yes} outcome={outcome} onOutcome={pickOutcome} notFound={notFoundMarket} flags={flags} now={now} pro={pro}
+            actions={<div className={css.heroBar}>
+              {id && research ? <ActionBar conditionId={id} pinned={research.market.pinned} muted={research.market.muted} running={running} question={research.market.question} researchDisabled={researchDisabled} onChanged={changed} onResearch={() => void doResearch()} /> : <span />}
+              <Switch checked={pro} onChange={chooseView} label="Pro view" kbd="v" title="Pro view adds the order book, recent trades, market stats and the key legend (v)" />
+            </div>} />
+          {id && <OurView state={research ? view : full.status === 404 ? { k: "none" } : null} yes={yes} ask={askOf} feeRate={viewDetail?.market.feeRate ?? 0} feeExp={viewDetail?.market.feeExponent ?? 1} tick={t0} now={now}
+            disabled={researchDisabled} starting={starting} startErr={startErr} onResearch={() => void doResearch()} onCancel={(p) => void cancelRun(p)} cancelling={cancelling} onBuy={buy} />}
+          {pro && <KeyStats book={book} vol24h={snap?.vol24h ?? row?.vol24h ?? null} oi={snap?.oi ?? null} depth5c={snap?.depth5cUsd ?? null} />}
           <div className={css.chartBox}>
             {id ? <ProbChart conditionId={id} liveMid={yes} pHat={pHat} markers={research?.thesisMarkers.map((m) => ({ ts: m.createdAt, pHat: m.pHat, side: m.side })) ?? []}
-              ownOrders={chartOrders} outcome={outcome} tick={tick ?? DEFAULT_TICK} range={range} onRangeChange={chooseRange} /> : null}
+              ownOrders={chartOrders} outcome={outcome} tick={t0} range={range} onRangeChange={chooseRange} /> : null}
           </div>
         </div>
       </Panel>
 
       <BottomTabs tab={tab} onTab={chooseTab} expanded={expanded} onExpand={() => setExpanded((x) => !x)} id={id} detail={research} detailError={full.error != null && !research} onRetry={full.refresh}
-        now={now} clob={clob} connected={w.status === "connected"} tokens={tokens} mark={mark} tick={tick ?? DEFAULT_TICK} yes={yes} researchDisabled={researchDisabled}
-        onResearch={() => { if (id) void startResearch(id).then(changed); }} />
+        now={now} clob={clob} connected={w.status === "connected"} tokens={tokens} mark={mark} tick={t0} yes={yes} researchDisabled={researchDisabled}
+        onResearch={() => void doResearch()} researchNote={startErr} progress={view?.k === "running" && view.total ? { done: view.done, total: view.total } : null} paperMode={paperMode} />
 
-      <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}>
-        <BookLadder ref={ladderRef} book={book} status={feed.status} noBook={feed.noBook} outcome={outcome} ownOrders={ownOrders}
-          viewKey={viewKey} cursor={ladderCursor} onCursor={setLadderCursor} onPick={(p) => setPick((x) => ({ price: p, n: (x?.n ?? 0) + 1 }))} />
-      </div>
+      {pro && (
+        <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}>
+          <BookLadder ref={ladderRef} book={book} status={feed.status} noBook={feed.noBook} outcome={outcome} ownOrders={ownOrders}
+            viewKey={viewKey} cursor={ladderCursor} onCursor={setLadderCursor} onPick={(p) => setPick((x) => ({ price: p, n: (x?.n ?? 0) + 1 }))} />
+        </div>
+      )}
 
       <div className={css.col4}>
         <TerminalTicket ref={ticket} marketId={id} detail={detail} feed={feed.data} noBook={feed.noBook} side={side} outcome={outcome}
-          onSide={pickSide} onOutcome={pickOutcome} held={held} pick={pick} wallet={w} onState={setOrder} />
-        <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}><TradeTape feed={viewFeed} status={feed.status} viewKey={viewFeed?.tokenId ?? ""} /></div>
+          onSide={pickSide} onOutcome={pickOutcome} held={held} paper={paperPos} pick={pick} wallet={w} onState={setOrder} onFilled={changed} />
+        {pro && <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}><TradeTape feed={viewFeed} status={feed.status} viewKey={viewFeed?.tokenId ?? ""} /></div>}
       </div>
 
       <p className={`${css.disc} ${css.pageDisc}`}>{DISCLAIMER}</p>

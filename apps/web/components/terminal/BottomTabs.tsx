@@ -31,13 +31,21 @@ type Props = {
   clob: Clob; connected: boolean; tokens: Map<string, TokenInfo>; mark: (tokenId: string) => number | null; tick: number;
   /** YES display price (mid, or last trade on a wide book): the paper rows' mark. */
   yes: number | null; researchDisabled: boolean; onResearch: () => void;
+  /** Why the last research start was refused, in plain words. */
+  researchNote: string | null;
+  /** Live analyst progress of the running pod, when known. */
+  progress: { done: number; total: number } | null;
+  /** Paper trading mode: paper rows first. */
+  paperMode: boolean;
 };
 
 /** Research · Positions · Orders · Rules (DESIGN 13.4 BottomTabs). Keys 1–4, `e` expands the pane over the chart. */
 export function BottomTabs(p: Props) {
   const n = accountCounts(p.clob, p.connected);
+  const paperN = p.detail?.positions.filter((x) => x.closedAt == null).length ?? 0;
+  const posN = n.positions == null && !paperN ? undefined : (n.positions ?? 0) + paperN;
   const items: TabItem[] = [
-    { id: "research", label: "Research", kbd: "1" }, { id: "positions", label: "Positions", count: n.positions, kbd: "2" },
+    { id: "research", label: "Research", kbd: "1" }, { id: "positions", label: "Positions", count: posN, kbd: "2" },
     { id: "orders", label: "Orders", count: n.orders, kbd: "3" }, { id: "rules", label: "Rules", kbd: "4" },
   ];
   return (
@@ -58,17 +66,18 @@ function Loading({ error, onRetry }: { error: boolean; onRetry: () => void }) {
   return error ? <ErrorBar message="Could not load this market's research. Retrying…" onRetry={onRetry} /> : <div className={css.skBox} role="status" aria-label="Loading"><Skeleton rows={5} /></div>;
 }
 
-function ResearchTab({ detail: d, detailError, onRetry, now, id, researchDisabled, onResearch }: Props) {
+function ResearchTab({ detail: d, detailError, onRetry, now, id, researchDisabled, onResearch, researchNote, progress }: Props) {
   if (!d) return <Loading error={detailError} onRetry={onRetry} />;
   const running = d.pod?.status === "running" ? d.pod : null;
   const t = d.thesis, l = d.latest;
   return (
     <div className={css.research}>
-      {running && <div className={css.runBanner}><ResearchRunning elapsedS={Math.max(0, (now - running.startedAt) / 1000)} /></div>}
+      {running && <div className={css.runBanner}><ResearchRunning done={progress?.done} total={progress?.total} elapsedS={Math.max(0, (now - running.startedAt) / 1000)} /></div>}
       {!t ? (
-        <EmptyState text={researchDisabled ? "No thesis yet. Research is disabled on this server." : "No thesis yet — press r to research."}
+        <EmptyState text={researchDisabled ? "No research yet. Research is off on this server: ANTHROPIC_API_KEY is not set." : "No research yet. 5 AI analysts read the rules and sources, then a judge sets a fair value (~3 min)."}
           action={!researchDisabled && !running && id ? <Button variant="primary" size="sm" onClick={onResearch}>Research<kbd>r</kbd></Button> : undefined} />
       ) : null}
+      {researchNote && <p className={`${css.line} ${css.neg}`} role="alert">{researchNote}</p>}
       <div className={css.rRow1}>
         <div className={css.rSpan}><ThesisPane thesis={t} now={now} /></div>
         <AgentEstimates agents={d.agents} />
@@ -84,33 +93,32 @@ function ResearchTab({ detail: d, detailError, onRetry, now, id, researchDisable
   );
 }
 
-function PositionsTab({ clob, connected, id, tokens, mark, tick, detail: d, yes }: Props) {
+function PositionsTab({ clob, connected, id, tokens, mark, tick, detail: d, yes, paperMode }: Props) {
   const paper = d?.positions.filter((x) => x.closedAt == null) ?? [];
   const yesTok = d?.market.yesTokenId;
-  return (
-    <>
-      <AccountBody clob={clob} connected={connected} view="positions" currentId={id} tokens={tokens} mark={mark} tick={tick} />
-      {paper.length > 0 && (
-        <>
-          <div className={css.divider}>Paper</div>
-          <table aria-label="paper positions">
-            <thead><tr><th>Outcome</th><th>Shares</th><th>Avg cost</th><th>Mark</th><th>Realized</th><th>Opened</th></tr></thead>
-            <tbody>
-              {paper.map((x) => {
-                const o = x.tokenId === yesTok ? "YES" : "NO", m = yes == null ? null : o === "YES" ? yes : 1 - yes;
-                return (
-                  <tr key={x.id}>
-                    <td><span className={`${css.tag} ${o === "YES" ? css.yes : css.no}`}>{o}</span></td><td>{sh(x.size)}</td><td>{cents(x.avgCost, tick)}{"¢"}</td>
-                    <td>{m == null ? "—" : `${cents(m, tick)}¢`}</td><td className={x.realizedPnl > 0 ? css.up : x.realizedPnl < 0 ? css.down : css.dim}>{usd(x.realizedPnl)}</td><td>{hm(x.openedAt)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
-    </>
-  );
+  const live = <AccountBody clob={clob} connected={connected} view="positions" currentId={id} tokens={tokens} mark={mark} tick={tick} />;
+  const rows = paper.length ? (
+    <table aria-label="paper positions">
+      <thead><tr><th>Outcome</th><th>Shares</th><th title="What you paid per share, fees included">Avg cost</th><th title="What a share trades at now">Price now</th><th title="Shares × (price now − avg cost)">Unrealized</th><th>Realized</th><th>Opened</th></tr></thead>
+      <tbody>
+        {paper.map((x) => {
+          const o = x.tokenId === yesTok ? "YES" : "NO", m = yes == null ? null : o === "YES" ? yes : 1 - yes, u = m == null ? null : x.size * (m - x.avgCost);
+          return (
+            <tr key={x.id}>
+              <td><span className={`${css.tag} ${o === "YES" ? css.yes : css.no}`}>{o}</span></td><td>{sh(x.size)}</td><td>{cents(x.avgCost, tick)}{"¢"}</td>
+              <td>{m == null ? "—" : `${cents(m, tick)}¢`}</td>
+              <td className={u == null ? css.dim : u > 0 ? css.up : u < 0 ? css.down : css.dim}>{u == null ? "—" : `${u >= 0 ? "+" : "−"}${usd(Math.abs(u))}`}</td>
+              <td className={x.realizedPnl > 0 ? css.up : x.realizedPnl < 0 ? css.down : css.dim}>{usd(x.realizedPnl)}</td><td>{hm(x.openedAt)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  ) : <p className={`${css.line} ${css.msg}`}>No paper positions in this market. Paper orders from the ticket show up here.</p>;
+  const paperHead = <div className={css.divider} title="Filled against the real order book, no real money">Paper</div>;
+  return paperMode
+    ? <>{paperHead}{rows}<div className={css.divider}>Live (wallet)</div>{live}</>
+    : <>{live}{paper.length > 0 && <>{paperHead}{rows}</>}</>;
 }
 
 function OrdersTab({ clob, connected, id, tokens, mark, tick }: Props) {

@@ -41,9 +41,11 @@ export function HeaderBadges({ flags: f, now }: { flags: HeaderFlags; now: numbe
  * Question (wraps in full), meta line, the two outcome cards (mouse form of Y / N) and the action toolbar (DESIGN 13.4 MarketHeader).
  * `yes` = the YES display price (mid, or last trade when the book is wider than 10¢); NO = 1 − YES.
  */
-export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, flags, now, actions }: {
+export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, flags, now, actions, pro }: {
   meta: HeaderMeta | null; tick: number | null; yes: number | null; outcome: Outcome; onOutcome: (o: Outcome) => void; notFound: boolean;
   flags: HeaderFlags | null; now: number; actions: ReactNode;
+  /** Pro view: price step and fee in the meta line. */
+  pro: boolean;
 }) {
   return (
     <header className={css.hero}>
@@ -53,16 +55,16 @@ export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, fl
           <div className={css.meta}>
             {meta.category && <span className={css.catChip}>{meta.category}</span>}
             <span>ends {meta.endDate ? day(meta.endDate) : "—"} {"·"} {Math.max(0, Math.round(meta.daysLeft))}d</span>
-            <span className={css.n}>tick {tick == null ? "—" : `${cents(tick, tick)}¢`}</span>
-            {meta.feeRate != null && <span className={css.n}>fee {(meta.feeRate * 100).toFixed(1)}%</span>}
+            {pro && <span className={css.n} title="Prices move in steps of this size">tick {tick == null ? "—" : `${cents(tick, tick)}¢`}</span>}
+            {pro && meta.feeRate != null && <span className={css.n} title="Taker fee rate, charged when an order fills against the book">fee {(meta.feeRate * 100).toFixed(1)}%</span>}
             {flags && <HeaderBadges flags={flags} now={now} />}
             <a href={`https://polymarket.com/market/${meta.conditionId}`} target="_blank" rel="noreferrer">Polymarket {"↗"}</a>
           </div>
         )}
       </div>
       <div className={css.out}>
-        <OutcomeCard outcome="YES" price={yes} pressed={outcome === "YES"} kbd="Y" onClick={() => onOutcome("YES")} />
-        <OutcomeCard outcome="NO" price={yes == null ? null : 1 - yes} pressed={outcome === "NO"} kbd="N" onClick={() => onOutcome("NO")} />
+        <OutcomeCard outcome="YES" price={yes} pressed={outcome === "YES"} kbd="Y" onClick={() => onOutcome("YES")} title="YES price now: a YES share pays $1 if the market resolves YES. Click to trade YES (y)" />
+        <OutcomeCard outcome="NO" price={yes == null ? null : 1 - yes} pressed={outcome === "NO"} kbd="N" onClick={() => onOutcome("NO")} title="NO price now: a NO share pays $1 if the market resolves NO. Click to trade NO (n)" />
       </div>
       <div className={css.heroAct}>{actions}</div>
     </header>
