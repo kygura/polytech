@@ -26,11 +26,11 @@ bun run typecheck
 cd apps/tui && bun run start    # TUI
 ```
 
-Copy `.env.example` for keys. Without Anthropic/Exa keys, local runs fall back to a deterministic fake research runner. Production refuses it. Fixtures stand in for Polymarket when it is unreachable (`PM_FIXTURES=1`).
+Copy `.env.example` for keys. Research agents need only `ANTHROPIC_API_KEY`: they run on the Messages API with Anthropic's hosted web search and fetch. Without a key, local runs fall back to a deterministic fake research runner; production refuses it. Fixtures stand in for Polymarket when it is unreachable (`PM_FIXTURES=1`).
 
 ## Docs
 
-- [`SPEC.md`](SPEC.md): build spec, Rev 6 (public visitor mode on top of Rev 5).
+- [`SPEC.md`](SPEC.md): build spec; Rev 9 (research desk, paper trading, simple terminal) is the latest section.
 - [`DESIGN.md`](DESIGN.md): design brief.
 - [`TASKS.md`](TASKS.md): task log of the original phase 1-5 build.
 - [`docs/`](docs): API notes, research profiles, design mockups.

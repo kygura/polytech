@@ -386,3 +386,33 @@ Owner feedback on Rev 7: the operator pages and the `/trade` terminal look like 
 4. On `/trade/[id]` the chart shows YES and NO lines from Polymarket history with working range tabs and hover tooltip; titles are not cut to one line; the research tab shows the thesis for a researched market.
 5. `/markets/[id]` lands on `/trade/[id]`.
 6. Bugs listed in `docs/rev8-audit.md` are fixed or explicitly deferred there with a reason.
+
+## Rev 9 — Research that works, a research desk, paper trading, a simple terminal (2026-10-21)
+
+Owner feedback on Rev 8: the terminal is too complex at a glance and its settings are unexplained; research does not work and has no visual feedback or dedicated place to research one or many markets; there is no paper mode to test strategies without real money; autonomous execution should be configured in one dedicated section.
+
+### Findings
+
+- **Every research pod on the deploy failed.** The Agent SDK runner spawns the Claude Code native binary, which is not in a Vercel function bundle (`Native CLI binary for linux-x64 not found`): 80 pods, 400 agent runs, 0 theses. Nothing in the UI said so.
+- The budget gate counted `running pods × 5 agents` against `maxConcurrentSandboxes` (5), so only one pod could run at a time even without sandboxes.
+- The judge (`max_tokens` 2000) and the R classifier (400) run with thinking on by default on the 5.5 models and could truncate their JSON.
+- `/api/stream` never closed itself and was killed at 300 s on every connection (logged as a timeout error).
+
+### Decisions
+
+- **Research runner.** Agents run on the Messages API: Anthropic-hosted `web_search` / `web_fetch` (2026-02-09 versions) and a strict `submit_result` tool that carries the `AgentOutput`. `pause_turn` resumes; a turn that ends without `submit_result` is nudged twice, then fails. Default runner whenever `ANTHROPIC_API_KEY` is set; `PM_RUNNER=sandbox` (with Vercel creds) or `PM_RUNNER=agent-sdk` opt back into the Agent SDK runners. Exa is optional.
+- **Concurrency.** With the API runner the cap counts pods (`maxConcurrentSandboxes` = concurrent research runs); with sandboxes it still counts agents.
+- **Failure reasons are stored** (`pods.error`) and shown wherever a run is shown.
+- **Triage.** Before research, a market passes primitive rules (open; inside the Settings day window and categories; a book; mid 3–97¢; spread ≤ 10¢; depth ≥ `filters.minDepthUsd`), then one Haiku 5.5 call (thinking off, low effort) reads question, category, days left and rules — never the price — and returns `research | skip`, a 0–1 score and a one-line reason. Stored in `triage`, reused for 24 h. `POST /api/research/triage`, `GET /api/research/triage?ids=`.
+- **Research desk** (`/research`, tab Desk): pick one or many markets, triage them, research them through a client-side queue that fills free run slots; live cards with a stage progress bar (rules → analysts n/5 → judge → sizing → done), elapsed time, cancel, failure reason, verdict (fair value, edge, side, size). Profiles move to the Automate tab with the same live runs. `GET /api/research/live`.
+- **Paper trading.** A per-viewer Paper / Live switch in the header, Paper by default; Live asks for confirmation. Paper orders (`POST /api/paper/order`) take a fresh snapshot and walk the real book (BUY spends dollars up the asks, SELL hits the bids, optional limit), then book into the same paper positions L1 autonomy uses. No wallet needed. Independent of the autonomy mode.
+- **Simple terminal.** `/trade` defaults to a simple view: market list, header with YES/NO, an "Our view" line (fair value vs price, edge, suggested size, or research progress), chart, tabs, and a ticket in dollars with a live estimate. The book ladder, trade tape, key stats and key legend sit behind a Pro view toggle (`v`, `localStorage pm.trade.pro`). Every control carries a one-line explanation.
+- **Autonomy is the one place for autonomous execution**: modes explained in plain words, risk limits, L3 caps, category overrides, gates, approvals, kill switch, event log. Settings keeps research budget, models (including the `triage` role), filters and theme, each field with a hint.
+
+### Done (Rev 9)
+
+1. `bun run typecheck`, `bun run test`, `bun run build` pass.
+2. On a deploy with only `ANTHROPIC_API_KEY`, a manual research run reaches `done` with a thesis or a judge fair value; a failed run shows its reason on the desk and the market page.
+3. The desk triages up to 50 markets, researches several at once within the run cap, and shows live progress for each.
+4. A paper BUY then SELL on `/trade` moves the paper position and realized P&L on Portfolio without a wallet.
+5. Migration `0014_research_desk` is applied to the hosted database (`bun run db:migrate` in `packages/db` with `DATABASE_URL`).

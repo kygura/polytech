@@ -3,6 +3,7 @@ import { subscribe } from "../../../lib/jobs";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // clients reconnect (EventSource does by itself)
+const CLOSE_MS = 280_000; // end the stream before the platform kills the function at maxDuration (logged as a timeout error)
 
 export function GET(req: Request) {
   const enc = new TextEncoder();
@@ -12,7 +13,8 @@ export function GET(req: Request) {
       const send = (s: string) => { try { c.enqueue(enc.encode(s)); } catch { cleanup(); } };
       const off = subscribe((e) => send(`event: ${e.type}\ndata: ${JSON.stringify(e.payload)}\n\n`));
       const timer = setInterval(() => send(`event: ping\ndata: ${Date.now()}\n\n`), 15_000);
-      cleanup = () => { off(); clearInterval(timer); req.signal.removeEventListener("abort", cleanup); try { c.close(); } catch {} };
+      const end = setTimeout(() => cleanup(), CLOSE_MS);
+      cleanup = () => { off(); clearInterval(timer); clearTimeout(end); req.signal.removeEventListener("abort", cleanup); try { c.close(); } catch {} };
       req.signal.addEventListener("abort", cleanup);
       send(": connected\n\n");
     },
