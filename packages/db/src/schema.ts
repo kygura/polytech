@@ -138,6 +138,18 @@ export const pods = pgTable("pods", {
   steering: jsonb("steering").$type<Record<string, unknown>>(), // resolved steering that ran
   cancelRequestedAt: ts("cancel_requested_at"),
   stage: text("stage"), // rules | agents | judge | sizing | done
+  error: text("error"), // why a failed pod failed (reason + scrubbed message), shown on the research desk
+});
+
+/** Cheap pre-research verdict per market: primitive rules first, then a Haiku read of the question and rules. Newest row per market wins. */
+export const triage = pgTable("triage", {
+  conditionId: text("condition_id").primaryKey(),
+  verdict: text("verdict").notNull(), // research | skip
+  score: dp("score").notNull(), // 0..1, how much public research can move fair value
+  reason: text("reason").notNull(),
+  failedRules: jsonb("failed_rules").$type<string[]>().notNull().default([]), // primitive rules that failed; non-empty = skipped without a model call
+  model: text("model"), // null when the rules alone decided
+  createdAt: ts("created_at").notNull().defaultNow(),
 });
 
 export const researchProfiles = pgTable("research_profiles", {

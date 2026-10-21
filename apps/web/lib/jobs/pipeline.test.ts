@@ -190,11 +190,12 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
       const deadline = d.now() + 300_000;
       const slow: AgentRunner = async (role, ...a) => { if (role === "rules") t += 250_000; return fakeRunner(role, ...a); }; // one pod burns 250 s
       const keys = ["a1", "a2", "a3"], n0 = await pods();
-      const first = await runProfile({ ...d, runner: slow }, await mk("dl1", keys), match(keys), deadline);
+      // sandbox runner: 5 agents per pod against a cap of 5 means one pod per wave
+      const first = await runProfile({ ...d, runner: slow, runnerKind: "sandbox" }, await mk("dl1", keys), match(keys), deadline);
       expect(first).toMatchObject({ stopped: "WINDOW" });
       const n1 = await pods();
       expect(n1 - n0).toBe(1); // second wave never started
-      const second = await runProfile(d, await mk("dl2", keys), match(keys), deadline);
+      const second = await runProfile({ ...d, runnerKind: "sandbox" }, await mk("dl2", keys), match(keys), deadline);
       expect(second).toMatchObject({ stopped: "WINDOW", done: 0, failed: 0 });
       expect(await pods()).toBe(n1);
     });

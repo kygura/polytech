@@ -2,14 +2,15 @@ import { after } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_STEERING, SteeringSchema, SteeringShape } from "@pm/core";
-import { schema as s } from "@pm/db";
+import { latestSnapshot, schema as s } from "@pm/db";
 import { getDeps, json, notFound, parse } from "../../../../../lib/api";
-import { getProfile, researchMarket } from "../../../../../lib/jobs";
+import { getProfile, researchMarket, takeSnapshots } from "../../../../../lib/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const SKIP_WINDOW_MS = 3000;
+const BOOK_MAX_AGE_MS = 15 * 60_000;
 const Body = z.strictObject({ profileId: z.string().optional(), steering: SteeringShape.partial().optional() });
 
 // A pod takes minutes: answer 202 now, run after the response. researchMarket locks per market itself.
@@ -31,6 +32,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       opts = { steering: m.data, profileId };
     }
   }
+  // a market opened from search, or never in a snapshot run, has no stored book: fetch one now instead of skipping with NO_BOOK
+  const snap = await latestSnapshot(d.db, id);
+  if (!snap?.book || d.now() - snap.ts.getTime() > BOOK_MAX_AGE_MS) await takeSnapshots(d, [id]).catch((e) => console.error("research: snapshot failed", id, e));
   const run = researchMarket(d, id, "manual", opts);
   after(() => run.catch((e) => console.error("research failed", id, e)));
   // Skips (LOCKED, NO_BOOK, budget, RESEARCH_DISABLED) resolve within moments; a real pod runs for minutes. Wait briefly so a skip reaches the caller instead of vanishing.

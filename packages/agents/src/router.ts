@@ -1,6 +1,6 @@
 import type { ALLOWED_MODELS } from "@pm/core";
 
-export type ModelRole = "rules" | "source" | "base_rate" | "news" | "red_team" | "judge" | "r_classifier";
+export type ModelRole = "rules" | "source" | "base_rate" | "news" | "red_team" | "judge" | "r_classifier" | "triage";
 
 export const DEFAULT_MODELS: Record<ModelRole, (typeof ALLOWED_MODELS)[number]> = {
   rules: "claude-haiku-5-5",
@@ -10,6 +10,7 @@ export const DEFAULT_MODELS: Record<ModelRole, (typeof ALLOWED_MODELS)[number]> 
   red_team: "claude-sonnet-5-5",
   judge: "claude-opus-5-5",
   r_classifier: "claude-haiku-5-5",
+  triage: "claude-haiku-5-5",
 };
 
 /** role -> model id; `models` is the Settings override map. Custom role keys fall back to the source model. */

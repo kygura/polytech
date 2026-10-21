@@ -80,9 +80,17 @@ export const disabledRunner: AgentRunner = async () => {
   throw new Error("research disabled: ANTHROPIC_API_KEY unset in production");
 };
 
-/** key + Vercel creds -> sandbox; key only -> local; no key -> fake only if PM_FIXTURES=1 or not prod, else disabled. Lazy imports keep SDKs out of fake/test paths. */
-export async function pickRunner(env: Env = process.env): Promise<{ kind: "sandbox" | "local" | "fake" | "disabled"; runner: AgentRunner }> {
+export type RunnerKind = "api" | "sandbox" | "local" | "fake" | "disabled";
+
+/**
+ * Key -> Messages API runner (Anthropic-hosted web search/fetch; works inside serverless functions). PM_RUNNER=sandbox (needs Vercel creds)
+ * or PM_RUNNER=agent-sdk opts into the Agent SDK runners. No key -> fake only if PM_FIXTURES=1 or not prod, else disabled.
+ * Lazy imports keep SDKs out of fake/test paths.
+ */
+export async function pickRunner(env: Env = process.env): Promise<{ kind: RunnerKind; runner: AgentRunner }> {
   if (!env.ANTHROPIC_API_KEY) return env.PM_FIXTURES === "1" || !isProd(env) ? { kind: "fake", runner: fakeRunner } : { kind: "disabled", runner: disabledRunner };
-  if (hasSandboxCreds(env)) return { kind: "sandbox", runner: (await import("./sandbox")).sandboxRunner(env) };
-  return { kind: "local", runner: (await import("./local")).localRunner(env) };
+  if (env.PM_RUNNER === "sandbox" && hasSandboxCreds(env)) return { kind: "sandbox", runner: (await import("./sandbox")).sandboxRunner(env) };
+  if (env.PM_RUNNER === "agent-sdk") return { kind: "local", runner: (await import("./local")).localRunner(env) };
+  const [{ apiRunner }, { default: Anthropic }] = await Promise.all([import("./api"), import("@anthropic-ai/sdk")]);
+  return { kind: "api", runner: apiRunner(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 0 })) };
 }
