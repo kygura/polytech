@@ -16,7 +16,7 @@ export function ConnectButton() {
   const label = connected
     ? <span className={`${css.chip} ${w.chainOk ? "" : "warn"}`}>{short(w.address!)}<span className={css.chipNet}> {"·"} {w.chainOk ? "Polygon" : "wrong network"}</span></span>
     : w.status === "connecting" ? <><span className={ui.spinner} aria-hidden /> Connecting…</>
-    : w.status === "unavailable" ? "No wallet found" : "Connect wallet";
+    : w.status === "unavailable" ? "Install a wallet" : "Connect wallet";
   const copy = async () => {
     try { await navigator.clipboard.writeText(w.address!); setCopied(true); setTimeout(() => setCopied(false), 3000); } catch { /* clipboard denied: address stays visible to copy by hand */ }
   };
@@ -29,7 +29,7 @@ export function ConnectButton() {
         type="button"
         className={`${css.wallet} ${connected ? "" : css.connect}`}
         disabled={w.status === "unavailable" || w.status === "connecting"}
-        title={w.status === "unavailable" ? "Install a browser wallet such as MetaMask or Rabby" : connected ? "Wallet" : "Connect a browser wallet to trade on /trade"}
+        title={w.status === "unavailable" ? "No browser wallet detected. Install one such as MetaMask or Rabby to trade live." : connected ? "Wallet" : "Connect a browser wallet to place live trades on Trade"}
         aria-haspopup={connected ? "dialog" : undefined}
         onClick={() => (connected ? setMenu(true) : void w.connect())}
       >{label}</button>

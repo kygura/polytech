@@ -40,8 +40,6 @@
 .right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
 .themeBtn { width: 28px; height: 28px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); font-size: var(--fs-lg); line-height: 1; }
 .themeBtn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
-.modeLink { display: inline-flex; flex: none; }
-.modeLink:hover { text-decoration: none; filter: brightness(1.15); }
 
 /* wallet */
 .wallet { height: 30px; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); font: 500 var(--fs-sm) / 1 var(--font-ui); white-space: nowrap; }

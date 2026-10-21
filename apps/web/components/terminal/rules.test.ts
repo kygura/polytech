@@ -32,7 +32,7 @@ describe("buttonState", () => {
     expect(buttonState({ ...base, loaded: false, noBook: true }).line?.text).toBe("No live book for this market.");
   });
   it("gate next: no wallet, signing step", () => {
-    expect(buttonState({ ...base, gate: "disconnected", wallet: "unavailable" })).toMatchObject({ label: "No wallet found", off: true, look: "connect" });
+    expect(buttonState({ ...base, gate: "disconnected", wallet: "unavailable" })).toMatchObject({ label: "Install a wallet", off: true, look: "connect" });
     expect(buttonState({ ...base, gate: "disconnected", wallet: "disconnected" })).toMatchObject({ label: "Connect wallet", off: false, action: "connect" });
     expect(buttonState({ ...base, gate: "allowance_needed", signing: true })).toMatchObject({ label: "Confirm in your wallet…", off: true, spin: true });
     expect(buttonState({ ...base, gate: "allowance_checking", allowanceError: "down" }).line).toEqual({ text: "down", link: "retryAllowance" });
