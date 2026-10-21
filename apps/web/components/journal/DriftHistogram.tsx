@@ -9,6 +9,8 @@ const cents = (c: number | null) => (c == null ? "—" : `${c < 0 ? "−" : "+"}
 /** Move of the mid toward p̂ after the call, 1-cent bins -10..+10: 24h and 7d side by side, dashed means. */
 export function DriftHistogram({ hist }: { hist: DriftHist }) {
   const { bins } = hist;
+  // No resolved thesis has a drift sample yet: axes alone would render as an empty box with a stray "1" at the top.
+  if (hist.n24 + hist.n7 === 0) return <p className="muted ui" style={{ margin: 0 }}>No resolved theses with a price-drift sample yet.</p>;
   const lo = bins[0]!.lo, hi = bins[bins.length - 1]!.hi;
   const max = Math.max(1, ...bins.flatMap((b) => [b.n24, b.n7]));
   const x = (c: number) => PAD.l + ((c - lo) / (hi - lo)) * (W - PAD.l - PAD.r);

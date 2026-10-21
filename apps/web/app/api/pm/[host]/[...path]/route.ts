@@ -1,10 +1,11 @@
-import { SESSION_COOKIE, authDisabled, bearer, verifySession } from "../../../../../lib/auth";
+import { getKv } from "@pm/db";
+import { clientIp } from "../../../../../lib/auth";
 
 // Node, not edge: egress must leave from the pinned function region (vercel.json), not a PoP near the browser.
 export const runtime = "nodejs";
 
 // Browser -> Polymarket REST relay for the operator's own browser-signed SDK calls. Keys never reach us: we only
-// forward the already-signed request. Session required (also enforced by proxy.ts); fixed upstream hosts only.
+// forward the already-signed request. Fixed upstream hosts only.
 const HOSTS: Record<string, string> = {
   clob: "https://clob.polymarket.com",
   gamma: "https://gamma-api.polymarket.com",
@@ -12,14 +13,13 @@ const HOSTS: Record<string, string> = {
   relayer: "https://relayer-v2.polymarket.com",
 };
 const TIMEOUT_MS = 15_000;
-
-const cookie = (header: string | null, name: string) => header?.split(/;\s*/).find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
+// The relay is anonymous (the visitor's wallet signs, we hold no key), so cap it per IP: an open relay is free egress for anyone. Generous for a trading UI's polling.
+const RELAY_LIMIT = 120, RELAY_WINDOW_MS = 60_000;
 
 async function relay(req: Request, { params }: { params: Promise<{ host: string; path: string[] }> }) {
   const h = req.headers;
-  if (!authDisabled() && !(await verifySession(cookie(h.get("cookie"), SESSION_COOKIE))) && !(await verifySession(bearer(h.get("authorization"))))) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const ip = clientIp(h);
+  if (!(await getKv().rateLimit(`pm:${ip}`, ip === "unknown" ? RELAY_LIMIT * 10 : RELAY_LIMIT, RELAY_WINDOW_MS)).ok) return Response.json({ error: "too many requests" }, { status: 429, headers: { "retry-after": "60" } });
   const { host, path } = await params;
   const base = Object.hasOwn(HOSTS, host) ? HOSTS[host] : undefined;
   if (!base) return Response.json({ error: "unknown host" }, { status: 404 });

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Button } from "../ui";
 import { COL_LABEL, COLUMNS, DEFAULT_COLS } from "./columns";
 import css from "./screener.module.css";
 import type { SavedView } from "./types";
@@ -77,7 +78,7 @@ export function ColsMenu({ cols, onChange, open, setOpen }: { cols: string[]; on
   };
   return (
     <div ref={wrap} className={css.viewWrap}>
-      <button type="button" className={css.metaBtn} aria-haspopup="true" aria-expanded={open} aria-keyshortcuts="c" onClick={() => setOpen(!open)} title="Columns (c)">[c] cols</button>
+      <Button className={css.metaBtn} aria-haspopup="true" aria-expanded={open} aria-keyshortcuts="c" onClick={() => setOpen(!open)} title="Columns (c)">Cols <kbd aria-hidden>c</kbd></Button>
       {open && (
         <div role="group" aria-label="Columns" className={css.cols}>
           <div className={css.colsHead}><span>Columns</span><button type="button" onClick={() => onChange(null)} disabled={cols.join() === DEFAULT_COLS.join()}>Reset</button></div>
@@ -114,8 +115,8 @@ export function NameSheet({ title, initial, action, hint, submit, onClose }: { t
         <input type="text" value={name} maxLength={60} autoFocus aria-label="View name" onChange={(e) => { setName(e.target.value); setErr(null); }} />
         {note && <div className={err ? "neg" : "muted"} role={err ? "alert" : undefined}>{note}</div>}
         <div className={css.sheetActions}>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit" disabled={busy || !name.trim()}>{action}</button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={busy || !name.trim()}>{action}</Button>
         </div>
       </form>
     </Sheet>
@@ -126,8 +127,8 @@ export function ConfirmSheet({ title, action, onConfirm, onClose }: { title: str
   return (
     <Sheet title={title} onClose={onClose}>
       <div className={css.sheetActions}>
-        <button type="button" autoFocus onClick={onClose}>Cancel</button>
-        <button type="button" className={css.danger} onClick={() => { onConfirm(); onClose(); }}>{action}</button>
+        <Button autoFocus onClick={onClose}>Cancel</Button>
+        <Button variant="danger" onClick={() => { onConfirm(); onClose(); }}>{action}</Button>
       </div>
     </Sheet>
   );

@@ -1,8 +1,9 @@
+import { SCOUT_KICK_MS } from "../lib/cadence";
 import { hms } from "./fmt";
 import type { SseStatus } from "./SseIndicator";
 
 // DESIGN 12.1.5: pure helpers behind the status bar and the SSE indicator.
-export const SNAPSHOT_CADENCE_MS = 15 * 60_000;
+export const SNAPSHOT_CADENCE_MS = SCOUT_KICK_MS; // the snapshot step runs with every scout kick
 export const SWEEP_CADENCE_MS = 24 * 3_600_000;
 export const RETRY_S = 3; // EventSource's default reconnect delay; the countdown is an estimate
 

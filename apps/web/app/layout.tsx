@@ -1,16 +1,20 @@
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import type { ReactNode } from "react";
-import { TERMINAL_PATH } from "../lib/terminalPath";
 import "./globals.css";
 
 export const metadata: Metadata = { title: "PM-EDGE" };
 
-// Applied before paint: stored theme wins, else prefers-color-scheme, else dark (CSS default). The /trade terminal stays dark unless chosen.
-const THEME_SCRIPT = `(function(){try{var t=localStorage.theme,term=${TERMINAL_PATH}.test(location.pathname);if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}else if(!(term&&t!=="system")&&matchMedia("(prefers-color-scheme: light)").matches){document.documentElement.dataset.theme="light"}}catch(e){}})()`;
+const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-inter" });
+const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-jbm" });
 
+// Applied before paint: the stored choice wins, else dark (the CSS default).
+const THEME_SCRIPT = `(function(){try{var t=localStorage.theme;if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}}catch(e){}})()`;
+
+// The font variables sit on <html> (not <body>) so the :root tokens --font-ui / --font-mono can resolve them.
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} /></head>
       <body>{children}</body>
     </html>

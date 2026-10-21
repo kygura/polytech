@@ -18,7 +18,9 @@
   background: var(--kill);
   color: var(--on-kill);
   border-color: var(--kill);
-  font-weight: 600;
+  height: 30px;
+  font: 600 var(--fs-sm) / 1 var(--font-ui);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 .kill:hover:not(:disabled) { background: var(--kill); filter: brightness(1.1); }
@@ -28,16 +30,6 @@
 .sse { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
 .blink { animation: blink 1s step-start infinite; }
-
-.tabs { display: flex; gap: var(--sp-1); }
-.tab {
-  background: none;
-  border: 1px solid transparent;
-  color: var(--muted);
-  padding: 2px var(--sp-2);
-}
-.tab[aria-selected="true"] { color: var(--text); font-weight: 600; border-color: var(--border); background: var(--surface-2); }
-.count { color: var(--muted); font-weight: 400; margin-left: var(--sp-1); }
 
 .filter { width: 240px; }
 
@@ -88,5 +80,5 @@
 .refit { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--surface-2); border-left: 3px solid var(--warn); }
 .refit table { width: auto; }
 .refitActions { display: flex; align-items: center; gap: var(--sp-2); }
-.refitApply { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.refitApply { background: var(--accent); border-color: var(--accent); color: var(--on-focus); font-weight: 600; }
 .refitApply:disabled { background: var(--surface-2); border-color: var(--border); color: var(--faint); }

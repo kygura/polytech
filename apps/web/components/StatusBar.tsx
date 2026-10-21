@@ -6,8 +6,8 @@ import { SseIndicator, type SseStatus } from "./SseIndicator";
 import { ageTone, fmtAge, runsLabel, spendLabel, SNAPSHOT_CADENCE_MS, SWEEP_CADENCE_MS, utcClock, type OpStatus } from "./statusbar";
 import css from "./StatusBar.module.css";
 
-/** Fixed bottom bar (DESIGN 12.1.5): sse | runs | spend | ingest ages | alerts | [g…] clock. `status` null = not loaded yet or /api/status failing: segments show `—`. */
-export function StatusBar({ status, sse, lastEventAt, chord, onAlerts }: { status: OpStatus | null; sse: SseStatus; lastEventAt: number | null; chord: boolean; onAlerts: () => void }) {
+/** Fixed bottom bar (DESIGN 12.1.5, 13.3): sse | runs | spend | ingest ages | alerts | (slot: /trade key legend + feed) | [g…] clock. `status` null = not loaded yet or /api/status failing: segments show `—`. `slotRef` receives the slot element that workspace pages portal into. */
+export function StatusBar({ status, sse, lastEventAt, chord, onAlerts, slotRef }: { status: OpStatus | null; sse: SseStatus; lastEventAt: number | null; chord: boolean; onAlerts: () => void; slotRef?: (el: HTMLElement | null) => void }) {
   const [now, setNow] = useState<number | null>(null); // null until mounted: no server/client clock mismatch
   useEffect(() => {
     setNow(Date.now());
@@ -35,6 +35,7 @@ export function StatusBar({ status, sse, lastEventAt, chord, onAlerts }: { statu
       <span className={css.seg} aria-live="polite">
         <button type="button" className={`${css.alerts} ${unacked > 0 ? css.alertsWarn : ""}`} onClick={onAlerts} aria-label={`${unacked} unacknowledged alert${unacked === 1 ? "" : "s"}`} title="alerts (g n)">alerts {unacked}</button>
       </span>
+      <span ref={slotRef} className={css.slot} />
       <span className={css.end}>
         {chord && <span className={css.chord} aria-hidden>g…</span>}
         <span className={css.clock}>{now == null ? "" : utcClock(now)}</span>

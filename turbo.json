@@ -32,8 +32,6 @@
     "ANTHROPIC_API_KEY",
     "EXA_API_KEY",
     "CRON_SECRET",
-    "JWT_SECRET",
-    "APP_PASSWORD_HASH",
     "PGLITE_DIR"
   ]
 }

@@ -1,5 +1,3 @@
-import { AuthError } from "./api";
-
 export type SseEvent = { event: string; data: string };
 
 /** Incremental SSE parser: feed text chunks, get complete events (handles chunks split anywhere). */
@@ -29,10 +27,9 @@ const sleep = (ms: number, signal: AbortSignal) =>
     signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
   });
 
-/** Streams `/api/stream` until aborted; reconnects with exponential backoff (1s..30s). Throws AuthError on 401. */
+/** Streams `/api/stream` until aborted; reconnects with exponential backoff (1s..30s). */
 export async function streamEvents(
   url: string | URL,
-  headers: () => Promise<Record<string, string>>,
   onEvent: (e: SseEvent) => void,
   onStatus: (live: boolean) => void,
   signal: AbortSignal,
@@ -40,15 +37,14 @@ export async function streamEvents(
   let delay = 1000;
   while (!signal.aborted) {
     try {
-      const res = await fetch(url, { headers: { ...(await headers()), accept: "text/event-stream" }, signal });
-      if (res.status === 401) throw new AuthError("run pm login");
+      const res = await fetch(url, { headers: { accept: "text/event-stream" }, signal });
       if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
       onStatus(true);
       delay = 1000;
       const feed = sseParser(), dec = new TextDecoder();
       for await (const chunk of res.body) for (const e of feed(dec.decode(chunk, { stream: true }))) onEvent(e);
-    } catch (e) {
-      if (e instanceof AuthError) throw e;
+    } catch {
+      // dropped connection: back off and retry
     }
     if (signal.aborted) return;
     onStatus(false);

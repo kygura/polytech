@@ -16,6 +16,7 @@ export const RANGE_QUERY: Record<Range, { interval: "1d" | "1w" | "1m" | "max"; 
 };
 
 export const MAX_POINTS = 500;
+const MIN_ALL_POINTS = 30;
 export type HistPt = { ts: number; mid: number }; // ts = epoch ms
 export type HistoryResult = { range: Range; source: "polymarket" | "snapshots"; points: HistPt[] };
 
@@ -43,7 +44,10 @@ export type HistoryDeps = {
 export async function loadHistory(range: Range, d: HistoryDeps): Promise<HistoryResult> {
   const q = RANGE_QUERY[range];
   if (d.tokenId) {
-    const pts = await d.pm.pricesHistory({ token: d.tokenId, interval: q.interval, fidelity: q.fidelity }).then(toPoints, () => []);
+    const get = (fidelity: number) => d.pm.pricesHistory({ token: d.tokenId!, interval: q.interval, fidelity }).then(toPoints, () => [] as HistPt[]);
+    let pts = await get(q.fidelity);
+    // ALL is daily buckets: a market only days old gets a handful of points, so ask again hourly (still downsampled).
+    if (range === "all" && pts.length < MIN_ALL_POINTS) { const fine = await get(60); if (fine.length > pts.length) pts = fine; }
     if (pts.length) return { range, source: "polymarket", points: downsample(pts) };
   }
   const own = await d.snapshots(q.windowMs == null ? 0 : d.now - q.windowMs);

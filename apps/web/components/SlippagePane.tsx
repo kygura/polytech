@@ -4,7 +4,7 @@ import { usePoll } from "../hooks/usePoll";
 import { feedUrl } from "../hooks/useMarketFeed";
 import { MarketFeedSchema } from "../lib/feed";
 import { hm } from "./fmt";
-import { Segmented } from "./Segmented";
+import { Panel, Segmented } from "./ui";
 import { ariaLabel, capLabel, curveOf, readout, sizeAt, usdLabel, X_MAX, X_MIN, X_TICKS, xFrac, yFrac, Y_SPAN, type Side } from "./slippage";
 import charts from "./charts.module.css";
 import css from "./detail.module.css";
@@ -72,12 +72,8 @@ export function SlippagePane({ conditionId, snapshot, defaultSide, height = 140 
   })();
 
   return (
-    <section className="pane">
-      <h2 className={css.titleRow}>
-        <span>Slippage</span>
-        <Segmented label="Slippage side" options={SIDES} value={side} onChange={setSide} />
-      </h2>
-      <div className="body">{body}</div>
-    </section>
+    <Panel title="Slippage" right={<Segmented label="Slippage side" options={SIDES} value={side} onChange={setSide} />} pad>
+      {body}
+    </Panel>
   );
 }

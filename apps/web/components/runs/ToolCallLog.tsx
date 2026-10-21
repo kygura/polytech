@@ -34,7 +34,7 @@ export function ToolCallLog({ calls }: { calls: ToolCall[] }) {
         {calls.map((c, i) => (
           <li key={i} title={c.input}>
             <span className={css.t}>{hms(c.ts)}</span><span className={css.n}>{c.name}</span>{truncate(c.input, 160)}
-            {!c.ok && <span className="neg"> {"→"} error</span>}
+            {!c.ok && <span className="down"> {"→"} error</span>}
           </li>
         ))}
       </ul>

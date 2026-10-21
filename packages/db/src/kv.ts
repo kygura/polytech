@@ -111,18 +111,19 @@ export function pgKv(db: Db): Kv {
   };
 }
 
-let kv: Kv | undefined;
+// globalThis for the same reason as the db singleton (client.ts): per-module copies would split the memory kv / lock state under `next dev`
+const kvSlot = ((globalThis as { __pmKv?: { kv?: Kv } }).__pmKv ??= {});
 export function getKv(): Kv {
-  if (kv) return kv;
+  if (kvSlot.kv) return kvSlot.kv;
   const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (url && token) return (kv = upstashKv(new Redis({ url, token })));
+  if (url && token) return (kvSlot.kv = upstashKv(new Redis({ url, token })));
   // hosted Postgres is shared by every instance: the kv table works there too
-  if (process.env.DATABASE_URL) return (kv = pgKv(getDb()));
+  if (process.env.DATABASE_URL) return (kvSlot.kv = pgKv(getDb()));
   // Serverless instances don't share memory, so rate limits/locks would be per-instance: refuse.
   if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
     throw new Error("DATABASE_URL, UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
   }
   if (process.env.NODE_ENV === "production") console.warn("kv: Upstash not configured, using in-memory kv (single process only)");
-  return (kv = memoryKv());
+  return (kvSlot.kv = memoryKv());
 }

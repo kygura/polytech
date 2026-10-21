@@ -1,6 +1,7 @@
 "use client";
 import { BUILTIN_ROLES } from "@pm/core";
-import { DataTable, MarketCell, type Column } from "./DataTable";
+import { DataTable, type Column } from "./DataTable";
+import { MarketTitle } from "./pageParts";
 import { StatusDot, type DotStatus } from "./StatusDot";
 import { dur, hm } from "./fmt";
 import type { read } from "../lib/jobs";
@@ -40,17 +41,17 @@ const live = (s: string) => s === "running" || s === "judging" || s === "queued"
 const elapsed = (p: Pod, now: number) => (live(p.status) ? (now - p.startedAt) / 1000 : Math.max(0, ...p.agents.map((a) => a.durationS ?? 0)));
 
 const cols = (now: number): Column<Pod>[] => [
-  { id: "pod", header: "Pod", align: "l", cell: (p) => <span title={p.id}>{p.id.slice(0, 8)}</span> },
-  { id: "market", header: "Market", align: "l", cell: (p) => p.question ? <MarketCell question={p.question} category={null} max={40} /> : <span className="muted">{p.conditionId.slice(0, 10)}</span> },
+  { id: "pod", header: "Pod", align: "l", cell: (p) => <span className="n" title={p.id}>{p.id.slice(0, 8)}</span> },
+  { id: "market", header: "Market", align: "l", cell: (p) => p.question ? <MarketTitle id={p.conditionId} question={p.question} /> : <span className="muted n">{p.conditionId.slice(0, 10)}</span> },
   { id: "source", header: "Source", align: "l", cell: (p) => { const s = podSource(p); return (
     <span className="ui" title={s.label}><span className={s.muted ? "muted" : undefined} style={{ display: "inline-block", maxWidth: "18ch", overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "bottom" }}>{s.label}</span>
-      {p.steeringQuestion && <span style={{ color: "var(--accent)" }} title={p.steeringQuestion.slice(0, 120)} aria-label={`question: ${p.steeringQuestion.slice(0, 120)}`}> ?</span>}</span>
+      {p.steeringQuestion && <span style={{ color: "var(--focus)" }} title={p.steeringQuestion.slice(0, 120)} aria-label={`question: ${p.steeringQuestion.slice(0, 120)}`}> ?</span>}</span>
   ); } },
   { id: "trigger", header: "Trigger", align: "l", cell: (p) => p.trigger },
   { id: "started", header: "Started", align: "r", cell: (p) => hm(p.startedAt) },
   { id: "elapsed", header: "Elapsed", align: "r", cell: (p) => <span title={live(p.status) ? undefined : "longest agent"}>{dur(elapsed(p, now))}</span> },
   { id: "status", header: "Status", align: "l", cell: (p) => <StatusDot status={dotStatus(p.status)} label={p.status} /> },
-  { id: "stage", header: "Stage", align: "l", cell: (p) => p.stage ? <span style={{ color: live(p.status) ? "var(--accent)" : "var(--muted)" }}>{p.stage}</span> : <span className="muted">{"—"}</span> },
+  { id: "stage", header: "Stage", align: "l", cell: (p) => p.stage ? <span style={{ color: live(p.status) ? "var(--focus)" : "var(--muted)" }}>{p.stage}</span> : <span className="muted">{"—"}</span> },
   { id: "agents", header: "Agents", align: "l", cell: (p) => (
     <span className={css.dots}>
       {podRoles(p).map((role) => { const a = p.agents.find((x) => x.role === role); return <span key={role} title={`${role}: ${a?.status ?? "queued"}`}><StatusDot status={a ? dotStatus(a.status) : "queued"} label={false} /></span>; })}
@@ -66,5 +67,5 @@ export const orderPods = (pods: Pod[]) => [...pods].sort((a, b) => Number(live(b
 
 /** `onOpen` fires on row click and Enter (DataTable); `renderExpanded` is the retired expand-in-place and stays optional. */
 export function PodTable({ pods, now, selected, onSelect, onOpen, isNew, renderExpanded }: { pods: Pod[]; now: number; selected: string | null; onSelect: (id: string) => void; onOpen?: (p: Pod) => void; isNew?: (p: Pod) => boolean; renderExpanded?: (p: Pod) => ReactNode }) {
-  return <DataTable columns={cols(now)} rows={pods} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} onOpen={onOpen} renderExpanded={renderExpanded} label="pods" rowClass={(p) => (isNew?.(p) ? css.flash : undefined)} />;
+  return <DataTable columns={cols(now)} rows={pods} rowKey={(p) => p.id} selectedKey={selected} onSelect={onSelect} onOpen={onOpen} renderExpanded={renderExpanded} label="pods" rowClass={(p) => (isNew?.(p) ? `row2 ${css.flash}` : "row2")} />;
 }

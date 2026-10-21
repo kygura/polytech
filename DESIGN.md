@@ -1026,3 +1026,203 @@ Empty (0 resolved): `No resolved theses yet. Edge is measured forward; rows appe
 3. New pane `Slippage` under `Book` (`SlippageCurve`, SVG 100% × 140, same chart rules as §5): x = order size in USD on a log scale with ticks `$10 $100 $1k $10k`, y = average fill price (`p`, 3 dp, range from best ask to best ask + 10¢). Line `--text` 1.5px; dashed `--muted` horizontal at the best ask labelled `ask 0.420`; dotted `--faint` verticals at `capacity(ε)` for ε = 0.5¢, 1¢, 2¢ labelled `0.5¢ $620` etc. in `--muted` `--fs-xs`. A `YES NO` segmented control in the pane title picks the side (default = thesis side, else YES; NO uses the complement book). Hover: `$1,200 → avg 0.431 · slip +1.1¢`. `aria-label` `Slippage curve, YES, capacity at 1¢ $1,840`. Under 2 levels: `Not enough depth for a curve.`
 4. New pane `Metrics` under `Slippage` (`MetricsGrid`, `<dl>` in 4 columns, `--fs-sm`, label `--muted` ui left, value mono right, 24px rows): `mid · bid · ask · spread (¢) · fee · liq · vol24h · OI · d±1¢ · d±2¢ · d±5¢ · exit depth · capacity (@1¢) · holders · HHI (2 dp) · top1 · top5 · flow 24h (signed usd, `--pos`/`--neg`) · median ticket · large trade 24h (`yes`/`—`) · last trade (ago) · stale (h) · priority (2 dp) · src`. Null → `—` in `--muted`. All values come from `market_latest` plus the market row; nothing is computed client-side.
 5. Right column unchanged. The detail's `← Watchlist` link becomes `← Back` and returns to the referring list (`/markets` or `/watchlist`, read from `document.referrer` path, default `/markets`).
+
+## 13. Rev 8 — one app, one design system
+
+Scope: SPEC "Rev 8 — One app, one design system". Supersedes §12.1.1 (two palettes), §12.1.2 (header), §11.1 (`.term` tokens) and §12.6 (`/markets/[id]`, which now redirects to `/trade/[id]`). §11.2 (formatting), §11.6 (ticket states), §11.7 (live updates) and §12.2–12.5 stay in force except where this section changes them. The login page, `(public)` route group, `PublicShell` and `/trade/autonomy` are deleted. Where §1–§5 and this section disagree, this section wins.
+
+The look is the terminal's (§11, "Graphite Ladder"): graphite surfaces, 8px panels, Inter for words, JetBrains Mono for every number, blue YES / orange NO, violet focus. The operator pages adopt it; nothing keeps its own palette.
+
+### 13.1 Tokens
+
+All tokens live on `:root` in `globals.css` (dark) and `:root[data-theme="light"]`. The `.term` block and every `--t-*` definition are deleted. Theme resolution: stored `localStorage.theme` (`light` / `dark`), else dark; `prefers-color-scheme` is no longer consulted. `lib/terminalPath.ts` and the terminal branch in `THEME_SCRIPT` go away.
+
+Fonts: `Inter` (400/500/600) and `JetBrains_Mono` (400/500/600) via `next/font/google` in `app/layout.tsx`, their variables on `<body>`. `--font-ui: var(--font-inter), Inter, system-ui, sans-serif`; `--font-mono: var(--font-jbm), "JetBrains Mono", ui-monospace, monospace`. `body` is `400 var(--fs-md)/var(--lh-md) var(--font-ui)`. Numbers (prices, sizes, times, ids, table cells, key caps) are `--font-mono` with `font-variant-numeric: tabular-nums`; the `.n` utility sets both. Words in tables (market questions, categories, statuses) are `--font-ui`.
+
+Colour (dark / light). Every text token is checked ≥ 4.5:1 on `--surface` and `--surface-2` in both themes; `--faint` is never used for text that carries meaning.
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `--bg` | `#0b0d10` | `#eceef2` | page behind panels |
+| `--surface` | `#13161b` | `#ffffff` | panels, header, status bar, table body |
+| `--surface-2` | `#1a1e25` | `#f4f5f8` | table header, hover row, inputs, kbd, skeletons, segmented track |
+| `--border` | `#232830` | `#e1e4ea` | panel borders, row rules |
+| `--border-2` | `#2f3540` | `#cfd4dc` | input and button borders, kbd border |
+| `--text` | `#e4e7ec` | `#161a20` | primary |
+| `--muted` | `#8b93a1` | `#5d6573` | labels, secondary |
+| `--faint` | `#555d6b` | `#9aa1ad` | disabled values, gridlines, decorative only |
+| `--yes` / `--yes-bg` / `--on-yes` | `#5b9dff` / `rgb(91 157 255/.14)` / `#0b0d10` | `#1a5fcf` / `rgb(26 95 207/.10)` / `#fff` | YES identity: outcome card, YES chip, buy-YES button, YES chart line, YES side text |
+| `--no` / `--no-bg` / `--on-no` | `#ff9142` / `rgb(255 145 66/.14)` / `#0b0d10` | `#b04800` / `rgb(176 72 0/.10)` / `#fff` | NO identity, same places |
+| `--up` / `--up-bg` | `#4cc38a` / `rgb(76 195 138/.13)` | `#0a7a4e` / `rgb(10 122 78/.10)` | price up, positive edge/P&L, bids, BUY prints, live dot, "done" status |
+| `--down` / `--down-bg` | `#f0616d` / `rgb(240 97 109/.13)` | `#c93244` / `rgb(201 50 68/.09)` | price down, negative edge/P&L, asks, SELL prints, errors, failed status |
+| `--focus` / `--focus-bg` | `#9d8cff` / `rgb(157 140 255/.14)` | `#5b45e0` / `rgb(91 69 224/.09)` | focus ring, links, selected row, ladder cursor, own orders, running status, pinned dot |
+| `--tint` | `rgb(157 140 255/.24)` | `rgb(91 69 224/.16)` | update-highlight start colour (§11.7) |
+| `--warn` / `--warn-bg` | `#f5b544` / `rgb(245 181 68/.12)` | `#946000` / `rgb(148 96 0/.10)` | stale, caution, pending approvals |
+| `--kill` / `--on-kill` | `#d92626` / `#fff` | `#d00000` / `#fff` | kill switch only |
+| `--badge-s` / `--badge-c` | `#a58bf5` / `#d97bb0` | `#6a4bd1` / `#a63a78` | structural / contrarian badges (unchanged) |
+| `--backdrop` | `rgb(0 0 0/.5)` | `rgb(20 24 32/.35)` | dialog and drawer backdrop |
+| `--shadow` | `none` | `0 1px 2px rgb(20 24 32/.06)` | panels |
+
+Semantic rules: YES/NO colours mean outcome identity only; up/down mean direction or sign only. A number is never coloured by both at once, and every up/down number carries a sign. Mode colours appear only inside `ModeBadge` / `ModeSelector`: `--mode-0: var(--muted)`, `--mode-1: var(--focus)`, `--mode-2: var(--warn)`, `--mode-3: var(--no)`, `--mode-4: var(--down)` (the badge is a boxed upper-case label, so the orange/red cannot be mistaken for a price).
+
+Type scale (`--fs-* / --lh-*`, whole pixels): `xs` 11/14 (kbd, disclaimer, status bar, chart labels) · `sm` 12/16 (labels, table headers, panel titles, tape) · `md` 13/18 (body, table cells, inputs) · `lg` 15/20 (page titles, market question in lists' hover tooltip, ticket inputs) · `xl` 20/24 (mode badge, KPI values) · `2xl` 26/32 (YES/NO outcome cards on the market page only). Weights 400/500/600; no 700. Market question in the market-page header: `--fs-lg`, 600, `--font-ui`, wraps fully.
+
+Spacing `--sp-0..6`: 2, 4, 8, 12, 16, 24 px (`--sp-0 2`, `--sp-1 4`, `--sp-2 8`, `--sp-3 12`, `--sp-4 16`, `--sp-6 24`) plus `--gap: 6px` (gap between panels and the workspace page padding). Panel inner padding `--sp-3`. Table cell padding `0 var(--sp-2)`.
+
+Radii: `--r-sm 4` (kbd, chips, badges, tags), `--r-md 6` (inputs, buttons, segmented, outcome cards), `--r-lg 8` (panels, dialogs, drawers). `--radius` is an alias of `--r-sm`.
+
+Heights: `--top-h 44` (header) · `--status-h 24` · `--ph-h 34` (panel header) · `--hdr-h 28` (sticky table header) · `--row-h 26` (tables, lists) · `--row-h-2 40` (two-line market rows) · `--row-dense 22` (ladder, tape, metrics) · `--input-h 28` (forms) · `--input-h-lg 36` (ticket) · `--btn-h 28` · `--btn-h-lg 40` (ticket submit, kill wide) · `--legend-h 24`. Motion: `--tint-ms 600ms`; hover transitions 120ms; nothing else animates except the §11.7 tint, the live-dot pulse and spinners, all off under `prefers-reduced-motion`.
+
+Focus ring everywhere: `outline: 2px solid var(--focus); outline-offset: 1px` (`-2px` inside tables and the ladder). Inputs on focus: `border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-bg)`.
+
+Migration (aliases, defined once in `globals.css` so every existing module compiles unchanged and is retargeted; delete an alias once its last use is rewritten):
+
+| Old | New |
+|---|---|
+| `--surface` `--surface-2` `--border` `--text` `--muted` `--faint` `--bg` | same names, new values |
+| `--pos` → `var(--up)` · `--neg` → `var(--down)` · `--accent` → `var(--focus)` · `--warn` kept · `--kill` `--on-kill` kept | aliases; `.pos` / `.neg` classes keep working. Where `.pos`/`.neg` meant YES/NO *side* (Watchlist `Side` column, ThesisPane title, ResultCard), rewrite to `.yes` / `.no` |
+| `--mode-0..4` | as above (aliases of semantic tokens) |
+| `--font-ui` `--font-mono` `--fs-*` `--lh-*` `--sp-1..6` `--radius` `--row-h` | kept; `--sp-1..4,6` keep their px values, `--radius` becomes 4px |
+| `--t-bg --t-pane --t-pane-2 --t-line --t-line-2 --t-text --t-dim --t-faint` | `--bg --surface --surface-2 --border --border-2 --text --muted --faint` |
+| `--t-yes* --t-no* --t-up* --t-down* --t-bid* --t-ask* --t-focus* --t-tint --t-warn* --t-shadow` | drop the `t-`; `--bid`/`--ask` are aliases of `--up`/`--down` |
+| `--t-font-ui --t-font-num` | `--font-ui --font-mono` |
+| `--t-fs-xs/sm/md/lg/xl` | `--fs-xs/sm/md/lg/xl` (12.5 → 13, 16 → 15, 22 → `--fs-2xl` for the outcome cards) |
+| `--t-sp-1..6` (2 4 6 8 12 16) | `--sp-0 --sp-1 --gap --sp-2 --sp-3 --sp-4` |
+| `--t-r-sm/md/lg` | `--r-sm/md/lg` |
+| `--t-top-h --t-ph-h --t-row-h --t-ladder-h --t-tape-h --t-input-h --t-btn-h --t-legend-h --t-tint-ms` | `--top-h --ph-h --row-h --row-dense --row-dense --input-h-lg --btn-h-lg --legend-h --tint-ms` |
+
+`terminal.module.css` keeps its class names but reads the new tokens; the `.term` wrapper class and the `.term …` overrides in `globals.css` are removed (the base element styles below already match).
+
+### 13.2 Shared primitives
+
+New directory `apps/web/components/ui/` (one file per primitive, CSS in `ui.module.css`, which absorbs today's `ui.module.css`, `DataTable.module.css` shapes and the terminal's `.ph`/`.tab`/`.seg`/`.inp` rules). Global element styles in `globals.css`: `button`, `input`, `select`, `textarea`, `table`, `kbd`, `a`, `dialog`.
+
+| Primitive | Spec |
+|---|---|
+| `Panel` (`.panel`, replaces `.pane` and terminal `.pane`) | `background --surface; border 1px --border; border-radius --r-lg; box-shadow --shadow; overflow hidden; display flex; flex-direction column; min-height 0`. Header `.panel-h`: height `--ph-h`, padding `0 --sp-3`, bottom border, title `--fs-sm` 600 `--font-ui` `--text`; a right slot `.panel-h .r` (`margin-left auto`, `--muted`, 400, gap `--gap`) for counts, key caps, segmented controls, badges. Body `.panel-b` scrolls (`overflow auto; flex 1; min-height 0`); `.panel-b.pad` adds `--sp-3` padding. Props: `title`, `right?`, `pad?`, `as?` (section/nav/aside), `className`. |
+| `Tabs` | `role=tablist`, 32px strip, tab = `--fs-sm` 500 `--muted`, padding `0 --sp-2`, selected = `--text` + `inset 0 -2px var(--focus)`; optional count in `--muted` 400; optional `<kbd>` after the label. Arrow keys move, Home/End jump; `aria-controls` to the panel. Replaces `components/Tabs.tsx` and the terminal `.tab`. Used inside `.panel-h` (title slot) or standalone above a page body. |
+| `Segmented` | `role=radiogroup`, track `--surface-2` radius `--r-md` padding 2px; option 24px high, `--fs-xs` mono 500, selected `--surface` + `--text` + `0 0 0 1px --border-2`. Outcome variant: selected YES = `--yes` bg / `--on-yes`, NO = `--no` / `--on-no`. Keep `components/Segmented.tsx` API; the ticket's `.seg` and the range control share it. |
+| `Table` (`DataTable`) | `.tbl` inside a Panel body: sticky header `--hdr-h`, `--surface-2`, `--fs-sm` 500 `--muted`, sortable headers underline on hover; rows `--row-h`, `--fs-md`, 1px `--border` rules, hover `--surface-2`; numeric cells `.n` right-aligned; selected row = `--focus-bg` + 2px left bar `--focus` (inset box-shadow, same in virtual mode); `.muted` rows for stale data. Two-line rows: `.row2` (height `--row-h-2`, question clamped to 2 lines with `-webkit-line-clamp: 2`, full question in `title`). The scroll container is the Panel body; the page never scrolls horizontally because of a table. |
+| `Button` (`.btn`) | height `--btn-h`, padding `0 --sp-3`, radius `--r-md`, `--fs-sm` 500 `--font-ui`, gap `--sp-1` for an inline `<kbd>`. Variants: `primary` (`--focus` bg, `--on-yes`-style dark text in dark / white in light via `--on-focus` = `#0b0d10` / `#fff`), `secondary` (`--surface-2` bg, 1px `--border-2`, `--text`; the default), `ghost` (transparent, `--muted`, hover `--surface-2`), `danger` (transparent, 1px `--down`, `--down` text; filled `--down` only inside a confirm dialog), `yes`/`no` (filled outcome colours, ticket submit only), `kill` (`--kill` bg, `--on-kill`, 600, upper-case; the only red filled button outside dialogs). Sizes `sm` 24px and `lg` `--btn-h-lg`. Disabled: `opacity .5; cursor not-allowed`. |
+| `Input` (`.inp`) | height `--input-h`, `--surface-2`, 1px `--border-2`, radius `--r-md`, padding `0 --sp-2`, `--fs-md`; numeric inputs mono right-aligned; optional unit suffix slot (`¢`, `USD`, `sh`) in `--muted`. `lg` variant = ticket (`--input-h-lg`, `--fs-lg` mono). Error: border `--down` + `.ferr` line under it; hint `.fhint` `--muted` `--fs-xs`. Label row above: `--fs-xs` `--muted`, right slot for keys/balance. `Field`/`FormGroup` keep their APIs on top of this. |
+| `Badge` | 14×14 boxed letter (§12.2), unchanged. `Chip` (`.chip`): 22px pill, radius 11px, `--fs-xs` 500, 1px `--border`, `--muted`; pressed/selected `--surface-2` + `--border-2` + `--text`; removable chips show `×`. Used for category filters, tags, saved-view name. |
+| `PricePill` (`.pill-yes` / `.pill-no`) | inline price chip for lists and tables: `height 20px; padding 0 6px; border-radius --r-sm; font 500 12px/20px --font-mono`; YES = `--yes-bg` bg, `--yes` text; NO = `--no-bg` / `--no`. Content `6¢` (whole cents, one decimal when the tick needs it, §11.2). Never coloured by direction; a change next to it is a signed `.up`/`.down` number. |
+| `OutcomeCard` | market page only: 112×56 button, radius `--r-md`, 1px `--border-2`; label row `YES` + `<kbd>Y</kbd>` `--fs-xs` `--muted`; price `--fs-2xl` 600 mono in the outcome colour; pressed = outcome border + `--yes-bg`/`--no-bg`. |
+| `Kbd` | global `kbd` rule: `font 500 10px/14px --font-mono; padding 0 4px; border 1px solid --border-2; border-bottom-width 2px; border-radius --r-sm; color --muted; background --surface-2`. Inside a filled button: transparent bg, `currentColor` border. |
+| States | `Skeleton` rows (`--surface-2` bars 10px, 9px gap, 5 per panel or 20 per table); `EmptyState` (`--muted` `--fs-md` `--font-ui`, padding `--sp-4 --sp-3`, optional action button); `ErrorBar` (3px left border `--down`, `--surface`, message + `Retry` ghost button + `×`), `StaleBanner` (same shape, `--warn`), `Spinner` 12px. Loading never clears the last good data (§11.7). |
+| `StatusText` | dot + text, never a dot alone (`live · 22:22:43` `--up`, `stale · 14s old` `--warn`, `feed error · retrying` `--down`, `connecting…` `--muted`). `FeedBadge` and `SseIndicator` become two uses of it. |
+| `Dialog` / `Drawer` | `<dialog>`: `--surface`, 1px `--border`, radius `--r-lg`, padding `--sp-3`, 360–420px; drawer variant right rail `inset var(--top-h) 0 var(--status-h) auto; width 360px`. Backdrop `--backdrop`. |
+
+### 13.3 App shell
+
+One `Shell` for every route (`app/layout.tsx` → `(app)/layout.tsx` wraps `/trade` too; the `(public)` group is deleted). Header, fixed, `--top-h` 44px, `--surface`, 1px bottom border, padding `0 --sp-3`, gap `--sp-4`:
+
+1. Wordmark `PM/EDGE` (mono 600 13px, `/` in `--focus`), links to `/markets`.
+2. Nav (`--font-ui` `--fs-sm` 500, `--muted`, active `--text` + 2px bottom `--focus`, 44px tall items, gap `--sp-3`), three groups separated by a 16px gap: **Markets** `/markets` · **Trade** `/trade` · **Watchlist** `/watchlist` ‖ **Research** `/research` · **Runs** `/runs` · **Journal** `/journal` ‖ **Portfolio** `/paper` · **Autonomy** `/autonomy` · **Settings** `/settings`. `Runs` and `Watchlist` keep their superscript counts; hover shows the `g` chord as a `<kbd>`. `Trade` is a client `<Link>` now (same shell).
+3. Market search trigger: a 260px fake input (`--surface-2`, 1px `--border-2`, radius `--r-md`, 30px, magnifier glyph, placeholder `Search markets`, right `<kbd>/</kbd>`); opens `MarketSearch` (the dialog, searching `GET /api/markets?q=` over all tracked markets, then Polymarket via `/api/markets/search` when fewer than 3 local hits). A result opens `/trade/[id]`.
+4. Right cluster (`margin-left auto`, gap `--sp-2`): theme (ghost icon button, `t`), `ModeBadge` (size `lg`, 28px box), `ApprovalsBadge`, wallet (`ConnectButton` / `AddressChip` + balance, 30px secondary button; the terminal's `RegionStatus` text folds into its tooltip and the Trade page ticket), `KillSwitchButton` (`kill` variant, 30px, label `■ KILL → L0` / `■ AT L0 · CANCEL OPEN`).
+
+Status bar: §12.1.5 unchanged (24px, mono `--fs-xs`), plus a `feed` segment (the terminal's FeedBadge text) that renders only on `/trade`. The `KeyLegend` strip is absorbed into the status bar's left side on `/trade` (first six §11.5 keys as `<kbd>` groups, hidden under 1280px).
+
+Content area: `main` fills `top: 44px; bottom: 24px`. Two page kinds, set by the route's layout:
+
+- **Document pages** (everything but `/trade`): `main` scrolls; `padding: var(--sp-3) var(--sp-4)`; content `max-width: 1600px; margin: 0 auto`. Page header pattern `.page-h`: 40px row, `h1` `--fs-lg` 600 `--font-ui` left, actions right, then the panels in a 12px gap grid.
+- **Workspace pages** (`/trade`, `/trade/[id]`): `main` is `overflow: hidden; display: grid; height: calc(100dvh − 44px − 24px); padding: var(--gap); gap: var(--gap)`; panels scroll internally.
+
+Responsive: ≥ 1280px full header. 1100–1279px: the nav collapses its third group into a `More ▾` menu, the search trigger becomes an icon button, the wallet button shows only the address chip. < 1100px: nav becomes a `≡` menu (all nine items + search), the header keeps wordmark · menu · mode · kill; document pages drop to one column; `/trade` uses the §11.3 stacked fallback. Minimum supported width 960px; nothing is designed below it.
+
+### 13.4 Market page `/trade/[id]`
+
+`/trade` without an id renders the same page with the first market of the list selected (or the last visited, `localStorage pm.trade.last`). `/markets/[id]` → 308 redirect to `/trade/[id]`. Selecting a market swaps state and `router.replace`s the URL (§11.4 rule, no remount).
+
+```
+┌ MarketList 280 ┬ Center minmax(520,1fr) ──────────────────┬ Book 300 ┬ Ticket 320 ┐
+│                │ MarketHeader (hero + outcome cards)      │          │ Ticket      │
+│  rows 1–2      │ KeyStats                                 │ rows 1–2 │             │
+│                │ PriceChart (fills)                       │          ├─────────────┤
+│                ├ BottomTabs 300 (Research·Positions·…)    │          │ Trades      │
+└────────────────┴──────────────────────────────────────────┴──────────┴─────────────┘
+grid-template-columns: 280px minmax(520px,1fr) 300px 320px; grid-template-rows: 1fr 300px
+```
+
+**MarketList** (Panel, `nav`): header `Markets` + right `J K ⏎`. Under it a 30px search input (`data-filter`, placeholder `Filter markets`, debounced 150ms) and a chip row of categories (`All` + top 8 by count, horizontally scrollable, `aria-pressed`). The list is **all tracked markets** (`GET /api/markets?q=…&limit=200&sort:-vol24h`, pinned and watchlist rows first, then the rest), not only the watchlist; empty filter shows the watchlist tab's ordering. Row (`--row-h-2` 40px + 6px vertical padding, grid `1fr auto`): line 1 question `--fs-md` `--font-ui`, clamped to 2 lines, `title` = full question; line 2 `--fs-xs` `--muted`: category · `5d` (end) · `$170` vol24h. Right column: `PricePill` YES (`6¢`) over a signed 24h change in `--fs-xs` `.up`/`.down` (`+0.5` / `−1.2`, `—` when unknown; `d24c` added to the list row = mid now − mid 24h ago from snapshots). Selected row `--focus-bg` + 2px left bar; cursor row 1px inset `--border-2`. Stale rows (no snapshot, or snapshot > 6h old: `staleRow`) muted; the list row carries no `research` field. The §10.1 disclaimer stays at the bottom of the list (`--fs-xs`). Loading 8 skeleton rows; error `Could not load markets. Retrying…`; empty `No market matches "…"`.
+
+**MarketHeader** (top of the center Panel, no panel header): left: question `h1` `--fs-lg` 600 wraps fully; meta line `--fs-xs` `--muted`: category chip · `ends Oct 26, 2026 · 5d` · `tick 1¢` · `fee 2.0%` · structural/contrarian/stale `Badge`s · `Polymarket ↗`. Right: two `OutcomeCard`s (YES, NO; the mouse form of `Y`/`N`), then a 24px ghost toolbar: `Research` (`r`, re-research; shows a spinner + `running 06:41` while a pod is live), `Steer…` (`⇧S`), `Pin` (`p`, filled `--focus` dot when pinned), `Mute` (`m`). `KeyStats` row under it (last · bid · ask · spread · min order · vol 24h · OI · depth 5¢), `--fs-xs` labels over mono values.
+
+**PriceChart** (center Panel body, SVG sized by ResizeObserver, min height 220px). Panel header row above it (34px): title `Price` · legend chips `● YES 6¢` (`--yes`) `● NO 94¢` (`--no`) (click toggles that line; the ticket's outcome line cannot be hidden) · right: `Segmented` range `1D 1W 1M ALL` (keys `[` `]`, URL `?range=`, default `1M`) and `Segmented` axis `0–100 · Fit` (key `f`, `localStorage pm.chart.axis`, default `0–100`), source note `polymarket` / `snapshots` in `--faint`.
+
+- Data: `GET /api/markets/[id]/history?range=` (`HistoryResult`, YES mids, ≤ 500 points) + the live mid (`feed.mid ?? snapshot.mid`) appended as the last point at `now`. NO series = `1 − YES` point-wise.
+- Geometry: padding `top 8, right 52, bottom 22, left 0`; gridlines `--border` at each y tick; y labels right of the plot (`--fs-xs` mono `--muted`), x labels along the bottom.
+- Y axis: `0–100` mode = ticks 0 25 50 75 100 labelled `0%…100%`. `Fit` mode fits the **visible** lines: `lo = max(0, floor((min − 2)/step)·step)`, `hi = min(100, ceil((max + 2)/step)·step)` with `step` the smallest of 1, 2, 5, 10, 25 giving ≤ 6 ticks; labels are whole percents and never repeat (that is the Rev 7 bug). If both lines are visible and their span exceeds 60 points, Fit equals 0–100.
+- X axis: `1D` a label every 4h `14:00`; `1W` one per day `Mon 20`; `1M` every 5 days `Oct 5`; `ALL` monthly `Jan ’26` (weekly `Oct 5` when the span is < 90 days). First and last labels are always present; intermediate ones drop when closer than 56px.
+- Lines: 1.5px, `--yes` and `--no`, no area fill (two lines would overlap); `vector-effect: non-scaling-stroke`. Live last point: 3px dot in the line colour plus a 1.5s expanding ring (none under reduced motion). Price tags at the right edge of each line's last point: 44×18 rect radius `--r-sm`, line colour fill, `--on-yes`/`--on-no` text, `6¢` / `94¢`; when the two tags would overlap, the hidden line's tag yields.
+- Thesis overlay (when a thesis exists): dashed (`4 3`) horizontal `--focus` at p̂ in YES space, label `p̂ 47¢` at the left end; entry markers: a 6px triangle on the YES line at each `thesisMarkers[].createdAt`, filled `--yes` for a YES thesis, `--no` for NO, pointing up for a buy; own open orders as dashed `--focus` horizontals labelled `your bid 41.2¢ · 500` (§11.4); ~~own fills (`clob` / paper fills on this market) as `▲`/`▼` `--focus`~~ (not built, deferred). Markers are filtered to the range.
+- Crosshair: on hover a 1px `--border-2` vertical, a 4px dot on every visible line, and a tooltip (`--surface`, 1px `--border`, radius `--r-sm`, padding 4px 8px, mono `--fs-xs`) following the cursor and flipping at the right edge: `Oct 20 · 14:05` on line 1, `YES 6¢` in `--yes` and `NO 94¢` in `--no` on line 2, `p̂ 47¢` in `--focus` on line 3 when present. Touch: tap holds the crosshair.
+- States: loading = 3 skeleton bars at 25/50/75% height, the previous range's lines stay dimmed to 40% until the new data lands; empty = `No points in the last day` + a `Show ALL` ghost button; error = last good lines kept, `history unavailable · retry` in `--down` in the panel header's right slot; no history and no live mid = `No price history yet.`
+- `aria-label` on the `<svg>`: `YES and NO price history, 1 month, YES 6¢, NO 94¢, 312 points`; a visually hidden `<table>` with first/last/min/max per line follows it.
+
+**BookLadder** (Panel, rows 1–2): §11 unchanged (`--row-dense` rows, YES/NO title follows the ticket outcome, bid/ask bars, spread row, `L` cursor).
+
+**Ticket column**: `TerminalTicket` (Panel, natural height, §11.6 states; wallet/region gates read from the shell's wallet state) then `TradeTape` (Panel, fills the rest).
+
+**BottomTabs** (center Panel, 300px, `Tabs` in the header slot, keys `1 2 3 4`, right slot `⤢` toggle `e` that expands the pane to the whole center column and back; `localStorage pm.trade.tab`):
+
+| Tab | Content (existing components, re-skinned) |
+|---|---|
+| **Research** `1` | Body scrolls. Row 1: `ThesisPane` (title `Thesis · YES · judge · gpt-5 · 09:12 · 3h ago`, numgrid + prose) spanning 2 of 3 columns, `AgentEstimates` in column 3. Row 2: `KillCriteriaList` · `CatalystList` · `MetricsGrid` (now a 2-column `<dl>`). Row 3: `EvidenceTable` full width (count in its title). `ResearchRunning` banner at the top while a pod is live; `No thesis yet — press r to research` as the empty state with a `Research` button. |
+| **Positions** `2` | `AccountPane` positions table (this market first, then others; marks from the feed/watchlist) + `PositionsTable` paper rows under a `Paper` divider when any. |
+| **Orders** `3` | open orders (`AccountPane` orders tab, `x` cancels the focused row) then `ApprovalsPane` rows that belong to this market. |
+| **Rules** `4` | market `rules` text (`--font-ui`, `max-width 72ch`), resolution source, token ids (mono, copy buttons), event / neg-risk group link. |
+
+Dropped from the old operator detail: `DepthChart` (the ladder shows the book) and `SlippagePane` move into the **Research** tab's row 2 as a third column only when the thesis has a size (`Slippage` curve, §12.6.3 unchanged). `BackLink` is gone; the list is always visible.
+
+Responsive: 1100–1279px the MarketList becomes the §11.3 drawer and columns are `minmax(460px,1fr) 280px 300px`; < 1100px stacked: header, outcome cards, ticket, ladder, chart (240px), tabs (Research first), trades.
+
+### 13.5 Markets explorer `/markets`
+
+Layout and behaviour from §12.2 stay (32px bar row: `ViewMenu` · `QueryBar` · count · `[c] cols`; `FilterPanel` 240px rail; URL is the truth; DSL highlighting, hints, saved views, column picker, virtual rows). Changes:
+
+- The results table lives in a `Panel` whose body is the scroll container (`height: calc(100dvh − 44 − 24 − 32 − 24px)`); `table-layout: fixed; min-width: 1180px` so narrow viewports scroll **inside the panel**, never the page. The filter rail collapses to a 28px strip with a `Filters` vertical label under 1280px (state `pm.screener.panel`).
+- Rows are `.row2` (40px): the `Market` cell wraps to two lines (`--font-ui` `--fs-md`), `title` has the full question, category under it is dropped in favour of a `Cat` column. Virtual row height becomes 40.
+- Default columns, in order: `flags` 64 · `Market` flex ≥ 320 · `YES¢` 56 (`PricePill` yes) · `NO¢` 56 (`PricePill` no) · `P` 96 (probability bar: 6px track `--surface-2`, YES fill `--yes` from the left to `mid`, NO fill `--no` from the right; `aria-label="YES 6%"`) · `24h` 56 (signed cents `.up`/`.down`, from `d24c`) · `Sprd` 48 · `Liq` 64 · `Vol24` 60 · `Days` 44 · `Prio` 44 · `Edge¢` 56. In the picker, additionally: `Mid` (decimal), `Spark` 80 (optional 24h sparkline, off by default; when on, each visible row lazily fetches `history?range=1d` through the §12.6 cache, 1px `--text` line, no axes), `D±2¢`, `Stale`, `Top1`, `Src`, `Opp`, `Cat`, `End`, and the §12.2 extras.
+- Row click / `Enter` → `/trade/[id]` (prefetched after 300ms of selection). `p` `m` `r` act on the selected row as before.
+- Count cell reads `6,627 markets`; the `[c] cols` button is a secondary `Button` with a `<kbd>c</kbd>`.
+- States unchanged (§12.2) with the new `Skeleton`/`EmptyState`/`ErrorBar`.
+
+### 13.6 Other pages
+
+Every document page starts with `.page-h` (title left, primary actions right) and is built from `Panel` + `Table` + `Tabs`; no bare tables on the page background. Mono is for numbers only, so the body copy on these pages (hints, empty states, prose) switches to `--font-ui`.
+
+| Page | Mapping |
+|---|---|
+| Watchlist | `.page-h` `Watchlist` + right `show muted` checkbox, filter input, `swept 22:20`. `Tabs` (Small-cap · Size · Structural · Alerts) inside the Panel header; table rows `.row2`; `Side` column uses `.yes`/`.no`; `Market` wraps. Row click → `/trade/[id]`. |
+| Research | `.page-h` `Research` + `+ New profile` (primary, `n`). Profiles as a left Panel list (240px) + the selected profile's form Panel; empty state `No research profiles yet` with `Create profile` (secondary). |
+| Runs | `BudgetStrip` becomes a KPI strip (`--fs-xl` values, `--muted` labels) inside a Panel; `PodTable` in a Panel with `.row2` market cells; `/runs/[podId]` keeps §12.3 panes as Panels, the question links to `/trade/[id]`. |
+| Journal | controls row → `.page-h` with the selects on the right; `KpiStrip` Panel; charts in Panels (line colours: model `--text`, market `--muted`, pre-reveal `--focus`; P&L fills `--up-bg`/`--down-bg`). |
+| Portfolio (`/paper`) | `.page-h` `Portfolio` with `Tabs` Live · Paper (counts) and `PnlStrip` KPI Panel; positions/fills tables in Panels; off-state copy `Paper trading is off. Set mode L1 Paper in Autonomy.` with an `Autonomy →` secondary button. |
+| Autonomy | `.page-h` `Autonomy` + `ModeSelector` (Segmented, mode colours) in the header row; Panels: Pending approvals, Category overrides, Risk limits (MeterBar fills `--focus`/`--warn`/`--down`), Gates (`GatePanel`), Kill (the wide `kill` button inside its own Panel with the one-line explanation), Event log. |
+| Settings | `.page-h` `Settings`; each `FormGroup` is a Panel (title left, `Save …` secondary button in the header right slot, turning primary while dirty); fields `Input` 28px with unit suffixes; `theme` field becomes a `Segmented` Dark · Light. |
+
+### 13.7 Keyboard
+
+One registry (`useGlobalKeys` + per-route scopes, `SHORTCUTS` grouped by scope for the `?` sheet). Single keys are ignored while an input, select, textarea or open dialog has focus unless the row says "in ticket". The status bar shows a pending `g…`.
+
+| Scope | Keys |
+|---|---|
+| Global | `g m` Markets · `g t` Trade · `g w` Watchlist · `g r` Research · `g f` Runs (`g u` alias) · `g j` Journal · `g p` Portfolio · `g a` Autonomy · `g s` Settings · `g n` alerts drawer · `/` focus the view's `data-filter` input, else open market search · `t` theme · `?` sheet · `Esc` disarm, close popover/dialog/drawer, then blur |
+| Lists (Markets, Watchlist, Runs, Journal tables, alerts) | `j` `k` move selection · `Enter` open · `p` pin · `m` mute · `r` research · `f` filter panel · `c` columns · `v` views · `Ctrl+S` save view · `a` / `A` ack (alerts) |
+| Trade page | `j` `k` `Enter` market list cursor/select (same meaning as Lists) · `b` `s` side · `y` `n` outcome · `l` ladder · `⇧T` ticket · `x` cancel · `↑ ↓ ⇧↑ ⇧↓ Tab Enter ⌘Enter` in ticket (§11.5) · `1 2 3 4` bottom tabs (replace `P`/`O`) · `e` expand bottom pane · `[` `]` chart range · `f` chart axis Fit/0–100 · `p` pin · `m` mute · `r` research · `⇧S` steer (lowercase `s` is Sell) |
+| Research page | `n` new · `⇧P` preview · `x` run now (`p` was preview; it now means pin everywhere) |
+
+Conflicts resolved: `p`/`m`/`r` mean pin/mute/research on every route; `s` is Sell only on Trade (steer is `⇧S`); `f` is "filter panel" on Markets and "fit axis" on Trade (different routes, both listed in the sheet under their scope); `t` is always theme, `⇧T` the ticket; `x` is always "cancel the focused thing" (order, run). Every key has a visible mouse target with the same name and a `<kbd>` in its label or tooltip.
+
+### 13.8 Accessibility
+
+- Text contrast ≥ 4.5:1 for every token pair in 13.1 (verified for `--muted`, `--yes`, `--no`, `--up`, `--down`, `--focus`, `--warn`, `--kill` on `--surface` and `--surface-2`, both themes); `--faint` only for gridlines and disabled values. Filled YES/NO/kill buttons use `--on-*` text, ≥ 4.5:1.
+- Colour is never the only signal: YES/NO always carry the word or `¢` tag, up/down numbers carry a sign, statuses carry text, chart lines carry legend chips and price tags.
+- Focus: visible 2px `--focus` ring on every focusable; roving `tabindex` in the ladder, market list, tab strips and segmented controls; `Esc` always returns focus to where it came from (search trigger, tab button).
+- Tabs: `role=tablist/tab/tabpanel`, `aria-selected`, `aria-controls`, arrow-key navigation. Segmented: `role=radiogroup` + `role=radio` + `aria-checked`.
+- Chart: `<svg role="img">` with the 13.4 `aria-label`, a visually hidden data table, tooltip in an `aria-live="polite"` region updated on hover throttled to 250ms; range and axis controls are real buttons.
+- Live regions: `FeedBadge`/`SseIndicator` `role=status`; `ErrorBar` `role=alert`; the kill button has the §2 `aria-label` and a text label.
+- Motion: tint, ring pulse and spinners are disabled under `prefers-reduced-motion`; nothing blinks faster than 1 Hz.
+- Minimum target 24×24px for every control, 28px for buttons in the header and forms.

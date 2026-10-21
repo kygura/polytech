@@ -1,4 +1,5 @@
 import { refitDelta, type Suggested } from "./refit";
+import { Button } from "./ui";
 import ui from "./ui.module.css";
 
 /** Settings > Calibration: the journal's suggested refit (DESIGN 12.4). Apply is disabled while the group has unsaved edits. */
@@ -11,8 +12,8 @@ export function SuggestedRefit({ current, suggested, dirty, busy, onApply, onDis
         <tbody><tr><td>extremize</td><td className="num">{current.toFixed(2)}</td><td className="num">{suggested.extremize.toFixed(2)}</td><td className="num">{refitDelta(current, suggested)}</td></tr></tbody>
       </table>
       <div className={ui.refitActions}>
-        <button type="button" onClick={onDismiss} disabled={busy}>Dismiss</button>
-        <button type="button" className={ui.refitApply} onClick={onApply} disabled={busy || dirty} aria-describedby={dirty ? "refit-hint" : undefined}>Apply suggested</button>
+        <Button onClick={onDismiss} disabled={busy}>Dismiss</Button>
+        <Button variant="primary" onClick={onApply} disabled={busy || dirty} aria-describedby={dirty ? "refit-hint" : undefined}>Apply suggested</Button>
         {dirty && <span id="refit-hint" className="muted ui">Save or discard edits first</span>}
       </div>
     </div>

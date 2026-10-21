@@ -6,6 +6,8 @@ import { Field } from "../../../components/Field";
 import { refitConfirm, refitPayload } from "../../../components/refit";
 import { SuggestedRefit } from "../../../components/SuggestedRefit";
 import { FormGroup } from "../../../components/FormGroup";
+import pg from "../../../components/page.module.css";
+import { Panel, Segmented } from "../../../components/ui";
 import { useTheme, type Theme } from "../../../hooks/useTheme";
 import type { AppSettings } from "../../../lib/jobs/settings";
 
@@ -16,7 +18,7 @@ const GROUPS = {
 type Group = keyof typeof GROUPS;
 const ROLES = ["rules", "source", "base_rate", "news", "red_team", "judge"];
 const MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
-const THEMES: Theme[] = ["dark", "light", "system"];
+const THEMES: readonly { value: Theme; label: string }[] = [{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }];
 
 const pick = (s: AppSettings, keys: readonly string[]) => Object.fromEntries(keys.map((k) => [k, (s as Record<string, unknown>)[k]]));
 const getAt = (o: unknown, path: string): unknown => path.split(".").reduce<any>((x, k) => x?.[k], o);
@@ -85,8 +87,10 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
   const group = (g: Group, children: ReactNode) => <FormGroup key={g} id={g === "Calibration" || g === "Budget" ? g.toLowerCase() : undefined} title={g} dirty={dirty(g)} onSave={() => save(g)}>{children}</FormGroup>;
 
   return (
-    <>
+    <div className={pg.stack}>
+      <div className="page-h"><h1>Settings</h1></div>
       {msg && <ErrorBar message={msg} onRetry={() => setMsg(null)} />}
+      <div className={pg.cols}>
       {group("Filters", <>
         {num("filters.minDays", "min days", "d")}{num("filters.maxDays", "max days", "d")}
         {num("filters.minDepthUsd", `min depth ${s.filters.depthCents}¢`, "USD")}
@@ -127,9 +131,10 @@ export function SettingsView({ initial, categories }: { initial: AppSettings; ca
       </>)}
       <FormGroup title="Appearance">
         <Field label="theme" htmlFor="theme">
-          <select id="theme" value={theme} onChange={(e) => setTheme(e.target.value as Theme)}>{THEMES.map((t) => <option key={t} value={t}>{t}</option>)}</select>
+          <Segmented label="theme" options={THEMES} value={theme} onChange={setTheme} />
         </Field>
       </FormGroup>
-    </>
+      </div>
+    </div>
   );
 }

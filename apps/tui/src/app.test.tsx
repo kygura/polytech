@@ -3,8 +3,6 @@ import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./app";
 
-// Hermetic: never read the real ~/.config/pm-edge/token; fetch is stubbed per test below.
-vi.mock("./auth", () => ({ authHeaders: async () => ({}) }));
 
 // Tiny Ink test harness (ink-testing-library is untested against Ink 8): debug mode writes every frame raw.
 function mount() {

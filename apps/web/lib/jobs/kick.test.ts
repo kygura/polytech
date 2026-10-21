@@ -1,6 +1,6 @@
 import { memoryKv } from "@pm/db";
 import { describe, expect, it, vi } from "vitest";
-import { kickIfStale } from "./kick";
+import { kickIfStale, runChain } from "./kick";
 
 const MIN = 60_000;
 
@@ -33,5 +33,26 @@ describe("kickIfStale", () => {
   });
   it("start error propagates (route logs it)", async () => {
     await expect(kickIfStale(memoryKv(), Date.now(), async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+  });
+});
+
+describe("runChain (inline, no workflow wrapper)", () => {
+  it("runs the steps in cron order and a failing step does not block the later ones", async () => {
+    const seen: string[] = [], err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runChain(async (n, sc) => { seen.push(sc ? `${n}:${sc}` : n); if (n === "screen") throw new Error("boom"); });
+    expect(seen).toEqual(["sweep", "snapshot:all", "screen", "research", "monitor"]);
+    expect(err).toHaveBeenCalledWith("chain: screen failed", expect.any(Error));
+    err.mockRestore();
+  });
+  it("startChain off Vercel runs inline and never calls the workflow function directly", async () => {
+    vi.stubEnv("VERCEL", "");
+    const jobs = { sweep: vi.fn(), snapshot: vi.fn(), screen: vi.fn(), research: vi.fn(), monitor: vi.fn() };
+    vi.doMock("../api", () => ({ JOBS: jobs }));
+    const { startChain: fresh } = await import("./kick");
+    await fresh();
+    expect(jobs.sweep).toHaveBeenCalledTimes(1);
+    expect(jobs.snapshot).toHaveBeenCalledWith("all");
+    expect(jobs.monitor).toHaveBeenCalledTimes(1);
+    vi.doUnmock("../api"); vi.unstubAllEnvs();
   });
 });

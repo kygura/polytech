@@ -1,7 +1,7 @@
 import { hm } from "./fmt";
 import css from "./ui.module.css";
 
-export const STALE_MS = 5 * 60_000;
+export { STALE_MS } from "../lib/cadence"; // 2x the scout kick interval, shared with the status bar cadence
 
 export function StaleBanner({ lastSnapshotAt, now }: { lastSnapshotAt: number | null; now: number }) {
   const min = lastSnapshotAt == null ? null : Math.round((now - lastSnapshotAt) / 60_000);

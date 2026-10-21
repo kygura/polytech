@@ -1,6 +1,8 @@
 "use client";
 import { DataTable, type Column } from "../DataTable";
 import { EmptyState } from "../EmptyState";
+import { Flat } from "../pageParts";
+import { Panel } from "../ui";
 import { StatusDot } from "../StatusDot";
 import { dotStatus } from "../PodTable";
 import { dur, hms } from "../fmt";
@@ -17,10 +19,10 @@ export type Agent = {
 const dash = <span className="muted">{"—"}</span>;
 
 export function AgentTable({ agents, now, selected, onSelect, onView }: { agents: Agent[]; now: number; selected: string | null; onSelect: (id: string) => void; onView: (a: Agent) => void }) {
-  if (!agents.length) return <section className="pane"><EmptyState text="No agent runs yet" /></section>;
+  if (!agents.length) return <Panel title="Agents"><EmptyState text="No agent runs yet" /></Panel>;
   const retries = retryIds(agents);
   const cols: Column<Agent>[] = [
-    { id: "role", header: "Role", align: "l", cell: (a) => a.role },
+    { id: "role", header: "Role", align: "l", cell: (a) => <span className="n">{a.role}</span> },
     { id: "model", header: "Model", align: "l", cell: (a) => <span className="muted">{a.model}</span> },
     { id: "status", header: "Status", align: "l", cell: (a) => <StatusDot status={dotStatus(a.status)} label={a.status} /> },
     { id: "started", header: "Started", align: "r", cell: (a) => a.startedAt == null ? dash : <span suppressHydrationWarning>{hms(a.startedAt)}</span> },
@@ -32,13 +34,13 @@ export function AgentTable({ agents, now, selected, onSelect, onView }: { agents
     { id: "retry", header: "retry", align: "l", cell: (a) => retries.has(a.id) ? <span className={css.tag}>retry</span> : null },
   ];
   return (
-    <DataTable columns={cols} rows={byRole(agents)} rowKey={(a) => String(a.id)} selectedKey={selected} onSelect={onSelect} label="agent runs"
+    <Panel title="Agents" right={<span className="n">{agents.length}</span>}><Flat><DataTable columns={cols} rows={byRole(agents)} rowKey={(a) => String(a.id)} selectedKey={selected} onSelect={onSelect} label="agent runs"
       rowClass={(a) => (a.status === "running" ? css.live : undefined)}
       renderExpanded={(a) => (
         <div className={css.xbody}>
           <ToolCallLog calls={a.toolCalls} />
           {a.output != null && <button type="button" className={css.link} onClick={() => onView(a)}>view output</button>}
         </div>
-      )} />
+      )} /></Flat></Panel>
   );
 }

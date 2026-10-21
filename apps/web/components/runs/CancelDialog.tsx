@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { Button } from "../ui";
 import css from "./runs.module.css";
 
 /** Native <dialog>; Esc keeps (browser cancel event), Enter lands on the autofocused confirm button. */
@@ -16,8 +17,8 @@ export function CancelDialog({ open, onKeep, onConfirm }: { open: boolean; onKee
       <h2 id="cancel-title">Cancel run?</h2>
       <p>Agents that finished are kept; no thesis will be written.</p>
       <div className={css.btns}>
-        <button type="button" onClick={onKeep}>Keep (Esc)</button>
-        <button type="button" className={css.danger} autoFocus onClick={onConfirm}>Cancel run (Enter)</button>
+        <Button onClick={onKeep}>Keep <kbd>Esc</kbd></Button>
+        <Button className={css.danger} autoFocus onClick={onConfirm}>Cancel run <kbd>Enter</kbd></Button>
       </div>
     </dialog>
   );

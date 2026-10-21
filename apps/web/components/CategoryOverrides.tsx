@@ -1,6 +1,7 @@
 "use client";
 import { MODES, type Mode } from "@pm/core";
 import { ModeBadge } from "./ModeBadge";
+import { Panel, Table } from "./ui";
 
 export type CategoryRow = { category: string; override: Mode | null; effective: Mode };
 const rank = (m: Mode) => MODES.indexOf(m);
@@ -8,9 +9,8 @@ const rank = (m: Mode) => MODES.indexOf(m);
 /** Override may only lower the global mode. Options above global are disabled with the reason in title. */
 export function CategoryOverrides({ rows, mode, onChange }: { rows: CategoryRow[]; mode: Mode; onChange: (category: string, override: Mode) => void }) {
   return (
-    <section className="pane">
-      <h2>Category overrides</h2>
-      <table aria-label="category overrides">
+    <Panel title="Category overrides">
+      <Table label="category overrides">
         <thead><tr><th scope="col">Category</th><th scope="col">Override</th><th scope="col">Effective</th></tr></thead>
         <tbody>
           {rows.length ? rows.map((r) => (
@@ -27,7 +27,7 @@ export function CategoryOverrides({ rows, mode, onChange }: { rows: CategoryRow[
             </tr>
           )) : <tr><td colSpan={3} className="muted">No categories yet</td></tr>}
         </tbody>
-      </table>
-    </section>
+      </Table>
+    </Panel>
   );
 }

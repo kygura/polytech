@@ -1,6 +1,8 @@
 "use client";
 import { DataTable, type Column } from "../DataTable";
 import { EmptyState } from "../EmptyState";
+import { Flat } from "../pageParts";
+import { Panel } from "../ui";
 import { host, mmdd, words } from "../fmt";
 import detail from "../detail.module.css";
 
@@ -8,7 +10,7 @@ export type Ev = { id: number; role: string; claim: string; quote: string | null
 
 const COLS: Column<Ev>[] = [
   { id: "role", header: "Role", align: "l", cell: (e) => e.role },
-  { id: "dir", header: "Dir", align: "l", cell: (e) => e.direction > 0 ? <span className="pos" aria-label="supports">+</span> : e.direction < 0 ? <span className="neg" aria-label="against">{"−"}</span> : <span className="muted">0</span> },
+  { id: "dir", header: "Dir", align: "l", cell: (e) => e.direction > 0 ? <span className="up" aria-label="supports">+</span> : e.direction < 0 ? <span className="down" aria-label="against">{"−"}</span> : <span className="muted">0</span> },
   { id: "claim", header: "Claim", align: "l", cell: (e) => <span className={detail.claim}>{e.claim}</span> },
   { id: "quote", header: "Quote", align: "l", cell: (e) => <span className={detail.quote} title={e.quote ?? undefined}>{e.quote ? words(e.quote, 25) : "—"}</span> },
   { id: "pub", header: "Published", align: "l", cell: (e) => e.publishedAt ? mmdd(e.publishedAt) : <span className="muted">{"—"}</span> },
@@ -20,9 +22,8 @@ const COLS: Column<Ev>[] = [
 export function EvidenceStream({ evidence }: { evidence: Ev[] }) {
   const rows = [...evidence].sort((a, b) => b.retrievedAt - a.retrievedAt || b.id - a.id);
   return (
-    <section className="pane">
-      <h2>Evidence ({evidence.length})</h2>
-      {rows.length ? <DataTable columns={COLS} rows={rows} rowKey={(e) => String(e.id)} keys={false} label="evidence" /> : <EmptyState text="No evidence yet" />}
-    </section>
+    <Panel title={`Evidence (${evidence.length})`}>
+      {rows.length ? <Flat><DataTable columns={COLS} rows={rows} rowKey={(e) => String(e.id)} keys={false} label="evidence" /></Flat> : <EmptyState text="No evidence yet" />}
+    </Panel>
   );
 }

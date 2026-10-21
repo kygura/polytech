@@ -9,7 +9,7 @@ import { isRejection, type Wallet } from "../../hooks/useWallet";
 import type { PublicMarketDetail } from "../../lib/public";
 import { loadVisitorSettings } from "../../lib/visitor/settings";
 import { truncate } from "../fmt";
-import { DEFAULT_TICK, onTick, quote, roundTick, sellQuote, ticketGate, validate, validateSell, type FieldErrors } from "../public/ticket";
+import { DEFAULT_TICK, onTick, quote, roundTick, sellQuote, ticketGate, validate, validateSell, type FieldErrors } from "./ticket";
 import { cents, errMsg, forOutcome, nudge, sh, usd, type Outcome, type TradeSide } from "./book";
 import { buttonState, type Action } from "./rules";
 import css from "./terminal.module.css";
@@ -239,7 +239,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
 
         <div className={css.fld}>
           <label htmlFor="tk-shares"><span>Shares</span><span>
-            {loaded && n != null && p01 != null && <>= <span className={css.n} style={{ color: "var(--t-text)" }}>{usd(n * roundTick(side, p01, tick))}</span> · </>}
+            {loaded && n != null && p01 != null && <>= <span className={css.n} style={{ color: "var(--text)" }}>{usd(n * roundTick(side, p01, tick))}</span> · </>}
             Balance {c.balance == null ? "—" : usd(c.balance)}
           </span></label>
           <div className={`${css.inp} ${!editable ? css.dis : ""} ${loaded && shares !== "" && shareErr ? css.err : ""}`}>

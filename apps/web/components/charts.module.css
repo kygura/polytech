@@ -7,5 +7,3 @@
   position: absolute; pointer-events: none; background: var(--surface-2); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 2px var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); white-space: nowrap;
 }
-.levels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-2); }
-.levels table th { position: static; }

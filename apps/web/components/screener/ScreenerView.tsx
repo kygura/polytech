@@ -5,9 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "../DataTable";
 import { EmptyState } from "../EmptyState";
 import { ErrorBar } from "../ErrorBar";
-import { Skeleton } from "../Skeleton";
 import { STALE_MS } from "../StaleBanner";
 import { CHORD_MS } from "../../hooks/useGlobalKeys";
+import { Button, Panel } from "../ui";
 import ui from "../ui.module.css";
 import { buildColumns, cleanCols, colOfField, DEFAULT_COLS, pickCols, sortFieldOf } from "./columns";
 import { DEFAULT_SORT, nextSorts, pagedQuery, setSortInQuery } from "./dsl";
@@ -35,7 +35,8 @@ async function call(url: string, init?: RequestInit) {
   return body;
 }
 const canon = (q: string) => { const r = parseQuery(q); return r.errors.length ? q.trim() : formatQuery(r.filter); };
-const BODY_H = "100dvh - 40px - 24px - 32px - 36px";
+const ROW_H = 40; // two-line rows (DESIGN 13.5)
+const WIDE = 1280; // under this the filter rail starts folded
 
 export function ScreenerView({ initial, views: initialViews, defaultText, now: serverNow, lastSnapshotAt }: Props) {
   const router = useRouter();
@@ -72,7 +73,8 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   // client-only state: clock (hydration-safe), saved panel + column prefs
   useEffect(() => {
     setNow(Date.now());
-    if (store.get("pm.screener.panel") === "0") setPanel(false);
+    const saved = store.get("pm.screener.panel");
+    if (saved === "0" || (saved == null && window.innerWidth < WIDE)) setPanel(false);
     setCols(pickCols(initialViews.find((v) => v.id === initial.viewId)?.columns, store.get(`pm.cols.${initial.viewId}`))); // a saved view's columns win over localStorage
   }, [initial.viewId]); // eslint-disable-line react-hooks/exhaustive-deps -- initialViews changes on every refresh; only a view switch resets columns
 
@@ -133,7 +135,7 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   // a row selected for 300 ms prefetches its detail
   useEffect(() => {
     if (!selected) return;
-    const t = setTimeout(() => router.prefetch(`/markets/${selected}`), 300);
+    const t = setTimeout(() => router.prefetch(`/trade/${selected}`), 300);
     return () => clearTimeout(t);
   }, [selected, router]);
 
@@ -231,21 +233,21 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
   const columns = useMemo(() => buildColumns(cols, { now, researching }), [cols, now, researching]);
   const primary = sorts[0]!;
   const sortProp = { id: colOfField(primary.field, cols) ?? "", dir: primary.dir };
-  const tableH = `calc(${BODY_H}${error ? " - 46px" : ""})`;
-  const virtual = useMemo(() => ({ rowHeight: 26, overscan: 20, height: tableH, onWindow: (w: { end: number }) => setWinEnd(w.end) }), [tableH]);
+  const virtual = useMemo(() => ({ rowHeight: ROW_H, overscan: 20, height: "100%", onWindow: (w: { end: number }) => setWinEnd(w.end) }), []);
 
   let table;
   if (rows.length) {
     table = (
-      <div className={valid ? undefined : css.dim}>
+      <div className={valid ? css.fit : `${css.fit} ${css.dim}`}>
         <DataTable key={fetched.current} columns={columns} rows={rows} rowKey={(r) => r.conditionId} sort={sortProp} selectedKey={selected} onSelect={setSelected}
-          onOpen={(r) => router.push(`/markets/${r.conditionId}`)} muted={stale} label="markets" virtual={virtual} rowClass={(r) => (r.muted ? css.mutedRow : undefined)}
+          onOpen={(r) => router.push(`/trade/${r.conditionId}`)} muted={stale} label="markets" virtual={virtual} flush rowClass={(r) => (r.muted ? `row2 ${css.mutedRow}` : "row2")}
           onSort={(s, additive) => { const field = sortFieldOf(s.id); if (field) setText(setSortInQuery(text, nextSorts(sorts, { field, dir: s.dir }, !!additive))); }} />
       </div>
     );
-  } else if (loading) table = <Skeleton rows={20} />;
-  else if (!valid) table = <EmptyState text="Fix the query to load markets." />;
-  else table = <EmptyState text="No markets match. Loosen a range or drop a tag." action={<button type="button" onClick={() => setText("")}>Clear query</button>} />;
+  } else if (loading) table = <div className={css.skel} aria-busy="true" aria-label="loading">{Array.from({ length: 20 }, (_, i) => <span key={i} style={{ width: `${55 + ((i * 17) % 40)}%` }} />)}</div>;
+  else if (!valid) table = <div className={css.state}><EmptyState text="Fix the query to load markets." /></div>;
+  else if (error?.retry) table = <div className={css.state}><EmptyState text="Couldn't load markets." action={<Button onClick={() => { setError(null); setReload((n) => n + 1); }}>Retry</Button>} /></div>;
+  else table = <div className={css.state}><EmptyState text="No markets match. Loosen a range or drop a tag." action={<Button onClick={() => setText("")}>Clear query</Button>} /></div>;
 
   return (
     <div className={css.page}>
@@ -254,7 +256,7 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
           onPick={pick} onSaveAs={() => setDialog("save")} onRename={() => setDialog("rename")} onDelete={() => setDialog("delete")} onRevert={() => { setText(baseText); applyCols(active, active ? viewId : "default"); }} />
         <QueryBar value={text} onChange={setText} errors={parsed.errors} known={known} />
         <div className={css.meta}>
-          <span className={css.count} aria-live="polite">{total} mkts{loading && <span className={ui.spinner} role="status" aria-label="loading" />}</span>
+          <span className={css.count} aria-live="polite"><b>{total.toLocaleString("en-US")}</b>{" "}{total === 1 ? "market" : "markets"}{loading && <span className={ui.spinner} role="status" aria-label="loading" />}</span>
           <ColsMenu cols={cols} onChange={changeCols} open={pop === "cols"} setOpen={(o) => setPop(o ? "cols" : null)} />
         </div>
       </div>
@@ -264,7 +266,7 @@ export function ScreenerView({ initial, views: initialViews, defaultText, now: s
           : <button type="button" className={css.rail} onClick={togglePanel} aria-label="Show filters" title="Show filters (f)">Filters</button>}
         <div className={css.tableCol}>
           {error && <div className={css.errWrap}><ErrorBar message={error.msg} onRetry={error.retry ? () => { setError(null); setReload((n) => n + 1); } : undefined} onDismiss={() => setError(null)} /></div>}
-          {table}
+          <Panel className={css.results} label="Markets">{table}</Panel>
         </div>
       </div>
       {dialog === "save" && <NameSheet title="Save view" initial={active?.name ?? ""} action="Save" onClose={() => setDialog(null)} submit={save}

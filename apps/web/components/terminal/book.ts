@@ -1,6 +1,6 @@
 // Pure terminal helpers (DESIGN 11.2, 11.7): outcome mirroring, cents display, update-tint diffs, nudges. No React.
 import type { FeedLevel, MarketFeed } from "../../hooks/useMarketFeed";
-import { roundTick, tickDecimals } from "../public/ticket";
+import { roundTick, tickDecimals } from "./ticket";
 
 export type Outcome = "YES" | "NO";
 export type TradeSide = "BUY" | "SELL";
@@ -14,6 +14,16 @@ export function forOutcome(f: MarketFeed, o: Outcome): MarketFeed {
   if (o === "YES") return f;
   return { ...f, bids: f.asks.map(flipLevel), asks: f.bids.map(flipLevel), mid: f.mid == null ? null : flip(f.mid), last: f.last == null ? null : flip(f.last) };
 }
+
+/** Polymarket's display rule: the YES midpoint, unless the book is wider than 10¢, then the last trade (a 1¢ bid / 82¢ ask is not a 42¢ price). */
+export const WIDE_SPREAD = 0.1;
+export function displayYes(b: { bid: number | null | undefined; ask: number | null | undefined; mid: number | null | undefined; last: number | null | undefined }): number | null {
+  const wide = b.bid != null && b.ask != null && b.ask - b.bid > WIDE_SPREAD + 1e-9;
+  return wide && b.last != null ? b.last : b.mid ?? b.last ?? null;
+}
+export const isWide = (bid: number | null | undefined, ask: number | null | undefined) => bid != null && ask != null && ask - bid > WIDE_SPREAD + 1e-9;
+/** The feed's YES token display price (see `displayYes`). */
+export const feedDisplay = (f: Pick<MarketFeed, "bids" | "asks" | "mid" | "last">) => displayYes({ bid: f.bids[0]?.price, ask: f.asks[0]?.price, mid: f.mid, last: f.last });
 
 /** Cents decimals for a tick: 0.01 -> 0 (`41¢`), 0.001 -> 1 (`41.2¢`). */
 export const centDecimals = (tick: number) => Math.max(0, tickDecimals(tick) - 2);

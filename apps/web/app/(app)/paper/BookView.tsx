@@ -2,13 +2,15 @@
 import type { Mode } from "@pm/core";
 import { useEffect, useState, type ReactNode } from "react";
 import { ReconStatus } from "../../../components/ApprovalsPane";
-import { DataTable, MarketCell, type Column } from "../../../components/DataTable";
+import { DataTable, type Column } from "../../../components/DataTable";
 import { ErrorBar } from "../../../components/ErrorBar";
 import { NumCell } from "../../../components/NumCell";
-import { Tabs } from "../../../components/Tabs";
+import { Flat, Kpis, MarketCell, MarketTitle, Money } from "../../../components/pageParts";
+import { Panel, Tabs } from "../../../components/ui";
 import { hm, mmdd } from "../../../components/fmt";
 import { approvalChip, shortId, type Recon } from "../../../components/live";
 import css from "../../../components/panels.module.css";
+import pg from "../../../components/page.module.css";
 
 // GET /api/book/live (DESIGN 8.2).
 type LivePos = { conditionId: string; question: string; tokenId: string; outcome: string; shares: number; avgPrice: number; markPrice: number | null; unrealizedUsd: number | null };
@@ -17,17 +19,17 @@ type LiveOrder = Sent & { orderId: string; conditionId: string; question: string
 type LiveFill = Sent & { tradeId: string; conditionId: string; question: string; side: string; price: number; shares: number; feeUsd: number; at: string | number };
 type LiveBook = { positions: LivePos[]; openOrders: LiveOrder[]; fills: LiveFill[]; recon: Recon | null };
 
-const LIVE = <span className={`${css.chip} ${css.chipLive}`}>LIVE</span>;
-const mkt = (r: { question: string }) => <><MarketCell question={r.question} category={null} max={40} />{LIVE}</>;
+const row2 = () => "row2";
+const mkt = (r: { conditionId: string; question: string }) => <MarketTitle id={r.conditionId} question={r.question} />;
 // Orders and fills also say who sent them and whether they are a set leg (DESIGN 9.2, 9.3).
-const sentMkt = (r: Sent & { question: string }) => {
+const sentMkt = (r: Sent & { conditionId: string; question: string }) => {
   const a = approvalChip(r);
-  return <>{mkt(r)}{r.setId && <span className={css.chip} style={{ borderColor: "var(--border)", color: "var(--text)" }}>SET</span>}{a.text !== "user" && <span className={css.chip} style={{ borderColor: a.color, color: a.color }}>{a.text}</span>}</>;
+  return <MarketCell>{mkt(r)}{r.setId && <span className={css.chip} style={{ borderColor: "var(--border)", color: "var(--text)" }}>SET</span>}{a.text !== "user" && <span className={css.chip} style={{ borderColor: a.color, color: a.color }}>{a.text}</span>}</MarketCell>;
 };
-const sideCls = (s: string) => (/YES/i.test(s) ? "pos" : /NO/i.test(s) ? "neg" : undefined);
+const sideCls = (s: string) => (/YES/i.test(s) ? "yes" : /NO/i.test(s) ? "no" : undefined);
 const t = (v: string | number) => new Date(v).getTime();
 
-const ORDER_CLS: Record<string, string> = { failed: "neg", sending: "muted", unknown: "muted" };
+const ORDER_CLS: Record<string, string> = { failed: "down", sending: "muted", unknown: "muted" };
 const ORDER_COLS: Column<LiveOrder>[] = [
   { id: "market", header: "Market", align: "l", cell: sentMkt },
   { id: "side", header: "Side", align: "l", cell: (o) => <span className={sideCls(o.side)}>{o.side}</span> },
@@ -58,29 +60,24 @@ const FILL_COLS: Column<LiveFill>[] = [
 function LiveTab({ book, now }: { book: LiveBook; now: number }) {
   const { positions, openOrders, fills } = book;
   const pnl = positions.reduce((a, p) => a + (p.unrealizedUsd ?? 0), 0);
+  const recon = <ReconStatus recon={book.recon} now={now} />;
   if (!positions.length && !openOrders.length && !fills.length)
-    return <><p className={`ui ${css.line}`} style={{ margin: 0 }}><ReconStatus recon={book.recon} now={now} /></p><p className={`muted ${css.line}`}>No live trades yet. Approvals appear at L2.</p></>;
+    return <Panel title="Live book" right={recon}><p className={`${pg.hint} ${pg.line}`}>No live trades yet. Approvals appear at L2.</p></Panel>;
   return (
-    <>
-      <p className={`ui ${css.line}`} style={{ margin: 0 }}><ReconStatus recon={book.recon} now={now} /></p>
-      <div className={css.strip} aria-label="live P&L">
-        <span className={`${css.chip} ${css.chipLive}`} style={{ marginLeft: 0 }}>LIVE</span>
-        <span className={css.stripItem}><span className="muted ui">open</span> {positions.length}</span>
-        <span className={css.stripItem}><span className="muted ui">P&L</span> $<NumCell value={pnl} fmt="usd" signed /></span>
-      </div>
-      <section className="pane">
-        <h2>Open orders</h2>
-        {openOrders.length ? <DataTable columns={ORDER_COLS} rows={openOrders} rowKey={(o) => o.orderId} keys={false} label="live open orders" /> : <p className={`muted ${css.line}`}>No open live orders.</p>}
-      </section>
-      <section className="pane" style={{ marginTop: "var(--sp-3)" }}>
-        <h2>Positions</h2>
-        {positions.length ? <DataTable columns={POS_COLS} rows={positions} rowKey={(p) => p.tokenId} keys={false} label="live positions" /> : <p className={`muted ${css.line}`}>No open positions.</p>}
-      </section>
-      <section className="pane" style={{ marginTop: "var(--sp-3)" }}>
-        <h2>Fills</h2>
-        {fills.length ? <DataTable columns={FILL_COLS} rows={fills} rowKey={(f) => f.tradeId} keys={false} label="live fills" /> : <p className={`muted ${css.line}`}>No fills yet.</p>}
-      </section>
-    </>
+    <div className={pg.stack}>
+      <Panel title="Live book" label="live P&L" right={recon}>
+        <Kpis label="live P&L" items={[{ label: "open positions", value: positions.length }, { label: "unrealized P&L", value: <Money value={pnl} /> }]} />
+      </Panel>
+      <Panel title="Open orders" right={<span className="n">{openOrders.length}</span>}>
+        {openOrders.length ? <Flat><DataTable columns={ORDER_COLS} rows={openOrders} rowKey={(o) => o.orderId} keys={false} label="live open orders" rowClass={row2} /></Flat> : <p className={`${pg.hint} ${pg.line}`}>No open live orders.</p>}
+      </Panel>
+      <Panel title="Positions" right={<span className="n">{positions.length}</span>}>
+        {positions.length ? <Flat><DataTable columns={POS_COLS} rows={positions} rowKey={(p) => p.tokenId} keys={false} label="live positions" rowClass={row2} /></Flat> : <p className={`${pg.hint} ${pg.line}`}>No open positions.</p>}
+      </Panel>
+      <Panel title="Fills" right={<span className="n">{fills.length}</span>}>
+        {fills.length ? <Flat><DataTable columns={FILL_COLS} rows={fills} rowKey={(f) => f.tradeId} keys={false} label="live fills" rowClass={row2} /></Flat> : <p className={`${pg.hint} ${pg.line}`}>No fills yet.</p>}
+      </Panel>
+    </div>
   );
 }
 
@@ -96,14 +93,19 @@ export function BookView({ mode, at, paperCount, children }: { mode: Mode; at: n
   };
   useEffect(load, [at]);
   return (
-    <>
-      <div style={{ marginBottom: "var(--sp-3)" }}>
-        <Tabs items={[{ id: "live", label: "Live", count: book ? book.positions.length : undefined }, { id: "paper", label: "Paper", count: paperCount }]} active={tab} onChange={setTab} />
+    <div className={pg.stack}>
+      <div className="page-h">
+        <h1>Portfolio</h1>
+        <div className="r">
+          <Tabs label="book" panelId="book" items={[{ id: "live", label: "Live", count: book ? book.positions.length : undefined }, { id: "paper", label: "Paper", count: paperCount }]} active={tab} onChange={setTab} />
+        </div>
       </div>
-      {tab === "paper" ? children : <>
-        {err && <ErrorBar message={err} onRetry={load} />}
-        {book && <LiveTab book={book} now={at} />}
-      </>}
-    </>
+      <div role="tabpanel" id="book" aria-labelledby={`book-tab-${tab}`}>
+        {tab === "paper" ? children : <div className={pg.stack}>
+          {err && <ErrorBar message={err} onRetry={load} />}
+          {book && <LiveTab book={book} now={at} />}
+        </div>}
+      </div>
+    </div>
   );
 }

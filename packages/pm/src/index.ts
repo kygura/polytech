@@ -59,7 +59,8 @@ const retryAfterMs = (res: Response): number | undefined => {
 };
 
 type MarketQuery = { closed?: boolean; limit?: number; liquidityMin?: number; endDateMin?: string; endDateMax?: string };
-const marketParams = (o: MarketQuery) => ({ closed: o.closed ?? false, limit: o.limit, liquidity_num_min: o.liquidityMin, end_date_min: o.endDateMin, end_date_max: o.endDateMax });
+// include_tag: Gamma /markets/keyset has no `category` and omits `tags` unless asked; without it every market's category was null
+const marketParams = (o: MarketQuery) => ({ closed: o.closed ?? false, include_tag: true, limit: o.limit, liquidity_num_min: o.liquidityMin, end_date_min: o.endDateMin, end_date_max: o.endDateMax });
 type EventQuery = { closed?: boolean; limit?: number; tagId?: number; tagSlug?: string; liquidityMin?: number };
 
 export function createPm(opts: PmOptions = {}) {

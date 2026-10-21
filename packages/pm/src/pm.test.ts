@@ -73,6 +73,7 @@ describe("pagination", () => {
     await createPm({ fixtures: false, fetch: f as never }).listMarkets({ liquidityMin: 1000, endDateMin: "2026-01-03T00:00:00.000Z", endDateMax: "2026-05-01T00:00:00.000Z" });
     const q = new URL(String((f.mock.calls[0] as unknown[])[0])).searchParams;
     expect([q.get("closed"), q.get("liquidity_num_min"), q.get("end_date_min"), q.get("end_date_max")]).toEqual(["false", "1000", "2026-01-03T00:00:00.000Z", "2026-05-01T00:00:00.000Z"]);
+    expect(q.get("include_tag")).toBe("true"); // Gamma /markets/keyset sends no tags (so no category) without it
   });
   it("walkMarkets streams pages and stops cleanly (complete=false) on a persistent 429", async () => {
     const m = (n: number) => ({ id: String(n), conditionId: `0x${n}`, question: `q${n}` });
@@ -115,6 +116,13 @@ describe("lenient parsing", () => {
     })!;
     expect(m).toMatchObject({ id: "123", volume: 3512.5, liquidity: undefined, last_trade_price: 0.21, yes_token_id: "ty", no_token_id: "tn", yes_price: 0.3, neg_risk: true, neg_risk_group: "9", category: "crypto", event_id: "9", end_date: "2026-12-31T00:00:00.000Z" });
     expect(normMarket({ question: "no condition" })).toBeUndefined();
+  });
+  it("category comes from the market-level tags of a real Gamma keyset row (it has no `category` field)", () => {
+    // shape of GET /markets/keyset?include_tag=true (trimmed): tags carry extra keys; a known category slug wins over tag order
+    const row = { id: "559651", question: "Xi Jinping out before 2027?", conditionId: "0xa4", events: [{ id: "30828", seriesSlug: "xi-jinping-out" }],
+      tags: [{ id: "103715", label: "HFC", slug: "hfc", forceShow: false }, { id: "366", label: "world affairs", slug: "world-affairs" }, { id: "100265", label: "Geopolitics", slug: "geopolitics" }] };
+    expect(normMarket(row)).toMatchObject({ category: "geopolitics", tags: ["hfc", "world-affairs", "geopolitics"] });
+    expect(normMarket({ ...row, tags: undefined })!.category).toBeUndefined(); // without include_tag: what the sweep used to store
   });
   it("sorts books best-first and accepts both map and array token shapes", async () => {
     const f = vi.fn(async (u: URL) => json(String(u).includes("/books")

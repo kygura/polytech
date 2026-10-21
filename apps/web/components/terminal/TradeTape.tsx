@@ -2,7 +2,7 @@
 import { useRef } from "react";
 import type { FeedStatus, MarketFeed } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
-import { DEFAULT_TICK } from "../public/ticket";
+import { DEFAULT_TICK } from "./ticket";
 import { PaneSkeleton } from "./PaneSkeleton";
 import { cents, sh, tradeKey } from "./book";
 import css from "./terminal.module.css";

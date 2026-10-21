@@ -3,13 +3,16 @@ import type { Mode } from "@pm/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { DataTable, MarketCell, type Column } from "./DataTable";
+import { DataTable, type Column } from "./DataTable";
 import { EdgeBadge } from "./EdgeBadge";
 import { NumCell } from "./NumCell";
+import { Flat, MarketTitle } from "./pageParts";
+import { Button, Panel } from "./ui";
 import { hm, truncate } from "./fmt";
 import { approvalChip, countdown, drift, fallbackText, reconText, setStateText, stateText, usd2, type Proposal, type Recon, type SetLeg, type SetView } from "./live";
 import css from "./panels.module.css";
 import ui from "./ui.module.css";
+import btn from "./ui/ui.module.css";
 
 export function ReconStatus({ recon, now }: { recon: Recon | null | undefined; now: number }) {
   const r = reconText(recon, now);
@@ -45,34 +48,34 @@ function Rebaseline() {
       {confirm ? (
         <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}>
           <span className="ui">Re-baseline recon to current exchange balance?</span>
-          <button ref={confirmRef} type="button" onClick={() => void run()}>Confirm</button>
-          <button type="button" onClick={cancel}>Cancel</button>
+          <button type="button" className={`${btn.btn} ${btn.sm}`} ref={confirmRef} onClick={() => void run()}>Confirm</button>
+          <Button size="sm" onClick={cancel}>Cancel</Button>
         </span>
       ) : ackPrompt ? (
         <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center", flexWrap: "wrap" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}>
-          <span role="alert" className="neg ui">{ackPrompt.error}</span>
+          <span role="alert" className="down ui">{ackPrompt.error}</span>
           {ackPrompt.diff && ackPrompt.diff !== "none" && ackPrompt.diff.split("; ").map((t) => <span key={t} className="ui muted">{t}</span>)}
-          <button type="button" onClick={() => void run(true)}>I checked the venue — re-baseline anyway</button>
-          <button ref={ackCancelRef} type="button" onClick={cancel}>Cancel</button>
+          <Button size="sm" onClick={() => void run(true)}>I checked the venue — re-baseline anyway</Button>
+          <button type="button" className={`${btn.btn} ${btn.sm}`} ref={ackCancelRef} onClick={cancel}>Cancel</button>
         </span>
       ) : (
-        <button ref={openRef} type="button" disabled={busy} onClick={() => setConfirm(true)}>{busy ? "Re-baselining…" : "Re-baseline"}</button>
+        <button type="button" className={`${btn.btn} ${btn.sm}`} ref={openRef} disabled={busy} onClick={() => setConfirm(true)}>{busy ? "Re-baselining…" : "Re-baseline"}</button>
       )}
-      {err && <span role="alert" className="neg ui">{err}</span>}
+      {err && <span role="alert" className="down ui">{err}</span>}
     </>
   );
 }
 
-const SideCell = ({ p }: { p: Proposal }) => (p.kind === "exit" ? <span>SELL {p.side}</span> : p.orderSide === "SELL" ? <span>SELL</span> : <span className={p.side === "YES" ? "pos" : "neg"}>BUY {p.side}</span>);
+const SideCell = ({ p }: { p: Proposal }) => (p.kind === "exit" ? <span>SELL {p.side}</span> : p.orderSide === "SELL" ? <span>SELL</span> : <span className={p.side === "YES" ? "yes" : "no"}>BUY {p.side}</span>);
 const Shown = ({ s }: { s: { text: string; cls: string; title?: string } }) => <span className={s.cls} title={s.title}>{s.text}</span>;
-const market = (p: Proposal) => <Link href={`/markets/${p.conditionId}`}><MarketCell question={p.question} category={null} max={48} /></Link>;
+const market = (p: Proposal) => <MarketTitle id={p.conditionId} question={p.question} />;
 const Chip = ({ text, color }: { text: string; color: string }) => <span className={css.chip} style={{ borderColor: color, color, marginLeft: 0, marginRight: "var(--sp-1)" }}>{text}</span>;
 const SET_CHIP = <Chip text="SET" color="var(--border)" />;
 const EXIT_CHIP = <Chip text="EXIT" color="var(--warn)" />;
 const sub = (t: string | null) => t && <div className="muted ui" style={{ fontSize: "var(--fs-xs)" }}>{t}</div>;
 const setTitle = (s: SetView) => truncate(`${s.setKind} · ${s.legs.length} legs · ${s.legs[0]?.question ?? s.eventId}`, 48);
 const capSum = (s: SetView) => s.legs.reduce((t, l) => t + l.capPrice, 0);
-const LEG_CLS: Record<string, string> = { filled: "pos", queued: "muted", unwinding: "warn", unwound: "warn", held: "neg", failed: "neg" };
+const LEG_CLS: Record<string, string> = { filled: "up", queued: "muted", unwinding: "warn", unwound: "warn", held: "down", failed: "down" };
 const LEG_TEXT: Record<string, string> = { sending: "sending…", unwinding: "unwinding…" };
 
 type Decide = (id: string, a: "approve" | "reject", set?: boolean) => Promise<void>;
@@ -94,17 +97,17 @@ function Actions({ id, set, busy, ask, halted, onDecide }: { id: string; set?: b
     return (
       <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } }}>
         <span className="ui">{ask.text}</span>
-        <button ref={confirmRef} type="button" style={{ background: "var(--mode-2)", borderColor: "var(--mode-2)", color: "var(--bg)" }}
+        <button type="button" className={`${btn.btn} ${btn.sm}`} ref={confirmRef} style={{ background: "var(--warn)", borderColor: "var(--warn)", color: "var(--on-focus)" }}
           aria-label={ask.confirmLabel} onClick={() => { setConfirm(false); void onDecide(id, "approve", set); }}>Confirm</button>
-        <button type="button" onClick={cancel}>Cancel</button>
+        <Button size="sm" onClick={cancel}>Cancel</Button>
       </span>
     );
   return (
     <span style={{ display: "inline-flex", gap: "var(--sp-2)", alignItems: "center" }}>
       {halted
         ? <span className="muted ui" title={halted}>orders halted</span>
-        : <button ref={approveRef} type="button" style={{ borderColor: "var(--mode-2)" }} onClick={() => setConfirm(true)} aria-label={ask.approveLabel}>Approve</button>}
-      <button type="button" onClick={() => void onDecide(id, "reject", set)} aria-label={ask.rejectLabel}>Reject</button>
+        : <button type="button" className={`${btn.btn} ${btn.sm}`} ref={approveRef} style={{ borderColor: "var(--warn)" }} onClick={() => setConfirm(true)} aria-label={ask.approveLabel}>Approve</button>}
+      <Button size="sm" onClick={() => void onDecide(id, "reject", set)} aria-label={ask.rejectLabel}>Reject</Button>
     </span>
   );
 }
@@ -155,7 +158,7 @@ export function ApprovalsPane({ mode, pending, recent, sets = { pending: [], rec
   const toggle = (id: string) => setOpen((o) => { const x = new Set(o); x.has(id) ? x.delete(id) : x.add(id); return x; });
 
   if (belowL2 && !n)
-    return <section className="pane" id="approvals"><p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Approvals appear at L2 Approve each.</p></section>;
+    return <div id="approvals"><Panel title="Pending approvals"><p className={`muted ui ${css.line}`} style={{ margin: 0 }}>Approvals appear at L2 Approve each.</p></Panel></div>;
 
   const rows: Row[] = [
     ...sets.pending.flatMap((s): Row[] => [{ k: "s", s }, ...(open.has(s.id) ? s.legs.map((l, i): Row => ({ k: "leg", s, l, i })) : [])]),
@@ -164,22 +167,22 @@ export function ApprovalsPane({ mode, pending, recent, sets = { pending: [], rec
   const busySet = (s: SetView) => (s.state === "sending" || s.state === "unwinding" ? setStateText(s) : null);
   const cols: Column<Row>[] = [
     { id: "market", header: "Market", align: "l", cell: (r) => {
-      if (r.k === "leg") return <span style={{ paddingLeft: 16, display: "inline-flex", gap: "var(--sp-1)" }}><span className="muted">{r.i + 1}/{r.s.legs.length}</span><Link href={`/markets/${r.l.conditionId}`} tabIndex={-1}><MarketCell question={r.l.question} category={null} max={40} /></Link></span>;
+      if (r.k === "leg") return <span style={{ paddingLeft: 16, display: "inline-flex", gap: "var(--sp-1)", alignItems: "center" }}><span className="muted">{r.i + 1}/{r.s.legs.length}</span><MarketTitle id={r.l.conditionId} question={r.l.question} /></span>;
       if (r.k === "s") {
         const x = open.has(r.s.id), first = r.s.legs[0]?.conditionId;
         return <>
-          <button type="button" aria-expanded={x} aria-label={`${x ? "Hide" : "Show"} ${r.s.legs.length} legs`} onClick={() => toggle(r.s.id)} style={{ padding: "0 var(--sp-1)", marginRight: "var(--sp-1)" }}>{x ? "▾" : "▸"}</button>
-          {SET_CHIP}{first ? <Link href={`/markets/${first}`} className="ui">{setTitle(r.s)}</Link> : <span className="ui">{setTitle(r.s)}</span>}
+          <Button size="sm" variant="ghost" aria-expanded={x} aria-label={`${x ? "Hide" : "Show"} ${r.s.legs.length} legs`} onClick={() => toggle(r.s.id)} style={{ padding: "0 var(--sp-1)", marginRight: "var(--sp-1)" }}>{x ? "▾" : "▸"}</Button>
+          {SET_CHIP}{first ? <Link href={`/trade/${encodeURIComponent(first)}`} className="ui" title={setTitle(r.s)}>{setTitle(r.s)}</Link> : <span className="ui">{setTitle(r.s)}</span>}
           {sub(fallbackText(r.s.fallbackReason, r.s.costUsd, l3))}
         </>;
       }
       return <>{r.p.kind === "exit" && <>{EXIT_CHIP}<span className="muted ui">· {r.p.exitReason ?? "exit"} </span></>}{market(r.p)}{sub(fallbackText(r.p.fallbackReason, r.p.costUsd, l3))}</>;
     } },
-    { id: "side", header: "Side", align: "l", cell: (r) => (r.k === "leg" ? <span className={r.l.token === "YES" ? "pos" : "neg"}>{r.l.token}</span> : r.k === "s" ? (r.s.setKind === "buy-all" ? "BUY ALL" : "SELL ALL") : <SideCell p={r.p} />) },
+    { id: "side", header: "Side", align: "l", cell: (r) => (r.k === "leg" ? <span className={r.l.token === "YES" ? "yes" : "no"}>{r.l.token}</span> : r.k === "s" ? (r.s.setKind === "buy-all" ? "BUY ALL" : "SELL ALL") : <SideCell p={r.p} />) },
     { id: "shares", header: "Shares", align: "r", cell: (r) => <NumCell value={r.k === "p" ? r.p.shares : r.k === "s" ? r.s.shares : r.l.shares} fmt="int" /> },
     { id: "limit", header: "Limit", align: "r", cell: (r) => (r.k === "leg" ? <NumCell value={r.l.capPrice} fmt="p" /> : r.k === "s" ? `Σ ${capSum(r.s).toFixed(3)}` : r.p.kind === "exit" ? `≥ ${r.p.limitPrice.toFixed(3)}` : <NumCell value={r.p.limitPrice} fmt="p" />) },
     { id: "cost", header: "Cost$", align: "r", cell: (r) => (r.k === "leg" ? usd2(r.l.costUsd) : r.k === "s" ? usd2(r.s.costUsd) : r.p.kind === "exit" ? `+${usd2(r.p.costUsd)}` : usd2(r.p.costUsd)) },
-    { id: "edge", header: "Edge¢", align: "r", cell: (r) => (r.k === "leg" ? null : r.k === "s" ? <span className="pos">lock {r.s.lockedC == null ? "—" : r.s.lockedC.toFixed(1)}¢</span> : r.p.kind === "exit" ? <span className="muted">—</span> : <EdgeBadge cents={r.p.edgeC} />) },
+    { id: "edge", header: "Edge¢", align: "r", cell: (r) => (r.k === "leg" ? null : r.k === "s" ? <span className="up">lock {r.s.lockedC == null ? "—" : r.s.lockedC.toFixed(1)}¢</span> : r.p.kind === "exit" ? <span className="muted">—</span> : <EdgeBadge cents={r.p.edgeC} />) },
     { id: "ep", header: "E[P]$", align: "r", cell: (r) => (r.k === "leg" ? null : <NumCell value={r.k === "s" ? r.s.expectedProfitUsd : r.p.expectedProfitUsd} fmt="usd" signed />) },
     // Set rows: legs carry no mids yet, so drift shows —.
     { id: "drift", header: "Drift¢", align: "r", cell: (r) => (r.k === "p" ? <Shown s={drift(r.p)} /> : r.k === "s" ? <span className="muted">—</span> : null) },
@@ -193,19 +196,15 @@ export function ApprovalsPane({ mode, pending, recent, sets = { pending: [], rec
   const recentRows: RecentRow[] = [...recent.map((p): RecentRow => ({ k: "p", p })), ...sets.recent.map((s): RecentRow => ({ k: "s", s }))].sort((a, b) => at(b) - at(a));
 
   return (
-    <section className="pane" id="approvals">
-      <h2 style={{ display: "flex", justifyContent: "space-between", gap: "var(--sp-3)" }}>
-        <span aria-live="polite">Approvals · {n} pending</span>
-        <ReconStatus recon={recon} now={now} />
-      </h2>
+    <div id="approvals"><Panel label="Pending approvals" title={<span aria-live="polite">Pending approvals · {n}</span>} right={<ReconStatus recon={recon} now={now} />}>
       {rows.length
-        ? <DataTable columns={cols} rows={rows} rowKey={(r) => (r.k === "p" ? r.p.id : r.k === "s" ? r.s.id : `${r.s.id}:${r.i}`)} keys={false} label="pending approvals"
-            rowClass={(r) => (r.k === "leg" ? css.legRow : undefined)} />
+        ? <Flat><DataTable columns={cols} rows={rows} rowKey={(r) => (r.k === "p" ? r.p.id : r.k === "s" ? r.s.id : `${r.s.id}:${r.i}`)} keys={false} label="pending approvals"
+            rowClass={(r) => (r.k === "leg" ? `row2 ${css.legRow}` : "row2")} /></Flat>
         : <p className={`muted ui ${css.line}`} style={{ margin: 0 }}>No pending approvals.</p>}
       {recentRows.length > 0 && <>
         <div className={css.divider} style={{ paddingLeft: "var(--sp-3)" }}>Recent</div>
-        <DataTable columns={RECENT} rows={recentRows} rowKey={(r) => (r.k === "p" ? r.p.id : r.s.id)} keys={false} label="recent approvals" />
+        <Flat><DataTable columns={RECENT} rows={recentRows} rowKey={(r) => (r.k === "p" ? r.p.id : r.s.id)} keys={false} label="recent approvals" rowClass={() => "row2"} /></Flat>
       </>}
-    </section>
+    </Panel></div>
   );
 }

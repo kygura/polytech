@@ -3,7 +3,7 @@ import { forwardRef, useRef, type KeyboardEvent } from "react";
 import type { OpenOrder } from "@pm/pm/exchange";
 import type { FeedLevel, FeedStatus, MarketFeed } from "../../hooks/useMarketFeed";
 import { hms } from "../fmt";
-import { DEFAULT_TICK } from "../public/ticket";
+import { DEFAULT_TICK } from "./ticket";
 import { PaneSkeleton } from "./PaneSkeleton";
 import { cents, changedSizes, sh, type Outcome } from "./book";
 import css from "./terminal.module.css";
@@ -87,7 +87,7 @@ export const BookLadder = forwardRef<HTMLTableElement, Props>(function BookLadde
 
   return (
     <section className={`${css.pane} ${css.ladder}`} aria-label="order book">
-      <h2 className={css.ph}>Order book · {outcome} <span className={css.r}>{badge}{book && <>click a price or <kbd>L</kbd></>}</span></h2>
+      <h2 className={css.ph}>Order book · {outcome} <span className={css.r}>{badge}{book && <>click price · <kbd>L</kbd></>}</span></h2>
       <div className={css.lbody}>{body}</div>
       <div className={css.lfoot}><span>15 levels per side</span><span style={{ marginLeft: "auto" }}>{book ? `book ${hms(book.at)}` : "book —"}</span></div>
     </section>

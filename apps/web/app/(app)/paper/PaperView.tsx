@@ -5,6 +5,8 @@ import { ErrorBar } from "../../../components/ErrorBar";
 import { FillsTable } from "../../../components/FillsTable";
 import { PnlStrip } from "../../../components/PnlStrip";
 import { PositionsTable, type PaperBook } from "../../../components/PositionsTable";
+import pg from "../../../components/page.module.css";
+import { Panel } from "../../../components/ui";
 
 export function PaperView({ data }: { data: PaperBook }) {
   const router = useRouter();
@@ -17,17 +19,15 @@ export function PaperView({ data }: { data: PaperBook }) {
     router.refresh();
   };
   return (
-    <>
+    <div className={pg.stack}>
       {err && <ErrorBar message={err} onRetry={() => setErr(null)} />}
-      <PnlStrip summary={data.summary} />
-      <section className="pane">
-        <h2>Positions</h2>
-        <PositionsTable positions={data.positions} onClose={close} onOpen={(p) => router.push(`/markets/${p.conditionId}`)} selected={selected} onSelect={setSelected} />
-      </section>
-      <section className="pane" style={{ marginTop: "var(--sp-3)" }}>
-        <h2>Fills</h2>
+      <Panel title="Paper book" label="Paper P&L"><PnlStrip summary={data.summary} /></Panel>
+      <Panel title="Positions">
+        <PositionsTable positions={data.positions} onClose={close} onOpen={(p) => router.push(`/trade/${encodeURIComponent(p.conditionId)}`)} selected={selected} onSelect={setSelected} />
+      </Panel>
+      <Panel title="Fills" right={<span className="n">{data.fills.length}</span>}>
         <FillsTable fills={data.fills} />
-      </section>
-    </>
+      </Panel>
+    </div>
   );
 }

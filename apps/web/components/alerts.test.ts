@@ -20,7 +20,7 @@ describe("alerts model", () => {
   it("alertHref: run_failed -> pod, others -> market", () => {
     expect(alertHref({ kind: "run_failed", conditionId: "0xabc", data: { podId: "p1" } })).toBe("/runs/p1");
     expect(alertHref({ kind: "run_failed", conditionId: "0xabc", data: null })).toBeNull();
-    expect(alertHref({ kind: "structural", conditionId: "0xabc", data: null })).toBe("/markets/0xabc");
+    expect(alertHref({ kind: "structural", conditionId: "0xabc", data: null })).toBe("/trade/0xabc");
     expect(alertHref({ kind: "structural", conditionId: null, data: null })).toBeNull();
   });
   it("listKey clamps and maps j/k/Enter/a/A", () => {

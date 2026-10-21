@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { MeterBar } from "./MeterBar";
 import { fmt } from "./fmt";
+import { Panel, Table } from "./ui";
 import css from "./panels.module.css";
 
 export type Limits = { perTradeUsd: number; perTradePct: number; perMarket: number; perEvent: number; perCategory: number; totalOpen: number; dailyNotional: number; dailyLoss: number };
@@ -19,9 +21,8 @@ export function RiskLimits({ limits: l, usage: u }: { limits: Limits; usage: Usa
     ["daily loss", l.dailyLoss, u.dailyRealizedLoss],
   ];
   return (
-    <section className="pane">
-      <h2>Risk limits <span className="muted" style={{ fontWeight: 400, fontSize: "var(--fs-sm)" }}>read-only · edit in Settings</span></h2>
-      <table className={css.kv} aria-label="risk limits">
+    <Panel title="Risk limits" right={<>read-only · <Link href="/settings">edit in Settings</Link></>}>
+      <Table label="risk limits" className={css.kv}>
         <thead><tr><th scope="col">Limit</th><th scope="col" className="num">limit $</th><th scope="col" className="num">used today</th><th scope="col" style={{ width: "30%" }}>bar</th></tr></thead>
         <tbody>
           {rows.map(([k, lim, used, note]) => (
@@ -33,7 +34,7 @@ export function RiskLimits({ limits: l, usage: u }: { limits: Limits; usage: Usa
             </tr>
           ))}
         </tbody>
-      </table>
-    </section>
+      </Table>
+    </Panel>
   );
 }

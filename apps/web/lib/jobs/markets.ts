@@ -28,8 +28,8 @@ const col = (field: SortField, nowTs: SQL): SQL => {
 
 export const DEFAULT_LIMIT = 100;
 
-/** Pure: Filter -> WHERE / ORDER BY / paging. Statuses other than 'active' are never listed. */
-export function compileFilter(f: Filter, now: number) {
+/** Pure: Filter -> WHERE / ORDER BY / paging. Statuses other than 'active' are never listed. `watchFirst`: pinned and live-thesis rows sort ahead of the rest (the /trade list). */
+export function compileFilter(f: Filter, now: number, watchFirst = false) {
   const nowTs = sql`${new Date(now).toISOString()}::timestamptz`;
   const c: SQL[] = [sql`${m.status} = 'active'`];
   const range = (e: SQL, r?: Range) => {
@@ -62,6 +62,7 @@ export function compileFilter(f: Filter, now: number) {
   bool(sql`${th.id} is not null`, f.hasThesis);
 
   const orderBy = [
+    ...(watchFirst ? [sql`case when (${pinned} or ${live}) then 0 else 1 end`] : []),
     ...(f.sort?.length ? f.sort : [{ field: "priority" as const, dir: "desc" as const }]).map(
       ({ field, dir }) => sql`${col(field, nowTs)} ${sql.raw(dir === "asc" ? "asc" : "desc")} nulls last`,
     ),
@@ -75,8 +76,25 @@ const { conditionId: _id, ...latest } = getTableColumns(ml);
 /** Newest thesis per market via a correlated subselect on theses_cond (condition_id), so it stays an index probe. */
 const newest = sql`${th.id} = (select t2.id from theses t2 where t2.condition_id = ${m.conditionId} order by t2.created_at desc, t2.id desc limit 1)`;
 
-export async function listMarkets(db: Db, f: Filter, now: number, o: { limit?: number; offset?: number } = {}) {
-  const { where, orderBy, limit, offset } = compileFilter(f, now);
+const DAY_MS = 86_400_000;
+
+/**
+ * d24c: YES mid now minus the YES mid 24 h ago, in cents. "24 h ago" = the newest snapshot at or before now - 24 h (snapshot rows skip unchanged books,
+ * so an old row is still the right price). Null when the market has no snapshot that old. One index probe per id on snapshots_cond_ts.
+ */
+export async function change24h(db: Db, ids: string[], now: number): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!ids.length) return out;
+  const cut = new Date(now - DAY_MS).toISOString();
+  const rows = await db
+    .select({ id: sql<string>`v.id`, mid: sql<number | null>`(select sn.mid from snapshots sn where sn.condition_id = v.id and sn.ts <= ${cut}::timestamptz and sn.mid is not null order by sn.ts desc limit 1)` })
+    .from(sql`unnest(${arr(ids)}) as v(id)`);
+  for (const r of rows) if (r.mid != null) out.set(r.id, r.mid);
+  return out;
+}
+
+export async function listMarkets(db: Db, f: Filter, now: number, o: { limit?: number; offset?: number; watchFirst?: boolean } = {}) {
+  const { where, orderBy, limit, offset } = compileFilter(f, now, o.watchFirst);
   const [rows, [tot]] = await Promise.all([
     db.select({
       conditionId: m.conditionId, question: m.question, category: m.category, tags: m.tags, endDate: m.endDate,
@@ -91,11 +109,19 @@ export async function listMarkets(db: Db, f: Filter, now: number, o: { limit?: n
       .from(m).leftJoin(ml, sql`${ml.conditionId} = ${m.conditionId}`).leftJoin(s.marketFlags, sql`${s.marketFlags.conditionId} = ${m.conditionId}`).leftJoin(th, newest)
       .where(where),
   ]);
+  const before = await change24h(db, rows.map((r) => r.conditionId), now);
   return {
     total: tot?.n ?? 0,
     rows: rows.map(({ thesisId, thesisSide, thesisEdgeC, thesisPPost, thesisExpiresAt, ...r }) => ({
       ...r,
+      d24c: r.mid != null && before.has(r.conditionId) ? (r.mid - before.get(r.conditionId)!) * 100 : null,
       thesis: thesisId ? { id: thesisId, side: thesisSide!, edgeC: thesisEdgeC!, pPost: thesisPPost!, expired: !!thesisExpiresAt && thesisExpiresAt.getTime() <= now } : null,
     })),
   };
+}
+
+/** Category chips for the /trade list: active categories by market count, biggest first. */
+export async function topCategories(db: Db, n = 8) {
+  const rows = await db.select({ category: m.category, n: count() }).from(m).where(and(sql`${m.status} = 'active'`, sql`${m.category} is not null`)).groupBy(m.category).orderBy(sql`count(*) desc`, m.category).limit(n);
+  return rows.map((r) => ({ category: r.category!, n: r.n }));
 }

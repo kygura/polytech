@@ -53,7 +53,7 @@ export function MarketSearch({ open, onClose }: { open: boolean; onClose: () => 
         return;
       }
       onClose();
-      router.push(`/markets/${j.conditionId}`);
+      router.push(`/trade/${j.conditionId}`);
     } catch { setMsg("Failed: network error"); setBusy(false); }
   };
 

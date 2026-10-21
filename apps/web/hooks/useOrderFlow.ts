@@ -4,7 +4,7 @@
 import type { ClobExchange, LimitOrder } from "@pm/pm/exchange";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { truncate } from "../components/fmt";
-import { findPlaced, placeTicketOrder, roundTick } from "../components/public/ticket";
+import { findPlaced, placeTicketOrder, roundTick } from "../components/terminal/ticket";
 import { isRejection } from "./useWallet";
 
 export const ORDER_TTL_MS = 24 * 3_600_000; // ponytail: GTD 24 h, not in the brief; a resting order should not outlive the visitor's attention by much
