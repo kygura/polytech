@@ -12,9 +12,10 @@ const Body = z.strictObject({
   usd: z.number().positive().max(1_000_000).optional(),
   shares: z.number().positive().max(10_000_000).optional(),
   limit: z.number().gt(0).lt(1).optional(),
+  stop: z.number().gt(0).lt(1).optional(),
 });
 
-// Manual paper trade: fills against the live book into the paper book. No wallet, no real money.
+// Manual paper trade: fills against the live book into the paper book; a limit's unfilled rest and a stop wait in paper_orders. No wallet, no real money.
 export async function POST(req: Request) {
   const b = await parseBody(req, Body);
   if (b.res) return b.res;

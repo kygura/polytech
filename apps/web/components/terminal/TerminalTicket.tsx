@@ -13,7 +13,7 @@ import { loadVisitorSettings } from "../../lib/visitor/settings";
 import { truncate } from "../fmt";
 import {
   buyEstimate, DEFAULT_TICK, fillText, quote, roundTick, sellEstimate, sellQuote, ticketGate, validate, validatePaper, validateSell,
-  type FieldErrors, type PaperFill,
+  type FieldErrors, type PaperFill, type PaperType,
 } from "./ticket";
 import { cents, errMsg, forOutcome, nudge, sh, usd, type Outcome, type TradeSide } from "./book";
 import { plain } from "./research";
@@ -23,6 +23,9 @@ import css from "./terminal.module.css";
 const NUM = /^\d*\.?\d*$/; // typing filter: digits and one dot
 const num = (s: string) => (s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s));
 const signed = (v: number) => `${v >= 0 ? "+" : "−"}${usd(Math.abs(v))}`;
+const nearTick = (p: number, t: number) => Math.round(Math.round(p / t) * t * 1e6) / 1e6; // a stop has no better side: nearest step
+const PTYPES: readonly PaperType[] = ["market", "limit", "stop"];
+const PTYPE_LABEL: Record<PaperType, string> = { market: "Market", limit: "Limit", stop: "Stop" };
 const LIVE_BUSY: OrderPhase["s"][] = ["signing", "checking", "unknown"]; // a live send still being settled: the ticket stays live until it resolves
 
 export type TicketHandle = {
@@ -52,10 +55,11 @@ type Props = {
 export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalTicket({ marketId, detail, feed, noBook, side, outcome, onSide, onOutcome, held, paper, pick, wallet: w, onState, onFilled }, handle) {
   const c = w.clob;
   const { mode, setMode } = useTradingMode();
-  const btn = useRef<HTMLButtonElement>(null), limitEl = useRef<HTMLInputElement>(null), amountEl = useRef<HTMLInputElement>(null);
+  const btn = useRef<HTMLButtonElement>(null), limitEl = useRef<HTMLInputElement>(null), stopEl = useRef<HTMLInputElement>(null), amountEl = useRef<HTMLInputElement>(null);
   const [price, setPrice] = useState(""); // cents
   const [amount, setAmount] = useState(""); // BUY: dollars; SELL: shares
-  const [limitOn, setLimitOn] = useState(false); // paper: market order unless a limit is set
+  const [stopPx, setStopPx] = useState(""); // cents
+  const [ptype, setPType] = useState<PaperType>("market"); // paper: market order unless a limit or a stop is chosen
   const [armed, setArmed] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,7 +88,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   // Market switch: fresh fields and order view.
   const prefilled = useRef<string | null>(null), lastTick = useRef<number | null>(null);
   const { reset } = flow;
-  useEffect(() => { setPrice(""); setAmount(""); setHint(null); setLimitOn(false); setResult(null); pseq.current++; setBusy(false); prefilled.current = null; lastTick.current = null; reset(); }, [id, reset]);
+  useEffect(() => { setPrice(""); setAmount(""); setHint(null); setPType("market"); setStopPx(""); setResult(null); pseq.current++; setBusy(false); prefilled.current = null; lastTick.current = null; reset(); }, [id, reset]);
   // Side switch: the amount changes unit ($ <-> shares).
   useEffect(() => { setAmount(pending.current ?? ""); pending.current = null; }, [side]);
   useEffect(() => { setResult(null); setArmed(false); }, [mode]);
@@ -113,14 +117,14 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   useEffect(() => {
     if (!pick || tick == null) return;
     setPrice(cents(pick.price, tick));
-    setLimitOn(true);
+    setPType("limit");
     setHint(null);
     amountEl.current?.focus();
   }, [pick]); // every pick, never on a tick change
 
   const gate = ticketGate({ wallet: w.status, chainOk: w.chainOk, credsReady: c.credsReady, approved: c.approved });
   const loaded = feed != null && tick != null && detail != null && detail.market.conditionId === id && feed.tokenId === detail.market.yesTokenId;
-  const p01 = num(price) == null ? null : num(price)! / 100, n = num(amount);
+  const p01 = num(price) == null ? null : num(price)! / 100, n = num(amount), s01 = num(stopPx) == null ? null : nearTick(num(stopPx)! / 100, tick ?? DEFAULT_TICK);
   const tokenId = detail ? (outcome === "YES" ? detail.market.yesTokenId : detail.market.noTokenId) : null;
   const feeRate = detail?.market.feeRate ?? 0, feeExp = detail?.market.feeExponent ?? 1, minSh = feed?.minOrderSize ?? null;
   const t = tick ?? DEFAULT_TICK, cc = (p: number) => cents(p, t);
@@ -151,24 +155,26 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
       if (q) aria = `sell ${outcome} ${sh(q.shares)} shares at ${cents(sendPrice, tick)} cents, proceeds about ${usd(q.proceeds)}`;
     }
   } else if (!live) {
-    const lim = limitOn && p01 != null ? roundTick(side, p01, t) : null;
-    errs = validatePaper({ side, usd: n, shares: n, held: paper.shares, limit: p01, limitOn, tick: t, outcome });
+    const lim = ptype === "limit" && p01 != null ? roundTick(side, p01, t) : null, mid = book?.mid ?? null;
+    errs = validatePaper({ side, usd: n, shares: n, held: paper.shares, type: ptype, limit: p01, stop: s01, mid, tick: t, outcome, c: cc });
     paperValid = detail != null && detail.market.conditionId === id && !!id && !noBook && !errs.price && !errs.amount && !errs.shares;
-    if (paperValid && book) {
+    if (paperValid && book && ptype === "stop") {
+      est = <div>Waits until {outcome} {side === "BUY" ? "rises" : "falls"} to <b className={css.n}>{cc(s01!)}¢</b>{mid != null && <> (now <span className={css.n}>{cc(mid)}¢</span>)</>}, then {side === "BUY" ? <>buys with <b className={css.n}>{usd(n!)}</b></> : <>sells <b className={css.n}>{sh(n!)}</b> shares</>} at market.</div>;
+    } else if (paperValid && book) {
       if (side === "BUY") {
         const e = buyEstimate(book.asks, n!, feeRate, feeExp, lim);
         est = e ? <>
           <div>{"≈"} <b className={css.n}>{sh(e.shares)}</b> shares at avg <b className={css.n}>{cc(e.avg)}¢</b>{e.fee > 0.005 && <> {"·"} fee <span className={css.n}>{usd(e.fee)}</span></>}</div>
           <div>Pays <b className={`${css.n} ${css.up}`}>{usd(e.payout)}</b> if {outcome} wins {"·"} profit <b className={`${css.n} ${e.profit >= 0 ? css.up : css.down}`}>{signed(e.profit)}</b></div>
-          {!e.complete && <div className={css.warn}>Only {usd(e.spent)} of {usd(n!)} fills on the book now{lim != null ? " at your limit" : ""}</div>}
-        </> : <div className={css.warn}>Nothing fills now: {lim != null ? "no sellers at or under your limit" : "no sellers on the book"}</div>;
+          {!e.complete && <div className={css.warn}>Only {usd(e.spent)} of {usd(n!)} fills on the book now{lim != null ? `; the rest rests at ${cc(lim)}¢` : ""}</div>}
+        </> : lim != null ? <div>Nothing fills now: rests at <b className={css.n}>{cc(lim)}¢</b> until a seller meets it.</div> : <div className={css.warn}>Nothing fills now: no sellers on the book</div>;
       } else {
         const e = sellEstimate(book.bids, n!, feeRate, feeExp, lim, paper.avgCost);
         est = e ? <>
           <div>{"≈"} <b className={css.n}>{sh(e.shares)}</b> shares at avg <b className={css.n}>{cc(e.avg)}¢</b> {"·"} you get <b className={`${css.n} ${css.up}`}>{usd(e.proceeds)}</b></div>
           {e.pnl != null && <div>Profit on these shares <b className={`${css.n} ${e.pnl >= 0 ? css.up : css.down}`}>{signed(e.pnl)}</b> (vs. what you paid)</div>}
-          {!e.complete && <div className={css.warn}>Only {sh(e.shares)} of {sh(n!)} shares find a buyer now{lim != null ? " at your limit" : ""}</div>}
-        </> : <div className={css.warn}>Nothing fills now: {lim != null ? "no buyers at or over your limit" : "no buyers on the book"}</div>;
+          {!e.complete && <div className={css.warn}>Only {sh(e.shares)} of {sh(n!)} shares find a buyer now{lim != null ? `; the rest rests at ${cc(lim)}¢` : ""}</div>}
+        </> : lim != null ? <div>Nothing fills now: rests at <b className={css.n}>{cc(lim)}¢</b> until a buyer meets it.</div> : <div className={css.warn}>Nothing fills now: no buyers on the book</div>;
       }
     } else if (paperValid) est = <div>The estimate appears when the live book loads.</div>;
   }
@@ -197,12 +203,12 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     const seq = ++pseq.current;
     setBusy(true);
     setResult(null);
-    const body = { conditionId: id, outcome, side, ...(side === "BUY" ? { usd: n! } : { shares: n! }), ...(limitOn && p01 != null ? { limit: roundTick(side, p01, t) } : {}) };
+    const body = { conditionId: id, outcome, side, ...(side === "BUY" ? { usd: n! } : { shares: n! }), ...(ptype === "limit" && p01 != null ? { limit: roundTick(side, p01, t) } : {}), ...(ptype === "stop" && s01 != null ? { stop: s01 } : {}) };
     try {
       const r = await fetch("/api/paper/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const j = (await r.json().catch(() => null)) as (PaperFill & { error?: string }) | null;
       if (seq !== pseq.current) return; // market switched meanwhile
-      if (r.ok && j?.ok) { setResult({ text: fillText(j, cc), tone: j.partial ? "warn" : "up" }); setAmount(""); onFilled(); }
+      if (r.ok && j?.ok) { setResult({ text: fillText(j, cc), tone: j.partial && !j.working ? "warn" : "up" }); setAmount(""); onFilled(); }
       else setResult({ text: `Not filled: ${plain(j?.error ?? `server answered ${r.status}`)}`, tone: "neg", raw: j?.error });
     } catch (e) {
       if (seq === pseq.current) setResult({ text: "Not filled: could not reach the server", tone: "neg", raw: errMsg(e) });
@@ -229,7 +235,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
   const newOrder = () => { flow.reset(); setAmount(""); prefilled.current = null; };
 
   // ⏎ arms (focuses the submit in review), ⌘⏎ / Ctrl⏎ places; ↑↓ nudge (DESIGN 11.5).
-  const fieldKeys = (which: "limit" | "amount") => (e: KeyboardEvent<HTMLInputElement>) => {
+  const fieldKeys = (which: "limit" | "stop" | "amount") => (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       lastField.current = e.currentTarget;
       e.preventDefault();
@@ -244,6 +250,10 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
       if (tick == null) return;
       const base = p01 ?? book?.mid ?? 0.5;
       edit(() => setPrice(cents(nudge(side, base, dir * k, tick), tick)));
+    } else if (which === "stop") {
+      if (tick == null) return;
+      const base = s01 ?? book?.mid ?? 0.5;
+      edit(() => setStopPx(cents(nudge(side, base, dir * k, tick), tick)));
     } else {
       const step = side === "BUY" ? 1 : minSh ?? 1;
       edit(() => setAmount(String(Math.max(0, Math.round(((n ?? 0) + dir * k * step) * 100) / 100))));
@@ -289,12 +299,14 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     }
   } else {
     const ready = canSend;
-    goLabel = <>{busy && <span className={css.spin} aria-hidden />}{busy ? "Filling…" : `${verb} ${outcome} · paper`}{ready && <kbd>⏎</kbd>}</>;
+    goLabel = <>{busy && <span className={css.spin} aria-hidden />}{busy ? "Sending…" : `${ptype === "stop" ? "Set stop: " : ""}${verb} ${outcome} · paper`}{ready && <kbd>⏎</kbd>}</>;
     goLook = ready ? (outcome === "YES" ? css.yes : css.no) : css.off;
     goOff = !ready;
     goAct = place;
     line = noBook ? "No live order book for this market, so nothing can fill."
       : armed && ready ? "⏎ again places it. Esc returns to the fields."
+      : ptype === "stop" ? "Waits on the paper book, checked against the real order book; fires at market when the price gets there. No real money."
+      : ptype === "limit" ? "Fills what it can now against the real order book; the rest waits at your price until cancelled. No real money."
       : "Fills right away against the real order book at today's prices. Uses no real money.";
   }
 
@@ -306,7 +318,7 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
     const b = e.currentTarget.querySelector(`[data-v="${v}"]`) as HTMLButtonElement | null;
     if (b && !b.disabled) { set(v); b.focus(); }
   };
-  const showPrice = live || limitOn;
+  const showPrice = live || ptype === "limit";
   const priceDis = (live && !loaded) || !editable;
   const amountShown = side === "BUY" ? "$" : "sh";
 
@@ -353,18 +365,26 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
           </div>
         </div>
 
-        {!live && !limitOn && (
-          <p className={css.line}>
-            <b className={css.txt}>Market order</b> — fills now at the best prices on the book.{" "}
-            <button type="button" className={css.link} disabled={!editable} onClick={() => { setLimitOn(true); requestAnimationFrame(() => limitEl.current?.focus()); }}>Set a limit price</button>
-          </p>
-        )}
+        {!live ? (
+          <div className={`${css.seg} ${css.seg3}`} role="radiogroup" aria-label="Order type" title="Market fills now. Limit fills at your price or better and waits for the rest. Stop waits until the price reaches it, then fills at market."
+            onKeyDown={(e) => {
+              if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+              e.preventDefault();
+              const v = PTYPES[(PTYPES.indexOf(ptype) + (e.key === "ArrowRight" ? 1 : PTYPES.length - 1)) % PTYPES.length]!;
+              edit(() => setPType(v));
+              (e.currentTarget.querySelector(`[data-v="${v}"]`) as HTMLButtonElement | null)?.focus();
+            }}>
+            {PTYPES.map((v) => (
+              <button key={v} type="button" role="radio" data-v={v} aria-checked={ptype === v} tabIndex={ptype === v ? 0 : -1} className={css.w} disabled={!editable}
+                onClick={() => { edit(() => setPType(v)); if (v !== "market") requestAnimationFrame(() => (v === "stop" ? stopEl : limitEl).current?.focus()); }}>{PTYPE_LABEL[v]}</button>
+            ))}
+          </div>
+        ) : <p className={`${css.line} ${css.dim}`}>Stop orders are paper only: Polymarket has no stop orders, and only your wallet can sign.</p>}
         {showPrice && (
           <div className={css.fld}>
             <label htmlFor="tk-limit">
-              <span>{live ? "Limit price · ¢" : "Limit price (optional) · ¢"}</span>
-              <span>{!live ? <button type="button" className={css.link} disabled={!editable} onClick={() => { setLimitOn(false); setHint(null); }}>Use market order</button>
-                : tick == null ? "price step —" : <><kbd>↑</kbd><kbd>↓</kbd> step {cents(tick, tick)}¢ {"·"} <kbd>⇧</kbd> ×10</>}</span>
+              <span>Limit price · ¢</span>
+              <span>{tick == null ? "price step —" : <><kbd>↑</kbd><kbd>↓</kbd> step {cents(tick, tick)}¢ {"·"} <kbd>⇧</kbd> ×10</>}</span>
             </label>
             <div className={`${css.inp} ${priceDis ? css.dis : ""} ${price !== "" && errs.price ? css.err : ""}`}>
               <input ref={limitEl} id="tk-limit" type="text" inputMode="decimal" autoComplete="off" value={live && !loaded ? "—" : price} disabled={priceDis}
@@ -373,7 +393,24 @@ export const TerminalTicket = forwardRef<TicketHandle, Props>(function TerminalT
             </div>
             <div id="tk-limit-msg">
               {(price !== "" || !live) && errs.price ? <div className={css.ferr}>{price === "" ? "Enter a limit price, or use a market order" : errs.price}</div> : offTick ? <div className={css.fhint}>{offTick}</div> : hint ? <div className={css.fhint}>{hint}</div>
-                : <div className={css.fhint}>{side === "BUY" ? "Only fill at this price or lower" : "Only fill at this price or higher"}{live ? ". Prefilled with the best price on the book; anything unfilled waits on the book." : "."}</div>}
+                : <div className={css.fhint}>{side === "BUY" ? "Only fill at this price or lower" : "Only fill at this price or higher"}{live ? ". Prefilled with the best price on the book; anything unfilled waits on the book." : ". Below the market to buy, or above it to sell, it waits until the price comes to it."}</div>}
+            </div>
+          </div>
+        )}
+        {!live && ptype === "stop" && (
+          <div className={css.fld}>
+            <label htmlFor="tk-stop">
+              <span>Stop price · ¢</span>
+              <span>{tick == null ? "price step —" : <><kbd>↑</kbd><kbd>↓</kbd> step {cents(tick, tick)}¢ {"·"} <kbd>⇧</kbd> ×10</>}</span>
+            </label>
+            <div className={`${css.inp} ${!editable ? css.dis : ""} ${stopPx !== "" && errs.price ? css.err : ""}`}>
+              <input ref={stopEl} id="tk-stop" type="text" inputMode="decimal" autoComplete="off" value={stopPx} disabled={!editable}
+                aria-invalid={stopPx !== "" && !!errs.price} aria-describedby="tk-stop-msg" onChange={(e) => NUM.test(e.target.value) && edit(() => setStopPx(e.target.value))} onKeyDown={fieldKeys("stop")} />
+              <span className={css.u}>¢</span>
+            </div>
+            <div id="tk-stop-msg">
+              {errs.price ? <div className={css.ferr}>{stopPx === "" ? "Enter a stop price" : errs.price}</div>
+                : <div className={css.fhint}>{side === "BUY" ? "Above the price now: buys at market once it rises to this." : "Below the price now: sells at market once it falls to this (a stop-loss)."}</div>}
             </div>
           </div>
         )}

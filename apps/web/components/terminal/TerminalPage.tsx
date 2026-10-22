@@ -19,7 +19,7 @@ import { Panel, Switch } from "../ui";
 import { useStatusSlot } from "../ShellContext";
 import { type TokenInfo } from "./AccountPane";
 import { BookLadder } from "./BookLadder";
-import { BottomTabs, isTab, TAB_KEY, type BottomTab } from "./BottomTabs";
+import { BottomTabs, isTab, TAB_KEY, type BottomTab, type PaperOrders } from "./BottomTabs";
 import { feedDisplay, forOutcome, type Outcome, type TradeSide } from "./book";
 import { FeedBadge } from "./FeedBadge";
 import { KeyLegend } from "./KeyLegend";
@@ -108,7 +108,18 @@ export function TerminalPage() {
   const running = view?.k === "running" ? { startedAt: view.startedAt } : null;
   useEffect(() => { setFast(!!running); setLiveFast(!!running); }, [!!running]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (liveFast) lv.refresh(); }, [liveFast]); // eslint-disable-line react-hooks/exhaustive-deps -- re-arm the poll at 3 s
-  const changed = useCallback(() => { det.refresh(); full.refresh(); }, [det.refresh, full.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Resting paper limits and stops of this market: each poll also works them against a fresh book, every 15 s while one rests.
+  const [poFast, setPoFast] = useState(false);
+  const po = usePoll<PaperOrders>(id ? `/api/paper/orders?conditionId=${id}` : null, poFast ? 15_000 : 60_000);
+  const paperOrders = po.data?.working.every((o) => o.conditionId === id) ? po.data : null;
+  const resting = (paperOrders?.working.length ?? 0) > 0;
+  useEffect(() => setPoFast(resting), [resting]);
+  useEffect(() => { if (poFast) po.refresh(); }, [poFast]); // eslint-disable-line react-hooks/exhaustive-deps -- re-arm the poll at 15 s
+  const changed = useCallback(() => { det.refresh(); full.refresh(); po.refresh(); }, [det.refresh, full.refresh, po.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A resting order that fills changes the paper positions: refetch them when the working set changes.
+  const workKey = paperOrders?.working.map((o) => `${o.id}:${o.usd ?? o.shares}`).join() ?? "";
+  const lastWork = useRef(workKey);
+  useEffect(() => { if (lastWork.current && workKey !== lastWork.current) full.refresh(); lastWork.current = workKey; }, [workKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // A run that finishes while watched: refetch the detail for the new thesis / agents.
   const was = useRef<string | null>(null);
   useEffect(() => {
@@ -144,7 +155,8 @@ export function TerminalPage() {
   const chartOrders = detail ? clob.orders.flatMap((o): ChartOrder[] => {
     const out: Outcome | null = o.tokenId === detail.market.yesTokenId ? "YES" : o.tokenId === detail.market.noTokenId ? "NO" : null;
     return out ? [{ price: o.price, side: o.side, outcome: out, shares: o.shares - o.filled }] : [];
-  }) : [];
+  }).concat(paperMode ? (paperOrders?.working ?? []).flatMap((o): ChartOrder[] => o.kind === "limit" && o.limit != null
+    ? [{ price: o.limit, side: o.side, outcome: o.outcome, shares: o.side === "BUY" ? (o.usd ?? 0) / o.limit : o.shares ?? 0 }] : []) : []) : [];
   const mark = (t: string) => {
     const info = tokens.get(t);
     if (!info) return null;
@@ -317,7 +329,8 @@ export function TerminalPage() {
 
       <BottomTabs tab={tab} onTab={chooseTab} expanded={expanded} onExpand={() => setExpanded((x) => !x)} id={id} detail={research} detailError={full.error != null && !research} onRetry={full.refresh}
         now={now} clob={clob} connected={w.status === "connected"} tokens={tokens} mark={mark} tick={t0} yes={yes} researchDisabled={researchDisabled}
-        onResearch={() => void doResearch()} researchNote={startErr} progress={view?.k === "running" && view.total ? { done: view.done, total: view.total } : null} paperMode={paperMode} />
+        onResearch={() => void doResearch()} researchNote={startErr} progress={view?.k === "running" && view.total ? { done: view.done, total: view.total } : null} paperMode={paperMode}
+        paperOrders={paperOrders} onPaperChanged={changed} />
 
       {pro && (
         <div className={dim ? css.dimmed : undefined} style={{ display: "contents" }}>
