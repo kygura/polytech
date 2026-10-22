@@ -13,13 +13,14 @@ const PKG = JSON.stringify({ type: "module", dependencies: { "@anthropic-ai/clau
 const query = readFile(new URL("./agent-query.mjs", import.meta.url));
 const safeFetch = readFile(new URL("./safe-fetch.mjs", import.meta.url)); // fetch_url's SSRF guard; stdlib only, runs in the sandbox too
 
-/** One Vercel Sandbox per agent. Only ANTHROPIC_API_KEY + EXA_API_KEY enter the sandbox. Abort stops the sandbox (kills the command) and rejects. */
+/** One non-persistent Vercel Sandbox per agent. Only ANTHROPIC_API_KEY + EXA_API_KEY enter the sandbox. Abort stops the sandbox (kills the command) and rejects. */
 export const sandboxRunner = (env: Record<string, string | undefined> = process.env): AgentRunner =>
   validated(async (role, brief, opts) => {
     const t = Date.now();
     const sandbox = await Sandbox.create({
       image: "vercel/sandbox/node:24",
       timeout: opts.timeoutMs + 120_000,
+      persistent: false, // throwaway VM: the default (true) snapshots ~800MB of node_modules on every stop, kept 30 days
       ...(env.VERCEL_TOKEN && env.VERCEL_TEAM_ID && env.VERCEL_PROJECT_ID
         ? { token: env.VERCEL_TOKEN, teamId: env.VERCEL_TEAM_ID, projectId: env.VERCEL_PROJECT_ID }
         : {}),
