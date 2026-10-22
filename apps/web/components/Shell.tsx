@@ -37,7 +37,7 @@ const GROUPS: readonly (readonly NavItem[])[] = [
 const isWorkspace = (path: string) => /^\/trade(\/|$)/.test(path);
 // Events that move the status bar (DESIGN 12.1.5).
 const BAR_ON = new Set<SseEvent["type"]>(["pod.started", "pod.stage", "pod.failed", "pod.done", "pod.cancelled", "snapshot.done", "sweep.done", "alert.created", "alert.acked"]);
-const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.stage", "pod.failed", "pod.done", "pod.cancelled", "thesis.created", "paper.fill", "paper.close", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
+const REFRESH_ON = new Set<SseEvent["type"]>(["sweep.done", "snapshot.done", "screen.done", "pod.started", "pod.stage", "pod.failed", "pod.done", "pod.cancelled", "thesis.created", "paper.fill", "paper.close", "paper.order", "calibration.done", "proposal.created", "proposal.updated", "order.updated", "order.filled", "order.error", "recon.done", "set.updated"]);
 const STATUS_ON = new Set<SseEvent["type"]>(["mode.changed", "proposal.created", "proposal.updated", "order.updated", "recon.done", "set.updated"]);
 type Status = { pendingCount?: number; flaggedSets?: number; liveOpenOrders?: number; recon?: Recon | null };
 

@@ -13,6 +13,9 @@ Response bodies are the return values of `apps/web/lib/jobs/read.ts` (types expo
 | GET | /api/calibration | `category`, `model`, `sinceDays` | `calibration` |
 | GET | /api/paper | — | `paperBook` |
 | POST | /api/paper/:positionId/close | — | `{ok, realizedPnl}` (closes paper position at current best bid) |
+| POST | /api/paper/order | `{conditionId, outcome, side, usd?, shares?, limit?, stop?}` | fill result; `working` when a limit's rest or a stop now rests (409 `{error}` when refused) |
+| GET | /api/paper/orders?conditionId= | — | `{working, closed}` resting paper limits/stops; with `conditionId` the market's working orders are worked against a fresh book first |
+| POST | /api/paper/orders/:id/cancel | — | `{ok}` or 409 when no longer working |
 | GET | /api/autonomy | — | `autonomy` (incl. `mode`, `executionEnabled`, `exchangeConfigured`, `pendingCount`, `liveOpenOrders`, `recon`) |
 | POST | /api/autonomy/mode | `{to:"L0".."L4", reason?}` | `{allowed, mode, reason}` (L2 needs a configured exchange; L3/L4 → allowed:false, EXECUTION_DISABLED) |
 | POST | /api/autonomy/kill | — | `{mode:"L0", cancelled, failed:[{orderId,error}]}` |

@@ -263,6 +263,27 @@ export const positions = pgTable("positions", {
   paper: boolean("paper").notNull().default(true),
 });
 
+/** Working manual paper orders: a limit that did not fill on arrival rests here; a stop waits for its trigger. Fills land in orders/fills/positions. */
+export const paperOrders = pgTable("paper_orders", {
+  id: text("id").primaryKey(),
+  conditionId: text("condition_id").notNull(),
+  tokenId: text("token_id").notNull(),
+  outcome: text("outcome").notNull(), // YES | NO
+  side: text("side").notNull(), // BUY | SELL
+  kind: text("kind").notNull(), // limit | stop
+  limitPrice: dp("limit_price"), // limit: fill at this price or better
+  stopPrice: dp("stop_price"), // stop: BUY triggers when the price rises to it, SELL when it falls to it; then fills at market
+  usd: dp("usd"), // BUY: dollars left to spend
+  shares: dp("shares"), // SELL: shares left to sell
+  filledShares: dp("filled_shares").notNull().default(0),
+  status: text("status").notNull().default("working"), // working | filled | cancelled
+  reason: text("reason"), // why it was cancelled
+  createdAt: ts("created_at").notNull().defaultNow(),
+  triggeredAt: ts("triggered_at"),
+  bookTs: ts("book_ts"), // the book it last looked at: the next fill or trigger check needs a newer one (a snapshot's levels count once)
+  closedAt: ts("closed_at"),
+}, (t) => [index("paper_orders_status_idx").on(t.status, t.conditionId)]);
+
 export const autonomyEvents = pgTable("autonomy_events", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   ts: ts("ts").notNull().defaultNow(),

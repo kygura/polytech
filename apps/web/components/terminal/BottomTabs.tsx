@@ -37,7 +37,17 @@ type Props = {
   progress: { done: number; total: number } | null;
   /** Paper trading mode: paper rows first. */
   paperMode: boolean;
+  /** This market's resting paper limits and stops (GET /api/paper/orders). */
+  paperOrders: PaperOrders | null;
+  /** A paper order was cancelled: refetch. */
+  onPaperChanged: () => void;
 };
+export type PaperOrder = {
+  id: string; conditionId: string; outcome: "YES" | "NO"; side: "BUY" | "SELL"; kind: "limit" | "stop"; limit: number | null; stop: number | null;
+  usd: number | null; shares: number | null; filledShares: number; status: "working" | "filled" | "cancelled"; reason: string | null;
+  createdAt: number; triggeredAt: number | null; closedAt: number | null;
+};
+export type PaperOrders = { working: PaperOrder[]; closed: PaperOrder[] };
 
 /** Research · Positions · Orders · Rules (DESIGN 13.4 BottomTabs). Keys 1–4, `e` expands the pane over the chart. */
 export function BottomTabs(p: Props) {
@@ -46,7 +56,7 @@ export function BottomTabs(p: Props) {
   const posN = n.positions == null && !paperN ? undefined : (n.positions ?? 0) + paperN;
   const items: TabItem[] = [
     { id: "research", label: "Research", kbd: "1" }, { id: "positions", label: "Positions", count: posN, kbd: "2" },
-    { id: "orders", label: "Orders", count: n.orders, kbd: "3" }, { id: "rules", label: "Rules", kbd: "4" },
+    { id: "orders", label: "Orders", count: n.orders == null && !p.paperOrders?.working.length ? undefined : (n.orders ?? 0) + (p.paperOrders?.working.length ?? 0), kbd: "3" }, { id: "rules", label: "Rules", kbd: "4" },
   ];
   return (
     <Panel className={css.bottom} label="Market tabs"
@@ -121,12 +131,15 @@ function PositionsTab({ clob, connected, id, tokens, mark, tick, detail: d, yes,
     : <>{live}{paper.length > 0 && <>{paperHead}{rows}</>}</>;
 }
 
-function OrdersTab({ clob, connected, id, tokens, mark, tick }: Props) {
+function OrdersTab({ clob, connected, id, tokens, mark, tick, paperMode, paperOrders, onPaperChanged }: Props) {
   const pr = usePoll<{ pending: Proposal[] }>("/api/proposals", 30_000);
   const mine = (pr.data?.pending ?? []).filter((x) => x.conditionId === id);
+  const live = <AccountBody clob={clob} connected={connected} view="orders" currentId={id} tokens={tokens} mark={mark} tick={tick} />;
+  const paper = <PaperOrdersTable orders={paperOrders} tick={tick} onChanged={onPaperChanged} />;
+  const paperHead = <div className={css.divider} title="Resting paper limits and stops, worked against the real order book; no real money">Paper</div>;
   return (
     <>
-      <AccountBody clob={clob} connected={connected} view="orders" currentId={id} tokens={tokens} mark={mark} tick={tick} />
+      {paperMode ? <>{paperHead}{paper}<div className={css.divider}>Live (wallet)</div>{live}</> : <>{live}{(paperOrders?.working.length ?? 0) > 0 && <>{paperHead}{paper}</>}</>}
       {mine.length > 0 && (
         <>
           <div className={css.divider}>Pending approvals ({mine.length}) {"·"} <Link href="/autonomy#approvals">decide in Autonomy {"→"}</Link></div>
@@ -143,6 +156,42 @@ function OrdersTab({ clob, connected, id, tokens, mark, tick }: Props) {
           </table>
         </>
       )}
+    </>
+  );
+}
+
+/** Working paper orders with Cancel, then the last few that filled or were cancelled. */
+function PaperOrdersTable({ orders, tick, onChanged }: { orders: PaperOrders | null; tick: number; onChanged: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null), [err, setErr] = useState<string | null>(null);
+  const cancel = async (oid: string) => {
+    setBusy(oid);
+    setErr(null);
+    const r = await fetch(`/api/paper/orders/${encodeURIComponent(oid)}/cancel`, { method: "POST" }).catch(() => null);
+    if (!r || (!r.ok && r.status !== 409)) setErr("Could not cancel the order. Try again.");
+    setBusy(null);
+    onChanged();
+  };
+  const rows = [...(orders?.working ?? []), ...(orders?.closed ?? []).slice(0, 5)];
+  if (!rows.length) return <p className={`${css.line} ${css.msg}`}>No paper limit or stop orders in this market. A limit below the market (buy) or above it (sell), or a stop, rests here until it fills.</p>;
+  const px = (o: PaperOrder) => (o.kind === "stop" ? `stop ${cents(o.stop, tick)}¢` : `${cents(o.limit, tick)}¢`);
+  const left = (o: PaperOrder) => (o.status !== "working" ? "—" : o.side === "BUY" ? usd(o.usd ?? 0) : `${sh(o.shares ?? 0)} sh`);
+  const state = (o: PaperOrder) => o.status === "working" ? (o.kind === "stop" ? (o.triggeredAt ? "fired, filling" : "waiting for trigger") : "resting")
+    : o.status === "filled" ? "filled" : `cancelled${o.reason && o.reason !== "cancelled by you" ? `: ${o.reason}` : ""}`;
+  return (
+    <>
+      {err && <p className={`${css.line} ${css.neg}`} role="alert">{err}</p>}
+      <table aria-label="paper limit and stop orders">
+        <thead><tr><th>Outcome</th><th>Side</th><th>Type</th><th title="Limit price, or the stop's trigger price">Price</th><th title="Dollars left to spend (buy) or shares left to sell">Left</th><th>Filled</th><th>Status</th><th>Placed</th><th /></tr></thead>
+        <tbody>
+          {rows.map((o) => (
+            <tr key={o.id} className={o.status === "working" ? undefined : css.dim}>
+              <td><span className={`${css.tag} ${o.outcome === "YES" ? css.yes : css.no}`}>{o.outcome}</span></td><td className={o.side === "BUY" ? css.up : css.down}>{o.side}</td>
+              <td>{o.kind === "stop" ? "Stop" : "Limit"}</td><td>{px(o)}</td><td>{left(o)}</td><td>{o.filledShares > 0 ? `${sh(o.filledShares)} sh` : "—"}</td><td>{state(o)}</td><td>{hm(o.createdAt)}</td>
+              <td>{o.status === "working" && <Button variant="ghost" size="sm" disabled={busy === o.id} onClick={() => void cancel(o.id)} aria-label={`Cancel paper ${o.kind} ${o.side} ${o.outcome}`}>{busy === o.id ? "Cancelling…" : "Cancel"}</Button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }

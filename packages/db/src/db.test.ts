@@ -60,6 +60,9 @@ describe("db (pglite memory)", () => {
     await db.update(s.pods).set({ error: "TIMEOUT: x" }).where(eq(s.pods.id, "p1"));
     await db.insert(s.triage).values({ conditionId: "c1", verdict: "skip", score: 0, reason: "thin book", failedRules: ["THIN_BOOK"] });
     expect((await db.select().from(s.triage))[0]).toMatchObject({ failedRules: ["THIN_BOOK"], model: null });
+    // resting paper limits and stops
+    await db.insert(s.paperOrders).values({ id: "pord_1", conditionId: "c1", tokenId: "tok", outcome: "YES", side: "SELL", kind: "stop", stopPrice: 0.4, shares: 5 });
+    expect((await db.select().from(s.paperOrders))[0]).toMatchObject({ status: "working", filledShares: 0, limitPrice: null, triggeredAt: null });
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);
   });

@@ -7,6 +7,7 @@ import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { monitor } from "./monitor";
+import { workingPaperIds, workPaperOrders } from "./paperOrder";
 import { heuristicR, shortlist, watchlistIds } from "./screen";
 
 const MAX_FEE_FETCHES = 200;
@@ -324,7 +325,10 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
 }
 
 export async function snapshotBooks(d: Deps, scope: "watchlist" | "all") {
-  const out = await withLock(d, `snapshot:${scope}`, 4 * 60_000, async () => takeSnapshots(d, scope === "all" ? undefined : await watchlistIds(d)));
+  const ids = async () => { const w = await watchlistIds(d); return w && [...new Set([...w, ...await workingPaperIds(d)])]; }; // undefined (no screen yet) = all
+  const out = await withLock(d, `snapshot:${scope}`, 4 * 60_000, async () => takeSnapshots(d, scope === "all" ? undefined : await ids()));
+  // resting paper limits and stops ride every snapshot: the books are fresh now
+  if (!("reason" in out)) await withLock(d, "paperwork", 60_000, () => workPaperOrders(d)).catch((e) => console.warn("paper orders failed:", String(e?.message ?? e).slice(0, 160)));
   // alerts ride the watchlist cadence; they must never fail (or delay the result of) the snapshot
   if (scope === "watchlist" && !("reason" in out)) await monitor(d).catch((e) => console.warn("monitor failed:", String(e?.message ?? e).slice(0, 160)));
   return out;

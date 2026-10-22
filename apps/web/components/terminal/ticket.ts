@@ -175,21 +175,46 @@ export function paperHeld(rows: { tokenId: string; size: number; avgCost: number
   return { shares, avgCost: shares > 0 ? open.reduce((t, r) => t + r.size * r.avgCost, 0) / shares : null };
 }
 
-export type PaperFill = { ok: true; side: "BUY" | "SELL"; outcome: "YES" | "NO"; shares: number; avgPrice: number; fee: number; usd: number; partial: boolean; realizedPnl?: number };
+export type PaperType = "market" | "limit" | "stop";
+export type PaperWorking = { id: string; kind: "limit" | "stop"; side: "BUY" | "SELL"; outcome: "YES" | "NO"; limit: number | null; stop: number | null; usd: number | null; shares: number | null };
+export type PaperFill = { ok: true; side: "BUY" | "SELL"; outcome: "YES" | "NO"; shares: number; avgPrice: number; fee: number; usd: number; partial: boolean; realizedPnl?: number; working?: PaperWorking };
+const shTxt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/** What a working paper order waits for, in words: "buy YES at 40.0¢ with $50.00", "sell 10 YES at market once the price falls to 35.0¢". */
+export function workingText(w: Pick<PaperWorking, "kind" | "side" | "outcome" | "limit" | "stop" | "usd" | "shares">, c: (p: number) => string): string {
+  const what = w.side === "BUY" ? `buy ${w.outcome}${w.usd != null ? ` with $${w.usd.toFixed(2)}` : ""}` : `sell ${w.shares != null ? `${shTxt(w.shares)} ` : ""}${w.outcome}`;
+  return w.kind === "stop"
+    ? `${what} at market once the price ${w.side === "BUY" ? "rises" : "falls"} to ${c(w.stop!)}¢`
+    : `${what} at ${c(w.limit!)}¢ or better`;
+}
+
 /** The result line after POST /api/paper/order. */
 export function fillText(r: PaperFill, c: (p: number) => string): string {
-  const sh = r.shares.toLocaleString("en-US", { maximumFractionDigits: 2 }), fee = r.fee > 0.005 ? ` · fee $${r.fee.toFixed(2)}` : "";
+  const w = r.working;
+  if (w && w.kind === "stop") return `Stop set: ${workingText(w, c)}. See Orders to cancel.`;
+  if (w && !(r.shares > 0)) return `Resting: ${workingText(w, c)}. Nothing met it yet; it fills when the book reaches it. See Orders to cancel.`;
+  const sh = shTxt(r.shares), fee = r.fee > 0.005 ? ` · fee $${r.fee.toFixed(2)}` : "";
   const pnl = r.realizedPnl == null ? "" : ` · ${r.realizedPnl >= 0 ? "+" : "−"}$${Math.abs(r.realizedPnl).toFixed(2)} realized`;
   const verb = r.side === "BUY" ? "Bought" : "Sold";
+  if (w) return `${verb} ${sh} ${r.outcome} at ${c(r.avgPrice)}¢${fee}${pnl}. The rest rests: ${workingText(w, c)}.`;
   return `${r.partial ? "Partly filled: " : ""}${verb} ${sh} ${r.outcome} at ${c(r.avgPrice)}¢${fee}${pnl}${r.partial ? " — the book ran out at your price" : ""}`;
 }
 
-/** Paper fields: dollars to spend (BUY) or shares to sell, an optional limit (cents typed) inside the tick range. */
-export function validatePaper(o: { side: "BUY" | "SELL"; usd: number | null; shares: number | null; held: number; limit: number | null; limitOn: boolean; tick: number; outcome: Side }): FieldErrors {
+/**
+ * Paper fields: dollars to spend (BUY) or shares to sell; a limit (market crossing fills now, the rest rests) or a stop inside the tick range,
+ * both typed in cents. A stop must sit on the far side of the price now (`mid`, the outcome's): above it to buy, below it to sell.
+ */
+export function validatePaper(o: { side: "BUY" | "SELL"; usd: number | null; shares: number | null; held: number; type: PaperType; limit: number | null; stop?: number | null; mid?: number | null; tick: number; outcome: Side; c?: (p: number) => string }): FieldErrors {
   const e: FieldErrors = {};
-  if (o.limitOn) {
+  if (o.type === "limit") {
     const pe = priceError(o.limit, o.tick, o.side);
     if (pe) e.price = pe;
+  } else if (o.type === "stop") {
+    const st = o.stop ?? null, c = o.c ?? ((p: number) => (p * 100).toFixed(1));
+    const pe = priceError(st, o.tick, o.side);
+    if (pe) e.price = pe;
+    else if (o.mid != null && o.side === "BUY" && !(st! > o.mid + 1e-9)) e.price = `A buy stop goes above the price now (${c(o.mid)}¢)`;
+    else if (o.mid != null && o.side === "SELL" && !(st! < o.mid - 1e-9)) e.price = `A sell stop goes below the price now (${c(o.mid)}¢)`;
   }
   if (o.side === "BUY") {
     if (o.usd == null || !(o.usd > 0)) e.amount = "Enter an amount in dollars";

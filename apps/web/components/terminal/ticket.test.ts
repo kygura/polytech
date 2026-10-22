@@ -195,19 +195,34 @@ describe("paper estimates", () => {
     expect(paperHeld(rows, null)).toEqual({ shares: 0, avgCost: null });
   });
   it("validatePaper", () => {
-    const o = { side: "BUY" as const, usd: 10, shares: null, held: 0, limit: null, limitOn: false, tick: 0.01, outcome: "YES" as const };
+    const o = { side: "BUY" as const, usd: 10, shares: null, held: 0, type: "market" as const, limit: null, tick: 0.01, outcome: "YES" as const };
     expect(validatePaper(o)).toEqual({});
     expect(validatePaper({ ...o, usd: null })).toEqual({ amount: "Enter an amount in dollars" });
-    expect(validatePaper({ ...o, limitOn: true, limit: 1.2 }).price).toMatch(/between/);
-    expect(validatePaper({ ...o, limitOn: true, limit: 0.42 })).toEqual({});
+    expect(validatePaper({ ...o, type: "limit", limit: 1.2 }).price).toMatch(/between/);
+    expect(validatePaper({ ...o, type: "limit", limit: 0.42 })).toEqual({});
     expect(validatePaper({ ...o, side: "SELL", shares: 5 })).toEqual({ shares: "You hold no paper YES shares" });
     expect(validatePaper({ ...o, side: "SELL", shares: 50, held: 40.257 })).toEqual({ shares: "You hold 40.25 YES shares" });
     expect(validatePaper({ ...o, side: "SELL", shares: 40, held: 40 })).toEqual({});
+  });
+  it("validatePaper: a stop sits above the price to buy, below it to sell", () => {
+    const o = { side: "BUY" as const, usd: 10, shares: 5, held: 5, type: "stop" as const, limit: null, mid: 0.5, tick: 0.01, outcome: "YES" as const };
+    expect(validatePaper({ ...o, stop: null }).price).toMatch(/between/);
+    expect(validatePaper({ ...o, stop: 0.55 })).toEqual({});
+    expect(validatePaper({ ...o, stop: 0.5 })).toEqual({ price: "A buy stop goes above the price now (50.0¢)" });
+    expect(validatePaper({ ...o, side: "SELL", stop: 0.45 })).toEqual({});
+    expect(validatePaper({ ...o, side: "SELL", stop: 0.6 })).toEqual({ price: "A sell stop goes below the price now (50.0¢)" });
   });
   it("fillText", () => {
     const c = (p: number) => (p * 100).toFixed(1);
     expect(fillText({ ok: true, side: "BUY", outcome: "YES", shares: 118.234, avgPrice: 0.423, fee: 0.4, usd: 50, partial: false }, c)).toBe("Bought 118.23 YES at 42.3¢ · fee $0.40");
     expect(fillText({ ok: true, side: "SELL", outcome: "NO", shares: 10, avgPrice: 0.6, fee: 0, usd: 6, partial: true, realizedPnl: -1.5 }, c))
       .toBe("Partly filled: Sold 10 NO at 60.0¢ · −$1.50 realized — the book ran out at your price");
+    const w = { id: "pord_1", kind: "limit" as const, side: "BUY" as const, outcome: "YES" as const, limit: 0.4, stop: null, usd: 50, shares: null };
+    expect(fillText({ ok: true, side: "BUY", outcome: "YES", shares: 0, avgPrice: 0, fee: 0, usd: 0, partial: true, working: w }, c))
+      .toBe("Resting: buy YES with $50.00 at 40.0¢ or better. Nothing met it yet; it fills when the book reaches it. See Orders to cancel.");
+    expect(fillText({ ok: true, side: "BUY", outcome: "YES", shares: 10, avgPrice: 0.4, fee: 0, usd: 4, partial: true, working: { ...w, usd: 46 } }, c))
+      .toBe("Bought 10 YES at 40.0¢. The rest rests: buy YES with $46.00 at 40.0¢ or better.");
+    expect(fillText({ ok: true, side: "SELL", outcome: "NO", shares: 0, avgPrice: 0, fee: 0, usd: 0, partial: false, working: { ...w, kind: "stop", side: "SELL", outcome: "NO", limit: null, stop: 0.35, usd: null, shares: 10 } }, c))
+      .toBe("Stop set: sell 10 NO at market once the price falls to 35.0¢. See Orders to cancel.");
   });
 });

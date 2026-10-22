@@ -158,6 +158,7 @@
 .txt { color: var(--text); font-weight: 500; }
 .tk { padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--surface-2); border-radius: var(--r-md); padding: 3px; gap: 3px; }
+.seg.seg3 { grid-template-columns: 1fr 1fr 1fr; }
 .seg button { height: 28px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--muted); background: none; border: 0; }
 .seg button[aria-checked="true"].w { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border-2); }
 .seg button[aria-checked="true"].y { background: var(--yes); color: var(--on-yes); }
