@@ -1,4 +1,4 @@
-import { aggregate, brier, confidenceForCategory, drift, fitExtremize, logLoss, paperPnl, type Forecast } from "@pm/core";
+import { aggregate, brier, confidenceForCategory, drift, fadeCalibration, fitExtremize, isFade, logLoss, paperPnl, type Forecast } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { and, asc, eq, getTableColumns, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { DAY, chunks, withLock, type Deps } from "./deps";
@@ -34,6 +34,17 @@ export async function categoryConfidence(db: Db, category: string | null): Promi
   const rows = (await forecastRows(db)).filter((r) => r.category === (category ?? "other"));
   const a = aggregate(rows, () => "all").all;
   return a ? confidenceForCategory(a.n, a.brier, a.marketBrier) : 0.4;
+}
+
+/**
+ * Confidence for a new thesis: the category's, except that a fade of a longshot (isFade: cheap side 3-20%, our estimate
+ * below it) earns the pooled fade bucket's confidence once that bucket has proven itself over 30 resolved fades.
+ */
+export async function thesisConfidence(db: Db, category: string | null, pMarket: number, pHat: number): Promise<number> {
+  const rows = await forecastRows(db);
+  const cat = aggregate(rows.filter((r) => r.category === (category ?? "other")), () => "all").all;
+  const c = cat ? confidenceForCategory(cat.n, cat.brier, cat.marketBrier) : 0.4;
+  return isFade(pMarket, pHat) ? Math.max(c, fadeCalibration(rows).c) : c;
 }
 
 /** Resolved markets (had a thesis or position, no outcome yet) -> `outcomes`. Everything else is computed on read. */

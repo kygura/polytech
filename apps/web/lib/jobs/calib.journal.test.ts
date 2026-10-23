@@ -3,6 +3,7 @@ import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
+import { thesisConfidence } from "./calib";
 import { calibrateNightly, deps, getSettings, journalNightly, putSettings, type Deps } from "./index";
 
 process.env.PGLITE_DIR = "memory://";
@@ -124,5 +125,18 @@ describe("extremize suggestion", () => {
   it("calibrateNightly runs the journal and reports it", async () => {
     const out = (await calibrateNightly(await fresh())) as { journal: { theses: number } };
     expect(out.journal.theses).toBeGreaterThan(40);
+  });
+});
+
+describe("longshot fade confidence", () => {
+  it("a fade gets 0.4 until 30 resolved fades, then the pooled fade bucket's c; non-fades keep the category's", async () => {
+    expect(await thesisConfidence(d.db, "geo", 0.1, 0.03)).toBe(0.4);
+    // 30 fades of a 10c YES at 3%, one of which happened, spread over fresh categories (none reaches its own gate)
+    for (let i = 0; i < 30; i++) await seed(`fade-${i}`, { category: `geo${i % 3}`, mid: 0.1, pYes: 0.03, result: i === 0 ? "YES" : "NO" });
+    const c = await thesisConfidence(d.db, "geo", 0.1, 0.03);
+    expect(c).toBeCloseTo(0.4 + 0.5 * ((1 - 0.967 / 1.1) / 0.2), 9);
+    expect(await thesisConfidence(d.db, "geo", 0.92, 0.99)).toBe(c); // NO-side longshot, same bucket
+    expect(await thesisConfidence(d.db, "geo", 0.1, 0.2)).toBe(0.4); // buying the longshot is not a fade
+    expect(await thesisConfidence(d.db, "geo", 0.5, 0.3)).toBe(0.4); // nor is a mid-book call
   });
 });
