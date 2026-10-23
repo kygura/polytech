@@ -26,7 +26,7 @@ describe("brief", () => {
 
 describe("router", () => {
   it("defaults + override", () => {
-    expect(modelFor("rules")).toBe("claude-opus-5-5");
+    expect(modelFor("rules")).toBe("claude-sonnet-5-5");
     expect(modelFor("r_classifier")).toBe("claude-haiku-5-5"); // the screen-wide flagger stays cheap
     expect(modelFor("judge")).toBe("claude-opus-5-5");
     expect(modelFor("news", { news: "x" })).toBe("x");
@@ -191,7 +191,7 @@ describe("runPod steering", () => {
       steering: steer({ models: { source: "claude-haiku-5-5", judge: "claude-sonnet-5-5" } }),
     });
     const m = Object.fromEntries(calls.map((c) => [c.role, c.o.model]));
-    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-opus-5-5", red_team: "claude-sonnet-5-5" });
+    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-sonnet-5-5", red_team: "claude-sonnet-5-5" });
     expect(judgeModel).toBe("claude-sonnet-5-5");
   });
 

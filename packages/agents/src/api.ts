@@ -15,8 +15,8 @@ const MAX_TOOL_CALLS = 200;
 const SEARCH_USD = 0.01; // web search is billed per request ($10 / 1000) on top of tokens
 const NUDGES = 2; // turns that ended without submit_result before the agent gives up
 
-/** Haiku runs a light pass; the rules reader (resolving ambiguity) thinks hard; other agents research at medium effort to fit the pod's agent window. */
-const effortFor = (model: string, role: string): "low" | "medium" | "high" => (model.includes("haiku") ? "low" : role === "rules" ? "high" : "medium");
+/** Haiku runs a light pass; Sonnet/Opus agents research at medium effort to fit the pod's agent window. */
+const effortFor = (model: string): "low" | "medium" => (model.includes("haiku") ? "low" : "medium");
 
 /**
  * One research agent on the plain Messages API: Anthropic-hosted web search + web fetch, then a strict `submit_result` call carrying the
@@ -54,7 +54,7 @@ export const apiRunner = (client: Client): AgentRunner =>
             system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
             tools,
             tool_choice: { type: "auto" },
-            output_config: { effort: effortFor(opts.model, role) },
+            output_config: { effort: effortFor(opts.model) },
             messages,
           }, { signal: ac.signal }).finalMessage(),
           { deadline: opts.deadline },

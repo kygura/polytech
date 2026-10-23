@@ -68,7 +68,7 @@ packages/db     Drizzle schema + migrations
 
 Each research agent is an Agent SDK `query()` run inside a Vercel Sandbox. Agents and orchestrator calls (judge, R classifier) all authenticate with `ANTHROPIC_API_KEY`. On rate-limit or overload errors the runner backs off and retries; total spend is bounded by the budget knobs.
 
-The **model router** picks a Claude model per role (configurable in Settings). Defaults: research roles on Sonnet, rules reader on Opus at high effort (resolving ambiguous rules is the edge), judge on Opus. Diversity comes from role separation and blind estimation, not from mixing providers.
+The **model router** picks a Claude model per role (configurable in Settings). Defaults: research roles on Sonnet, rules reader on Sonnet, judge on Opus. Diversity comes from role separation and blind estimation, not from mixing providers.
 
 ## Polymarket data layer
 
@@ -113,7 +113,7 @@ Two passes: hard filters on the whole universe, then a priority score on survivo
 | T time value (0–1) | Return per day of capital | Days to resolution, decays past 60 days |
 | C crowding (0–1) | One-sidedness | Top-10 holder share, net taker flow 24h, comment sentiment skew |
 | A attention (0.3–1) | How few participants have done the work | 24h volume: 1 up to $5k, −0.35 per 10× above, floor 0.3 ($50k → 0.65, $500k+ → 0.3). Ranks busy markets behind, never excludes them. |
-| N rules nuance (1–1.5) | Rules that need careful reading | 1 + 0.5 × the R classifier's rule ambiguity (cached with R; 1 when unrated). Headline traders misread these; the pod's rules reader (Opus, high effort) resolves the reading. |
+| N rules nuance (1–1.5) | Rules that need careful reading | 1 + 0.5 × the R classifier's rule ambiguity (cached with R; 1 when unrated). Headline traders misread these; the pod's rules reader (Sonnet) resolves the reading. |
 
 L is computed against two size targets; each market is tagged **small-cap** or **size** and ranked in separate lists.
 
@@ -130,7 +130,7 @@ Each shortlisted market gets a pod: five Agent SDK agents with fixed roles, then
 
 | Role | Job | Output | Default model |
 |---|---|---|---|
-| Rules reader | Parse resolution text, source, edge cases; resolve each ambiguity to the reading the resolver will most likely apply; likely crowd misreads | Resolved checklist, residual ambiguity | Opus (high effort) |
+| Rules reader | Parse resolution text, source, edge cases; resolve each ambiguity to the reading the resolver will most likely apply; likely crowd misreads | Resolved checklist, residual ambiguity | Sonnet |
 | Primary-source hunter | Find the document/schedule/dataset/docket that settles it | Sourced facts with dates | Sonnet + Exa |
 | Base-rate analyst | Reference classes, historical frequencies; runs small scripts | Prior with method | Sonnet |
 | News and flow scanner | Last 7 days of news; is it priced in? | Event timeline | Sonnet + Exa |
