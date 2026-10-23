@@ -145,7 +145,7 @@ Each shortlisted market gets a pod: five Agent SDK agents with fixed roles, then
 
 **Re-research triggers:** price moves > 8¢ since thesis; a catalyst date passes; new high-relevance Exa hit on a saved query; thesis > 72 h old with < 14 days to resolution.
 
-**Calibration loop:** every judge estimate stored with the market price at the time. Nightly job computes Brier and log loss by category, role mix and model. They are reported, not applied: confidence `c` is the judge's, gated on evidence, and capped at 0.4 unless at least one fact on the thesis's side of the book cites a primary source (an official domain, or the resolution source the rules name). The count is stored on the thesis as `primaryFacts`.
+**Calibration loop:** every judge estimate stored with the market price at the time. Nightly job computes Brier and log loss by category, role mix and model. They are reported, not applied: confidence `c` is the judge's, gated on evidence, and capped at 0.4 unless the verdict rests on at least one strong fact: one the judge grades high on source reputation (for that kind of claim) and verified on the claim itself (a specific, dated, checkable fact bearing on resolution), on a url an analyst actually cited. The graded facts are stored on the thesis (`keyEvidence`, `strongFacts`).
 
 ## Sizing and projected returns
 

@@ -52,11 +52,11 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect([...small, ...size].some((x) => x.thesisId)).toBe(true);
   });
 
-  it("evidence gate: the fake runner cites only example.com, so every thesis records 0 primary facts and c <= 0.4", async () => {
+  it("evidence gate: the fake judge grades no evidence, so every thesis records 0 strong facts and c <= 0.4", async () => {
     const ths = await d.db.select().from(s.theses);
     expect(ths.length).toBeGreaterThan(0);
     for (const t of ths) {
-      expect((t.detail as { primaryFacts?: number }).primaryFacts).toBe(0);
+      expect((t.detail as { strongFacts?: number }).strongFacts).toBe(0);
       expect(t.c).toBeLessThanOrEqual(0.4);
     }
   });

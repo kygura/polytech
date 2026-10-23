@@ -170,8 +170,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       await setStage("sizing");
 
       const j = pod.judge;
-      // the judge's confidence stands only when a fact on the thesis's side cites a primary source (official data, the named resolution source)
-      const ev = evidenceConfidence(j.confidence, pod.evidence, market.rules, j.p_hat, snap.mid), c = ev.c;
+      // the judge's confidence stands only when its verdict rests on a strong fact (high-reputation source, verified claim) an analyst cited
+      const ev = evidenceConfidence(j.confidence, j.key_evidence, pod.evidence.map((e) => e.url)), c = ev.c;
       const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
       const core = sizeTrade({
         bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: j.p_hat, c, daysLeft: (market.endDate - now) / DAY,
@@ -208,7 +208,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
           rAnn: core.rAnn, rank: core.rank, catalysts: j.catalysts.map((x) => `${x.date} ${x.label}`), killCriteria: j.kill_criteria,
           createdAt: new Date(now), expiresAt: new Date(Math.min(market.endDate, now + 72 * 3_600_000)),
           detail: {
-            thesis: j.thesis, pYes: j.p_hat, pMidYes: snap.mid, primaryFacts: ev.primary, k: core.k, e: core.e, shares: core.shares, payoff: core.payoff,
+            thesis: j.thesis, pYes: j.p_hat, pMidYes: snap.mid, strongFacts: ev.strong, keyEvidence: j.key_evidence, k: core.k, e: core.e, shares: core.shares, payoff: core.payoff,
             expectedProfit: core.expectedProfit, daysLeft: core.daysLeft, capped: j.capped, judgeConfidence: j.confidence, trigger,
             model: judgeModel, roleMix: pod.agents.filter((a) => a.ok).map((a) => a.role).join("+"),
           },

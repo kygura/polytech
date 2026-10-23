@@ -144,7 +144,7 @@ describe("runPod steering", () => {
       expect(userPrompt(c.brief).split("Operator focus")[0]).not.toContain(q); // prose after the JSON, not inside it
     }
     let sent = "";
-    const out = { content: [{ type: "text", text: JSON.stringify({ p_hat: 0.5, confidence: 0.5, thesis: "t", catalysts: [], kill_criteria: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } };
+    const out = { content: [{ type: "text", text: JSON.stringify({ p_hat: 0.5, confidence: 0.5, thesis: "t", catalysts: [], kill_criteria: [], key_evidence: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } };
     const client = { messages: { create: async (a: { messages: { content: string }[] }) => ((sent = a.messages[0]!.content), out) } };
     await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: anthropicJudge(client as never), steering: steer({ question: q }) });
     expect(sent).toContain(`Operator focus: ${q}`);
