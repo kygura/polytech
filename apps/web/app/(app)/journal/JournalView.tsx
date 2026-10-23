@@ -12,19 +12,18 @@ import { KpiStrip } from "../../../components/journal/KpiStrip";
 import { PnlCurve } from "../../../components/journal/PnlCurve";
 import { GATE_N, GROUPS, ROLLING, breakdownRows, driftHistogram, rollingBrier, type GroupBy } from "../../../components/journal/journal";
 import j from "../../../components/journal/journal.module.css";
-import type { read, terminal } from "../../../lib/jobs";
+import type { terminal } from "../../../lib/jobs";
 import pg from "../../../components/page.module.css";
 import { Panel } from "../../../components/ui";
 import ui from "../../../components/ui.module.css";
 
 export type JournalData = Awaited<ReturnType<typeof terminal.journalView>>;
-export type Fade = Awaited<ReturnType<typeof read.calibration>>["fade"];
 export type Filters = { category: string; model: string; sinceDays: string; groupBy: GroupBy; minN: number };
 const WINDOWS: [string, string][] = [["30", "30d"], ["90", "90d"], ["", "all"]];
 
 const Mark = ({ n }: { n: number }) => (n < GATE_N ? <span className={j.mark}>n={n} {"·"} low confidence</span> : null);
 
-export function JournalView({ data, filters, categories, models, extremize, fade }: { data: JournalData; filters: Filters; categories: string[]; models: string[]; extremize: number; fade: Fade }) {
+export function JournalView({ data, filters, categories, models, extremize }: { data: JournalData; filters: Filters; categories: string[]; models: string[]; extremize: number }) {
   const router = useRouter();
   const go = (patch: Partial<Filters>) => {
     const f = { ...filters, ...patch };
@@ -93,9 +92,6 @@ export function JournalView({ data, filters, categories, models, extremize, fade
           <div className={j.wm}><Mark n={s.resolved} /><DriftHistogram hist={hist} /></div>
         </Panel>
       </div>
-      <Panel title="Longshot fades" right={<span className={j.legend}>all categories, unfiltered</span>}>
-        <FadeLine f={fade} />
-      </Panel>
       <BreakdownTable rows={groups} label={groupLabel} minN={filters.minN} />
       {suggested && (
         <p className={`${ui.bar} ${ui.barWarn}`} role="status">
@@ -103,19 +99,5 @@ export function JournalView({ data, filters, categories, models, extremize, fade
         </p>
       )}
     </div>
-  );
-}
-
-const pc = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1).replace(/\.0$/, "")}%`);
-/** Theses that bet against a 3-20% longshot: what the market priced it at, what we said, how often it happened, and the confidence new fades get. */
-function FadeLine({ f }: { f: Fade }) {
-  if (!f.n) return <p className={pg.hint}>No resolved fades yet. A fade is a thesis that puts a 3–20% longshot below its price; until 30 resolve and beat the market, they size at confidence 0.4.</p>;
-  return (
-    <p className={pg.line}>
-      n <span className="n">{f.gate}</span> {"·"} market said <span className="n">{pc(f.marketP)}</span> {"·"} we said <span className="n">{pc(f.ourP)}</span> {"·"} happened <span className="n">{pc(f.hitRate)}</span>
-      {" · "}Brier <span className="n">{f.brier == null ? "—" : f.brier.toFixed(3)}</span> vs market <span className="n">{f.marketBrier == null ? "—" : f.marketBrier.toFixed(3)}</span>
-      {" · "}skill <span className="n">{f.skill == null ? "—" : f.skill.toFixed(2)}</span> {"·"} fade confidence <span className="n">{f.c.toFixed(2)}</span>
-      {f.n < 30 && <span className={j.mark}> unlocks at 30</span>}
-    </p>
   );
 }

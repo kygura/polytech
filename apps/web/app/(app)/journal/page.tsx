@@ -19,5 +19,5 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
   ]);
   const models = [...new Set([...Object.keys(all.byModel), ...data.summary.byModel.map((m) => m.key), filters.model].filter(Boolean))].sort();
   const categories = [...new Set([...Object.keys(all.byCategory), ...data.summary.byCategory.map((c) => c.key), filters.category].filter((c) => c && c !== "unknown"))].sort();
-  return <JournalView data={data} filters={filters} categories={categories} models={models} extremize={settings.extremize} fade={all.fade} />;
+  return <JournalView data={data} filters={filters} categories={categories} models={models} extremize={settings.extremize} />;
 }

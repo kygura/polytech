@@ -4,7 +4,7 @@ import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
-import { thesisConfidence } from "./calib";
+import { categoryConfidence } from "./calib";
 import { DAY, addSpend, feeExpOf, feeOf, ruleText, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
 import { matchMarkets, listProfiles, type Match } from "./profiles";
@@ -171,8 +171,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       await setStage("sizing");
 
       const j = pod.judge;
-      // c <= 0.4 until 30 resolved in the category, or, for a longshot fade, until 30 resolved fades beat the market
-      const c = Math.min(j.confidence, await thesisConfidence(db, mrow.category, snap.mid, j.p_hat));
+      const c = Math.min(j.confidence, await categoryConfidence(db, mrow.category)); // c <= 0.4 until 30 resolved in the category
       const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
       const core = sizeTrade({
         bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: j.p_hat, c, daysLeft: (market.endDate - now) / DAY,

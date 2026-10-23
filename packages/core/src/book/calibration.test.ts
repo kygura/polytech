@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, brier, confidenceForCategory, fadeCalibration, isFade, logLoss, reliabilityBins } from "./calibration";
+import { aggregate, brier, confidenceForCategory, logLoss, reliabilityBins } from "./calibration";
 import type { Forecast } from "./types";
 
 const f = (p: number, pMarket: number, outcome: 0 | 1, category = "x"): Forecast => ({
@@ -54,41 +54,4 @@ describe("confidenceForCategory", () => {
     expect(confidenceForCategory(30, 0.3, 0.25)).toBe(0.4);
     expect(confidenceForCategory(100, 0.05, 0.25)).toBeCloseTo(0.9, 10);
   });
-});
-
-describe("longshot fades", () => {
-  it("isFade: cheap side 3-20% and our estimate below it, on either side of the book", () => {
-    expect(isFade(0.1, 0.03)).toBe(true); // YES at 10c, we say 3%
-    expect(isFade(0.92, 0.98)).toBe(true); // NO is the 8c longshot, we say 2%
-    expect(isFade(0.1, 0.15)).toBe(false); // buying the longshot is not a fade
-    expect(isFade(0.01, 0.002)).toBe(false); // below the band
-    expect(isFade(0.3, 0.1)).toBe(false); // above it
-  });
-  it("only fades count; below 30 resolved c stays 0.4", () => {
-    const rows = [f(0.1, 0.5, 0), ...Array.from({ length: 29 }, () => f(0.03, 0.1, 0))];
-    const r = fadeCalibration(rows);
-    expect(r.n).toBe(29);
-    expect(r.c).toBe(0.4);
-    expect(r.marketP).toBeCloseTo(0.1, 12);
-    expect(r.ourP).toBeCloseTo(0.03, 12);
-    expect(r.hitRate).toBe(0);
-  });
-  it("30 fades at 10c that happen 1 in 30: skill .121, c .70; NO-side fades are mirrored", () => {
-    // market Brier (29·.01 + .81)/30 = .03667, ours (29·.0009 + .9409)/30 = .03223
-    const rows = [...Array.from({ length: 29 }, () => f(0.97, 0.9, 1)), f(0.97, 0.9, 0)];
-    const r = fadeCalibration(rows);
-    expect(r.n).toBe(30);
-    expect(r.marketP).toBeCloseTo(0.1, 12);
-    expect(r.ourP).toBeCloseTo(0.03, 12);
-    expect(r.hitRate).toBeCloseTo(1 / 30, 12);
-    expect(r.skill).toBeCloseTo(1 - 0.967 / 1.1, 9);
-    expect(r.c).toBeCloseTo(0.4 + 0.5 * ((1 - 0.967 / 1.1) / 0.2), 9);
-  });
-  it("fades that keep getting hit: negative skill, c 0.4", () => {
-    const rows = Array.from({ length: 30 }, (_, i) => f(0.02, 0.1, i % 4 === 0 ? 1 : 0)); // 25% happened vs a 10% price
-    const r = fadeCalibration(rows);
-    expect(r.skill).toBeLessThan(0);
-    expect(r.c).toBe(0.4);
-  });
-  it("empty", () => expect(fadeCalibration([])).toMatchObject({ n: 0, skill: null, c: 0.4 }));
 });

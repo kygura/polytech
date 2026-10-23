@@ -1,4 +1,4 @@
-import { aggregate, effectiveMode, FADE_GATE_N, fadeCalibration, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
+import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
@@ -260,7 +260,6 @@ export async function calibration(r: ReadDeps, o: { category?: string; model?: s
   const all = await forecastRows(r.db);
   const rows = all.filter((x) => (!o.category || x.category === o.category) && (!o.model || x.model === o.model) && (!o.sinceDays || x.resolvedAt >= r.now() - o.sinceDays * DAY));
   const cats = aggregate(all, (x) => x.category);
-  const fade = fadeCalibration(all);
   return {
     n: rows.length,
     overall: aggregate(rows, () => "all").all ?? null, // { n, brier, logLoss, marketBrier }
@@ -268,7 +267,6 @@ export async function calibration(r: ReadDeps, o: { category?: string; model?: s
     byModel: aggregate(rows, (x) => x.model),
     byRoleMix: aggregate(rows, (x) => x.roleMix),
     bins: reliabilityBins(rows), // 10 bins { lo, hi, n, meanPredicted, observed }
-    fade: { ...fade, gate: `${fade.n}/${FADE_GATE_N}` }, // pooled longshot fades, unfiltered: the c research gives a new fade
   };
 }
 
