@@ -37,6 +37,13 @@ describe("pass1", () => {
     const s = { ...S, filters: { ...S.filters, excludedCategories: ["us"] } };
     expect(pass1(market, snap, s, NOW)).toEqual({ ok: false, reason: "excluded_category" });
   });
+  it("tail prices -> no_headroom (within minEdge of 0 or 1)", () => {
+    const at = (p: number) => ({ ...snap, bids: [{ price: p - 0.001, size: 1e6 }], asks: [{ price: p + 0.001, size: 1e6 }] });
+    expect(pass1(market, at(0.004), S, NOW)).toEqual({ ok: false, reason: "no_headroom" });
+    expect(pass1(market, at(0.997), S, NOW)).toEqual({ ok: false, reason: "no_headroom" });
+    expect(pass1(market, at(0.03), S, NOW).ok).toBe(true);
+    expect(pass1(market, at(0.97), S, NOW).ok).toBe(true);
+  });
   it("empty book -> no_book; thin book -> thin_depth", () => {
     expect(pass1(market, { ...snap, asks: [] }, S, NOW)).toEqual({ ok: false, reason: "no_book" });
     // mid .50; asks .52*300=156 <200, bids .48*300=144 <200

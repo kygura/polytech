@@ -6,7 +6,7 @@ const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 export type Pass1Reason =
   | "closed" | "not_accepting" | "disputed" | "days_out_of_range"
-  | "excluded_category" | "no_book" | "thin_depth";
+  | "excluded_category" | "no_book" | "thin_depth" | "no_headroom";
 
 export function pass1(
   m: Market, snap: Snapshot, s: Settings, now: number,
@@ -22,6 +22,9 @@ export function pass1(
   if ([m.category, ...m.tags].some((t) => ex.has(t.toLowerCase()))) return no("excluded_category");
   const mid = midOf(snap.bids, snap.asks);
   if (mid == null) return no("no_book");
+  // within minEdge of 0 or 1 the cheap side cannot pay minEdge even if it is certain, and the other side needs a fair value
+  // at least double the market's: sub-cent tail precision is noise, not an edge, so such markets are never researched on their own
+  if (Math.min(mid, 1 - mid) < s.minEdge) return no("no_headroom");
   // ponytail: side traded is unknown at pass 1, so either side's depth qualifies
   const depth = Math.max(depthWithin(snap.asks, mid, f.depthCents), depthWithin(snap.bids, mid, f.depthCents));
   return depth >= f.minDepthUsd ? { ok: true } : no("thin_depth");

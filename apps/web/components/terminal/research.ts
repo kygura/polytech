@@ -113,3 +113,25 @@ export function edgeNow(pYes: number, side: Outcome, ask: number | null | undefi
 
 /** Below this many cents an edge is not worth trading (fees and slippage eat it). */
 export const MIN_EDGE_C = 1;
+
+/**
+ * One call per researched market, shown beside the question: `trade` = the thesis was sized and the edge still clears
+ * MIN_EDGE_C at the live ask; `gone` = it was sized but the price has since moved; `pass` = researched, nothing worth
+ * trading (no sized thesis: the gap was inside fees and our confidence). null while unresearched / running / failed.
+ */
+export type Verdict = { k: "trade" | "gone" | "pass"; side: Outcome | null; edgeC: number | null };
+export function verdictOf(s: ViewState | null, liveEdgeC: number | null): Verdict | null {
+  if (s?.k === "judge") return { k: "pass", side: null, edgeC: null };
+  if (s?.k !== "thesis") return null;
+  if (s.sizeUsd < 1) return { k: "pass", side: null, edgeC: null };
+  const e = liveEdgeC ?? s.edgeC;
+  return { k: e >= MIN_EDGE_C ? "trade" : "gone", side: s.side, edgeC: e };
+}
+
+/** The judge's thesis opens with its call ("Fairly priced: …" / "Mispriced: …"); older theses: the first sentence. */
+export function verdictLine(thesis: string | null | undefined): string | null {
+  const t = thesis?.trim();
+  if (!t) return null;
+  const m = /^(.+?[.!?])(\s|$)/.exec(t);
+  return (m ? m[1]! : t).slice(0, 220);
+}

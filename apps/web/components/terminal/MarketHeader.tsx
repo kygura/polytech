@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { MarketFeed } from "../../hooks/useMarketFeed";
 import { Badge, OutcomeCard } from "../ui";
 import { cents, sh, usdShort, type Outcome } from "./book";
+import type { Verdict } from "./research";
 import { DEFAULT_TICK } from "./ticket";
 import css from "./terminal.module.css";
 
@@ -38,14 +39,30 @@ export function HeaderBadges({ flags: f, now }: { flags: HeaderFlags; now: numbe
 }
 
 /**
+ * Our call on this market, beside the question so it reads before the chart: Trade / Edge gone / Pass. Click opens the
+ * research tab (the judge's full reasoning); the tooltip carries the judge's one-line verdict.
+ */
+export function VerdictChip({ v, line, fair, market, tick, onOpen }: {
+  v: Verdict; line: string | null; fair: number | null; market: number | null; tick: number; onOpen: () => void;
+}) {
+  const c = (p: number | null) => (p == null ? "—" : `${cents(p, tick)}¢`);
+  const e = v.edgeC == null ? "" : `${v.edgeC >= 0 ? "+" : "−"}${Math.abs(v.edgeC).toFixed(1).replace(/\.0$/, "")}¢`;
+  const [label, cls] = v.k === "trade" ? [`Trade ${v.side} ${e}`, css.up] : v.k === "gone" ? [`Edge gone (${e})`, css.warn] : ["Pass · fairly priced", css.dim];
+  const tip = [line, `Fair ${c(fair)} vs market ${c(market)}.`, "Click for the full reasoning. Disagree? Steer… (⇧S) re-runs it with your angle."].filter(Boolean).join("\n");
+  return <button type="button" className={`${css.vChip} ${cls}`} onClick={onOpen} title={tip} aria-label={`Our verdict: ${label}`}>{label}</button>;
+}
+
+/**
  * Question (wraps in full), meta line, the two outcome cards (mouse form of Y / N) and the action toolbar (DESIGN 13.4 MarketHeader).
  * `yes` = the YES display price (mid, or last trade when the book is wider than 10¢); NO = 1 − YES.
  */
-export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, flags, now, actions, pro }: {
+export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, flags, now, actions, pro, verdict }: {
   meta: HeaderMeta | null; tick: number | null; yes: number | null; outcome: Outcome; onOutcome: (o: Outcome) => void; notFound: boolean;
   flags: HeaderFlags | null; now: number; actions: ReactNode;
   /** Pro view: price step and fee in the meta line. */
   pro: boolean;
+  /** Our verdict chip (VerdictChip), next to the end date. */
+  verdict?: ReactNode;
 }) {
   return (
     <header className={css.hero}>
@@ -55,6 +72,7 @@ export function MarketHeader({ meta, tick, yes, outcome, onOutcome, notFound, fl
           <div className={css.meta}>
             {meta.category && <span className={css.catChip}>{meta.category}</span>}
             <span>ends {meta.endDate ? day(meta.endDate) : "—"} {"·"} {Math.max(0, Math.round(meta.daysLeft))}d</span>
+            {verdict}
             {pro && <span className={css.n} title="Prices move in steps of this size">tick {tick == null ? "—" : `${cents(tick, tick)}¢`}</span>}
             {pro && meta.feeRate != null && <span className={css.n} title="Taker fee rate, charged when an order fills against the book">fee {(meta.feeRate * 100).toFixed(1)}%</span>}
             {flags && <HeaderBadges flags={flags} now={now} />}

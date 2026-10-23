@@ -93,6 +93,9 @@
 .hero h1 { font: 600 var(--fs-lg) / var(--lh-lg) var(--font-ui); margin: 0 0 var(--sp-1); overflow-wrap: anywhere; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); color: var(--muted); font: 400 var(--fs-xs) / var(--lh-xs) var(--font-ui); }
 .catChip { display: inline-flex; align-items: center; height: 18px; padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: 9px; color: var(--muted); }
+.vChip { display: inline-flex; align-items: center; height: 20px; padding: 0 var(--sp-2); border: 1px solid currentColor; border-radius: 10px; background: none; font: 600 var(--fs-xs) / var(--lh-xs) var(--font-ui); font-variant-numeric: tabular-nums; cursor: pointer; }
+.vChip:hover { background: var(--focus-bg); }
+.vChip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .zBadge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--warn); border-radius: var(--r-sm); color: var(--warn); font: 600 10px / 1 var(--font-mono); }
 .out { display: flex; gap: var(--gap); }
 .stats { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); flex: none; }
