@@ -18,7 +18,7 @@ export type ReadDeps = Pick<Deps, "db" | "now"> & { exchangeConfigured?: boolean
 export const readDeps = async (): Promise<ReadDeps> => ({ db: await dbReady(), now: defaultNow, exchangeConfigured: envExchange() !== null, pm: createPm() });
 
 type Th = typeof s.theses.$inferSelect;
-type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string };
+type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string; primaryFacts?: number };
 const dt = (t: Th) => (t.detail ?? {}) as ThDetail;
 
 const latestTheses = async (db: Db, ids?: string[]) => {

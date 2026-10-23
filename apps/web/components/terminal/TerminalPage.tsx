@@ -300,7 +300,7 @@ export function TerminalPage() {
   const askOf = (o: Outcome) => (viewFeed ? forOutcome(viewFeed, o).asks[0]?.price ?? null : null);
   const verdict = verdictOf(view, view?.k === "thesis" ? edgeNow(view.pYes, view.side, askOf(view.side), viewDetail?.market.feeRate ?? 0, viewDetail?.market.feeExponent ?? 1) : null);
   const verdictChip = verdict && view && (view.k === "thesis" || view.k === "judge")
-    ? <VerdictChip v={verdict} line={view.k === "thesis" ? verdictLine(thesis?.thesis) : null} fair={view.pYes} market={yes} tick={t0} daysLeft={meta?.daysLeft ?? null} onOpen={() => chooseTab("research")} /> : null;
+    ? <VerdictChip v={verdict} line={view.k === "thesis" ? verdictLine(thesis?.thesis) : null} fair={view.pYes} market={yes} tick={t0} daysLeft={meta?.daysLeft ?? null} primary={view.k === "thesis" ? thesis?.primaryFacts ?? null : null} onOpen={() => chooseTab("research")} /> : null;
 
   const feedAt = feed.data?.at ?? shown.current?.feed.at ?? null;
   const feedBadge = <span className={css.feedSeg}><FeedBadge status={feed.status} source={feed.source} at={feedAt} now={now} /></span>;

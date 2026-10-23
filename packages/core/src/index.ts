@@ -11,3 +11,4 @@ export * from "./book/index"; // T2
 export * from "./dsl";
 export * from "./crowd";
 export * from "./classify";
+export * from "./evidence";
