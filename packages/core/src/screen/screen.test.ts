@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type Market, type Snapshot } from "../types";
-import { crowd, factorI, factorL, factorT, pass1, priority, screen } from "./screen";
+import { crowd, factorA, factorI, factorL, factorT, pass1, priority, screen } from "./screen";
 
 const NOW = Date.UTC(2026, 9, 15);
 const DAY = 86_400_000;
@@ -120,6 +120,20 @@ describe("crowd", () => {
   });
 });
 
+describe("factorA (attention)", () => {
+  it("quiet markets get full credit; each 10x of volume takes 0.35 off, floored at 0.3", () => {
+    expect(factorA({ vol24h: 0 })).toBe(1);
+    expect(factorA({ vol24h: 5_000 })).toBe(1);
+    expect(factorA({ vol24h: 50_000 })).toBeCloseTo(0.65, 12);
+    expect(factorA({ vol24h: 500_000 })).toBeCloseTo(0.3, 12);
+    expect(factorA({ vol24h: 5e7 })).toBe(0.3);
+    expect(factorA({ vol24h: NaN })).toBe(1);
+  });
+  it("priority: a quiet market outranks an identical busy one", () => {
+    expect(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4, A: 1 }, S)).toBeCloseTo(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4, A: 0.3 }, S) / 0.3, 12);
+  });
+});
+
 describe("priority", () => {
   it("R*I*L*T*(1+0.5C)", () => {
     expect(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4 }, S)).toBeCloseTo(0.8 * 0.5 * 0.5 * 1 * 1.2, 12);
@@ -135,6 +149,6 @@ describe("screen", () => {
     expect(r.T).toBe(1);
     expect(r.C).toBeCloseTo(0.4 / 3, 12);
     expect(r.structural).toBe(true);
-    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C), 12);
+    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C) * r.A, 12);
   });
 });

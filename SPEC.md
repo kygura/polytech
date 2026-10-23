@@ -103,7 +103,7 @@ Two passes: hard filters on the whole universe, then a priority score on survivo
 - ≥ $200 depth within 5¢ of mid on the side traded
 - Excluded categories by config (e.g. sports in-play, 15-min crypto up/down)
 
-**Pass 2 — priority:** `Priority = R × I × L × T × (1 + 0.5·C)`
+**Pass 2 — priority:** `Priority = R × I × L × T × (1 + 0.5·C) × A`
 
 | Factor | Measures | Inputs |
 |---|---|---|
@@ -112,6 +112,7 @@ Two passes: hard filters on the whole universe, then a priority score on survivo
 | L liquidity fit (0–1) | Can target size fill? | Depth to fill target within 3¢ slippage, OI, 24h volume |
 | T time value (0–1) | Return per day of capital | Days to resolution, decays past 60 days |
 | C crowding (0–1) | One-sidedness | Top-10 holder share, net taker flow 24h, comment sentiment skew |
+| A attention (0.3–1) | How few participants have done the work | 24h volume: 1 up to $5k, −0.35 per 10× above, floor 0.3 ($50k → 0.65, $500k+ → 0.3). Ranks busy markets behind, never excludes them. |
 
 L is computed against two size targets; each market is tagged **small-cap** or **size** and ranked in separate lists.
 

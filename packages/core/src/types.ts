@@ -40,6 +40,8 @@ export type ScreenResult = {
   L: number;
   T: number;
   C: number;
+  /** Attention (factorA): 1 for a quiet market, down to 0.3 for a heavily traded one. In priority, not stored. */
+  A: number;
   priority: number;
   tier: Tier;
   structural: boolean;

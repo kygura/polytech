@@ -61,6 +61,20 @@ export function factorT(days: number, s: Settings): number {
   return days <= s.tDecayDays ? 1 : s.tDecayDays / days;
 }
 
+/** 24h volume up to which a market counts as quiet: full attention credit. */
+export const QUIET_VOL_USD = 5_000;
+const A_FLOOR = 0.3;
+
+/**
+ * Attention: the desk's edge is diligence, and it is widest where few participants have done the work. Quiet markets
+ * (<= QUIET_VOL_USD a day) score 1; each 10x more volume takes 0.35 off, floored at 0.3, so a $50k/day market scores 0.65 and a
+ * $500k+ headline market 0.3: ranked behind, never excluded. Liquidity (factorL) still requires a fillable book.
+ */
+export function factorA(snap: Pick<Snapshot, "vol24h">): number {
+  const v = Number.isFinite(snap.vol24h) ? Math.max(0, snap.vol24h) : 0;
+  return v <= QUIET_VOL_USD ? 1 : Math.max(A_FLOOR, 1 - 0.35 * Math.log10(v / QUIET_VOL_USD));
+}
+
 export type CrowdInput = { top10Share: number; netFlow: number; skew: number }; // flow, skew in -1..1
 
 export function crowd(i: CrowdInput): { c: number; side: Side | null } {
@@ -69,8 +83,9 @@ export function crowd(i: CrowdInput): { c: number; side: Side | null } {
   return { c, side: lean > 0.25 ? "YES" : lean < -0.25 ? "NO" : null };
 }
 
-export function priority(f: { R: number; I: number; L: number; T: number; C: number }, s: Settings): number {
-  return f.R * f.I * f.L * f.T * (1 + s.cCoef * f.C);
+/** A defaults to 1 (no attention discount) for callers that score without a snapshot. */
+export function priority(f: { R: number; I: number; L: number; T: number; C: number; A?: number }, s: Settings): number {
+  return f.R * f.I * f.L * f.T * (1 + s.cCoef * f.C) * (f.A ?? 1);
 }
 
 export function screen(a: {
@@ -81,8 +96,9 @@ export function screen(a: {
   const { L, tier } = factorL(snap, settings);
   const T = factorT((market.endDate - now) / DAY, settings);
   const C = crowd(a.crowd).c;
+  const A = factorA(snap);
   return {
-    conditionId: market.conditionId, ts: now, R: a.R, I, L, T, C,
-    priority: priority({ R: a.R, I, L, T, C }, settings), tier, structural: a.structural,
+    conditionId: market.conditionId, ts: now, R: a.R, I, L, T, C, A,
+    priority: priority({ R: a.R, I, L, T, C, A }, settings), tier, structural: a.structural,
   };
 }
