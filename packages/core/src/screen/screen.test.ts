@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type Market, type Snapshot } from "../types";
-import { crowd, factorI, factorL, factorT, pass1, priority, screen } from "./screen";
+import { crowd, factorA, factorI, factorN, factorL, factorT, pass1, priority, screen } from "./screen";
 
 const NOW = Date.UTC(2026, 9, 15);
 const DAY = 86_400_000;
@@ -36,6 +36,13 @@ describe("pass1", () => {
   it("excluded category also matches tags", () => {
     const s = { ...S, filters: { ...S.filters, excludedCategories: ["us"] } };
     expect(pass1(market, snap, s, NOW)).toEqual({ ok: false, reason: "excluded_category" });
+  });
+  it("tail prices -> no_headroom (within minEdge of 0 or 1)", () => {
+    const at = (p: number) => ({ ...snap, bids: [{ price: p - 0.001, size: 1e6 }], asks: [{ price: p + 0.001, size: 1e6 }] });
+    expect(pass1(market, at(0.004), S, NOW)).toEqual({ ok: false, reason: "no_headroom" });
+    expect(pass1(market, at(0.997), S, NOW)).toEqual({ ok: false, reason: "no_headroom" });
+    expect(pass1(market, at(0.03), S, NOW).ok).toBe(true);
+    expect(pass1(market, at(0.97), S, NOW).ok).toBe(true);
   });
   it("empty book -> no_book; thin book -> thin_depth", () => {
     expect(pass1(market, { ...snap, asks: [] }, S, NOW)).toEqual({ ok: false, reason: "no_book" });
@@ -113,6 +120,26 @@ describe("crowd", () => {
   });
 });
 
+describe("factorA (attention)", () => {
+  it("quiet markets get full credit; each 10x of volume takes 0.35 off, floored at 0.3", () => {
+    expect(factorA({ vol24h: 0 })).toBe(1);
+    expect(factorA({ vol24h: 5_000 })).toBe(1);
+    expect(factorA({ vol24h: 50_000 })).toBeCloseTo(0.65, 12);
+    expect(factorA({ vol24h: 500_000 })).toBeCloseTo(0.3, 12);
+    expect(factorA({ vol24h: 5e7 })).toBe(0.3);
+    expect(factorA({ vol24h: NaN })).toBe(1);
+  });
+  it("priority: a quiet market outranks an identical busy one", () => {
+    expect(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4, A: 1 }, S)).toBeCloseTo(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4, A: 0.3 }, S) / 0.3, 12);
+  });
+});
+
+describe("factorN (rules nuance)", () => {
+  it("1 + 0.5 x ambiguity, clamped; unrated -> 1", () => {
+    expect([factorN(0), factorN(0.6), factorN(1), factorN(3), factorN(null), factorN(undefined), factorN(NaN)]).toEqual([1, 1.3, 1.5, 1.5, 1, 1, 1]);
+  });
+});
+
 describe("priority", () => {
   it("R*I*L*T*(1+0.5C)", () => {
     expect(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4 }, S)).toBeCloseTo(0.8 * 0.5 * 0.5 * 1 * 1.2, 12);
@@ -128,6 +155,6 @@ describe("screen", () => {
     expect(r.T).toBe(1);
     expect(r.C).toBeCloseTo(0.4 / 3, 12);
     expect(r.structural).toBe(true);
-    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C), 12);
+    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C) * r.A * r.N, 12);
   });
 });

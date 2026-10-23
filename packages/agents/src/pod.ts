@@ -1,5 +1,5 @@
-import { DEFAULT_STEERING, capConfidence, straddles, type AgentOutput, type Level, type Market, type Settings, type Steering } from "@pm/core";
-import type { Judge, JudgeOut } from "./judge";
+import { DEFAULT_STEERING, capConfidence, checkQuote, straddles, type Level, type Market, type QuoteCheck, type Settings, type Steering } from "@pm/core";
+import type { CheckedOutput, Judge, JudgeOut } from "./judge";
 import { COMMON, buildBrief, type AgentRole } from "./prompts";
 import { AnthropicOutageError, isOverload } from "./backoff";
 import { modelFor, type ModelRole } from "./router";
@@ -20,7 +20,7 @@ export type PodSettings = {
 export type AgentResult =
   | { role: AgentRole; model: string; ok: true; run: Run }
   | { role: AgentRole; model: string; ok: false; error: string; outage: boolean; skipped?: true; cancelled?: true }; // skipped: never started (cost cap); cancelled: aborted mid-run
-export type EvidenceRow = { agent_role: AgentRole; claim: string; url: string; quote: string; date: string; direction: "+" | "-" };
+export type EvidenceRow = { agent_role: AgentRole; claim: string; url: string; quote: string; date: string; direction: "+" | "-"; quote_check: QuoteCheck };
 export type PodResult = {
   agents: AgentResult[];
   judge: JudgeOut & { capped: boolean };
@@ -127,7 +127,15 @@ export async function runPod(a: {
 
   const ok = agents.flatMap((x) => (x.ok ? [x.run] : []));
   if (ok.length < Math.min(3, roles.length)) throw new PodFailedError(agents, agents.some((x) => !x.ok && x.error.startsWith("TIMEOUT")) ? new PodTimeoutError("agents") : undefined);
-  const outputs: AgentOutput[] = ok.map((r) => r.output);
+  // each quote against the text that analyst's own runner read for that url (the full quote, before trim); the rules reader
+  // quotes the rules text from its brief, so that text counts as read for its facts
+  const outputs: CheckedOutput[] = ok.map((r) => ({
+    ...r.output,
+    key_facts: r.output.key_facts.map((f) => {
+      const read = r.output.role === "rules" ? [...(r.pages ?? []), { url: f.url, text: brief.rules }] : r.pages ?? [];
+      return { ...f, quote_check: checkQuote(f.quote, f.url, read) };
+    }),
+  }));
 
   const bidP = book.bids.map((l) => l.price), askP = book.asks.map((l) => l.price);
   const usd = (ls: Level[]) => ls.reduce((s, l) => s + l.price * l.size, 0);
@@ -158,6 +166,7 @@ export async function runPod(a: {
       quote: trim(f.quote),
       date: f.date,
       direction: o.probability == null || o.probability >= book.pMid ? "+" : "-",
+      quote_check: f.quote_check,
     })),
   );
   const costs = [...ok.map((r) => r.usage), j.usage].reduce(

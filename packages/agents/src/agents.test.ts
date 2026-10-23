@@ -4,6 +4,7 @@ import { AgentOutput } from "@pm/core";
 import { DEFAULT_STEERING, type Steering } from "@pm/core";
 import { AnthropicOutageError, anthropicJudge, apiRunner, userPrompt, isOverloadText, PodFailedError, PodTimeoutError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
+import { makePdf } from "./test-pdf";
 
 const mk = (q: string): Market => ({
   conditionId: q, eventId: "e", question: q, rules: "Resolves YES if X per https://example.com.", category: "politics",
@@ -25,7 +26,8 @@ describe("brief", () => {
 
 describe("router", () => {
   it("defaults + override", () => {
-    expect(modelFor("rules")).toBe("claude-haiku-5-5");
+    expect(modelFor("rules")).toBe("claude-sonnet-5-5");
+    expect(modelFor("r_classifier")).toBe("claude-haiku-5-5"); // the screen-wide flagger stays cheap
     expect(modelFor("judge")).toBe("claude-opus-5-5");
     expect(modelFor("news", { news: "x" })).toBe("x");
   });
@@ -52,6 +54,34 @@ describe("runPod", () => {
     expect(r.judge.p_hat).toBeGreaterThan(0);
     expect(r.evidence.length).toBeGreaterThanOrEqual(5);
     expect(r.evidence.every((e) => e.quote.split(/\s+/).length < 25 && ["+", "-"].includes(e.direction))).toBe(true);
+  });
+
+  it("quote check: fake fact 1 is on the page its runner read, facts 2-3 were never fetched", async () => {
+    const r = await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: fakeJudge });
+    for (const e of r.evidence.filter((x) => x.agent_role !== "rules")) expect(e.quote_check).toBe(e.url.endsWith("/1") ? "found" : "unfetched");
+  });
+
+  it("quote check: the rules reader's quotes are checked against the rules text in its brief", async () => {
+    const raw: RawRunner = async (role, brief, o) => {
+      const r = await fakeRaw(role, brief, o);
+      if (role !== "rules") return r;
+      const out = r.output as { key_facts: { quote: string }[] };
+      return { ...r, output: { ...out, key_facts: [{ ...out.key_facts[0]!, quote: brief.rules.split(/\s+/).slice(0, 6).join(" ") }, { ...out.key_facts[0]!, quote: "words the rules never use" }] } };
+    };
+    const r = await runPod({ market, siblings: sibs, book, runner: validated(raw), judge: fakeJudge });
+    expect(r.evidence.filter((e) => e.agent_role === "rules").map((e) => e.quote_check)).toEqual(["found", "not_found"]);
+  });
+
+  it("quote check: a misquote on a page that was read reaches the judge as not_found", async () => {
+    const raw: RawRunner = async (role, brief, o) => {
+      const r = await fakeRaw(role, brief, o);
+      return { ...r, pages: (r.pages ?? []).map((p) => ({ ...p, text: "The page says something else entirely." })) };
+    };
+    let seen: string[] = [];
+    const judge: typeof fakeJudge = async (i) => { seen = i.outputs.filter((x) => x.role !== "rules").flatMap((x) => x.key_facts.filter((f) => f.url.endsWith("/1")).map((f) => f.quote_check)); return fakeJudge(i); };
+    await runPod({ market, siblings: sibs, book, runner: validated(raw), judge });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((q) => q === "not_found")).toBe(true);
   });
 
   it("caps confidence when estimates straddle p_mid", async () => {
@@ -144,7 +174,7 @@ describe("runPod steering", () => {
       expect(userPrompt(c.brief).split("Operator focus")[0]).not.toContain(q); // prose after the JSON, not inside it
     }
     let sent = "";
-    const out = { content: [{ type: "text", text: JSON.stringify({ p_hat: 0.5, confidence: 0.5, thesis: "t", catalysts: [], kill_criteria: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } };
+    const out = { content: [{ type: "text", text: JSON.stringify({ p_hat: 0.5, confidence: 0.5, thesis: "t", catalysts: [], kill_criteria: [], key_evidence: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } };
     const client = { messages: { create: async (a: { messages: { content: string }[] }) => ((sent = a.messages[0]!.content), out) } };
     await runPod({ market, siblings: sibs, book, runner: fakeRunner, judge: anthropicJudge(client as never), steering: steer({ question: q }) });
     expect(sent).toContain(`Operator focus: ${q}`);
@@ -161,7 +191,7 @@ describe("runPod steering", () => {
       steering: steer({ models: { source: "claude-haiku-5-5", judge: "claude-sonnet-5-5" } }),
     });
     const m = Object.fromEntries(calls.map((c) => [c.role, c.o.model]));
-    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-haiku-5-5", red_team: "claude-sonnet-5-5" });
+    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-sonnet-5-5", red_team: "claude-sonnet-5-5" });
     expect(judgeModel).toBe("claude-sonnet-5-5");
   });
 
@@ -279,6 +309,19 @@ describe("apiRunner", () => {
     expect(r.toolCalls).toEqual([expect.objectContaining({ name: "web_search", ok: false })]);
     expect(r.usage.costUsd).toBeGreaterThan(0.02); // two searches at $0.01 plus tokens
     expect(sent[1]).toHaveLength(2); // the paused assistant turn went back as-is, no extra user message
+  });
+
+  it("keeps the text it read: fetched documents, cited search passages and parsed PDFs (a broken PDF is skipped)", async () => {
+    const turn = { stop_reason: "tool_use", usage, content: [
+      { type: "web_fetch_tool_result", tool_use_id: "f1", content: { type: "web_fetch_result", url: "https://bls.gov/cpi", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "text", media_type: "text/plain", data: "CPI rose 3.7 percent." } } } },
+      { type: "web_fetch_tool_result", tool_use_id: "f2", content: { type: "web_fetch_result", url: "https://x.gov/a.pdf", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "base64", media_type: "application/pdf", data: Buffer.from(makePdf("Payrolls rose by 150,000.")).toString("base64") } } } },
+      { type: "web_fetch_tool_result", tool_use_id: "f3", content: { type: "web_fetch_result", url: "https://x.gov/broken.pdf", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "base64", media_type: "application/pdf", data: "JVBE" } } } },
+      { type: "text", text: "noted", citations: [{ type: "web_search_result_location", url: "https://reuters.com/fed", cited_text: "The Fed raised rates by 25 bp.", encrypted_index: "x", title: null }] },
+      { type: "tool_use", id: "t", name: "submit_result", input: out },
+    ] };
+    const r = await apiRunner(scripted(turn).client)("news", brief, opts);
+    expect(r.pages!.slice(0, 2)).toEqual([{ url: "https://bls.gov/cpi", text: "CPI rose 3.7 percent." }, { url: "https://reuters.com/fed", text: "The Fed raised rates by 25 bp." }]);
+    expect(r.pages!.slice(2)).toEqual([{ url: "https://x.gov/a.pdf", text: expect.stringContaining("Payrolls rose by 150,000.") }]);
   });
 
   it("nudges a turn that ends without submit_result, then gives up", async () => {

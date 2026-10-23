@@ -24,10 +24,10 @@ import { feedDisplay, forOutcome, type Outcome, type TradeSide } from "./book";
 import { FeedBadge } from "./FeedBadge";
 import { KeyLegend } from "./KeyLegend";
 import { isMarketId } from "./marketList";
-import { KeyStats, MarketHeader, type HeaderFlags, type HeaderMeta } from "./MarketHeader";
+import { KeyStats, MarketHeader, VerdictChip, type HeaderFlags, type HeaderMeta } from "./MarketHeader";
 import { MarketList } from "./MarketList";
 import { OurView } from "./OurView";
-import { viewState, type LiveResp } from "./research";
+import { edgeNow, verdictLine, verdictOf, viewState, type LiveResp } from "./research";
 import { canSwitch, sellable } from "./rules";
 import { TerminalTicket, type TicketHandle } from "./TerminalTicket";
 import { DEFAULT_TICK, DISCLAIMER, paperHeld } from "./ticket";
@@ -298,6 +298,9 @@ export function TerminalPage() {
   const snap = viewDetail?.snapshot;
   const t0 = tick ?? DEFAULT_TICK;
   const askOf = (o: Outcome) => (viewFeed ? forOutcome(viewFeed, o).asks[0]?.price ?? null : null);
+  const verdict = verdictOf(view, view?.k === "thesis" ? edgeNow(view.pYes, view.side, askOf(view.side), viewDetail?.market.feeRate ?? 0, viewDetail?.market.feeExponent ?? 1) : null);
+  const verdictChip = verdict && view && (view.k === "thesis" || view.k === "judge")
+    ? <VerdictChip v={verdict} line={view.k === "thesis" ? verdictLine(thesis?.thesis) : null} fair={view.pYes} market={yes} tick={t0} daysLeft={meta?.daysLeft ?? null} evidence={view.k === "thesis" ? thesis?.keyEvidence ?? null : null} onOpen={() => chooseTab("research")} /> : null;
 
   const feedAt = feed.data?.at ?? shown.current?.feed.at ?? null;
   const feedBadge = <span className={css.feedSeg}><FeedBadge status={feed.status} source={feed.source} at={feedAt} now={now} /></span>;
@@ -312,7 +315,7 @@ export function TerminalPage() {
       <Panel label="market" className={`${css.centerp} ${dim ? css.dimmed : ""}`}>
         <div className={css.centerIn}>
           <button type="button" className={css.listBtn} onClick={() => { setDrawer(true); requestAnimationFrame(() => searchRef.current?.focus()); }} aria-label="Show market list">{"☰"} Markets</button>
-          <MarketHeader meta={meta} tick={tick} yes={yes} outcome={outcome} onOutcome={pickOutcome} notFound={notFoundMarket} flags={flags} now={now} pro={pro}
+          <MarketHeader meta={meta} tick={tick} yes={yes} outcome={outcome} onOutcome={pickOutcome} notFound={notFoundMarket} flags={flags} now={now} pro={pro} verdict={verdictChip}
             actions={<div className={css.heroBar}>
               {id && research ? <ActionBar conditionId={id} pinned={research.market.pinned} muted={research.market.muted} running={running} question={research.market.question} researchDisabled={researchDisabled} onChanged={changed} onResearch={() => void doResearch()} /> : <span />}
               <Switch checked={pro} onChange={chooseView} label="Pro view" kbd="v" title="Pro view adds the order book, recent trades, market stats and the key legend (v)" />

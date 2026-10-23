@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allInPrice, exitFactor, extremizeP, sizeTrade, type SizeInput } from "./sizing";
+import { allInPrice, exitFactor, extremizeP, needEdge, sizeTrade, type SizeInput } from "./sizing";
 import { DEFAULT_SETTINGS } from "./types";
 
 const S = DEFAULT_SETTINGS; // B 1000, kelly .25, cap .05, minEdge .02, rAnnCap 5
@@ -159,5 +159,31 @@ describe("sizeTrade Rev 7 refinements", () => {
     expect(sharp.pPost).toBeGreaterThan(plain.pPost);
     expect(sizeTrade({ ...base, settings: { ...S, extremize: 2 } as typeof S })).toEqual(sharp);
     expect(sizeTrade({ ...base, extremize: 0.5 })!.pHat).toBeLessThan(0.6);
+  });
+});
+
+describe("longshot guard", () => {
+  // YES book at 4/5c: a cheap YES needs fair >= 2x its cost, the 95c NO only minEdge
+  const tail: SizeInput = { ...base, bids: [{ price: 0.04, size: 5000 }], asks: [{ price: 0.05, size: 5000 }], pMid: 0.045, feeRate: 0, c: 1, daysLeft: 30 };
+  it("needEdge: the price itself under 15c, minEdge above", () => {
+    expect(needEdge(0.05, 0.02)).toBe(0.05);
+    expect(needEdge(0.01, 0.02)).toBe(0.02);
+    expect(needEdge(0.5, 0.02)).toBe(0.02);
+  });
+  it("a cheap YES on a tail estimate is not sized: 8c fair vs 5c cost", () => {
+    const r = sizeTrade({ ...tail, pHat: 0.08 })!;
+    expect(r.side).toBe("YES");
+    expect(r.e).toBeCloseTo(0.03, 12);
+    expect(r.sizeUsd).toBe(0);
+  });
+  it("double the price is sized: 11c fair vs 5c cost", () => {
+    expect(sizeTrade({ ...tail, pHat: 0.11 })!.sizeUsd).toBeGreaterThan(0);
+  });
+  it("the overpriced longshot is harvested from the NO side: 1% fair vs a 4c YES bid", () => {
+    const r = sizeTrade({ ...tail, pHat: 0.01 })!;
+    expect(r.side).toBe("NO");
+    expect(r.k).toBeCloseTo(0.96, 12);
+    expect(r.e).toBeCloseTo(0.03, 12);
+    expect(r.sizeUsd).toBeGreaterThan(0);
   });
 });

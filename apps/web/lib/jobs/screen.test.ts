@@ -73,6 +73,27 @@ describe("screenAll LLM budget", () => {
     expect(rest.every((x) => x.r === stored.get(x.conditionId))).toBe(true); // the sweep's score of the rules text
   });
 
+  it("rule ambiguity: cached with R, raises priority by 1 + 0.5 x ambiguity; rows rated before it are re-rated once", async () => {
+    await reset();
+    await screenAll(withR(async () => ({ R: 0.5, ambiguity: 0 })), { maxLlm: 1000 });
+    const flat = new Map((await d.db.select().from(s.screens)).map((x) => [x.conditionId, x.priority ?? 0]));
+    await d.db.delete(s.screens);
+    await d.db.update(s.rrCache).set({ detail: { fallback: false } }); // as written before rule_ambiguity was kept
+    let n = 0;
+    await screenAll(withR(async () => (n++, { R: 0.5, ambiguity: 0.8 })), { maxLlm: 1000 });
+    expect(n).toBeGreaterThan(0);
+    const cached = await d.db.select().from(s.rrCache);
+    expect(cached.every((c) => (c.detail as { ambiguity?: number }).ambiguity === 0.8)).toBe(true);
+    const now = await d.db.select().from(s.screens);
+    const hit = now.filter((x) => (flat.get(x.conditionId) ?? 0) > 0);
+    expect(hit.length).toBeGreaterThan(0);
+    for (const x of hit) expect(x.priority).toBeCloseTo(flat.get(x.conditionId)! * 1.4, 6); // T drifts by ms between runs
+    // rated now: a third run calls the classifier for nothing
+    n = 0;
+    await screenAll(withR(async () => (n++, { R: 0.5, ambiguity: 0.8 })), { maxLlm: 1000 });
+    expect(n).toBe(0);
+  });
+
   it("caps LLM calls per run", async () => {
     await reset();
     let n = 0;

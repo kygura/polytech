@@ -9,9 +9,9 @@ import { runAgent } from "./agent-query.mjs";
 const r = await runAgent(JSON.parse(readFileSync("input.json", "utf8")));
 console.log("__RESULT__" + JSON.stringify(r));
 `;
-const PKG = JSON.stringify({ type: "module", dependencies: { "@anthropic-ai/claude-agent-sdk": "0.3.300", zod: "^4.6.7" } });
+const PKG = JSON.stringify({ type: "module", dependencies: { "@anthropic-ai/claude-agent-sdk": "0.3.300", zod: "^4.6.7", unpdf: "1.8.1" } });
 const query = readFile(new URL("./agent-query.mjs", import.meta.url));
-const safeFetch = readFile(new URL("./safe-fetch.mjs", import.meta.url)); // fetch_url's SSRF guard; stdlib only, runs in the sandbox too
+const safeFetch = readFile(new URL("./safe-fetch.mjs", import.meta.url)); // fetch_url's SSRF guard (+ unpdf for PDFs); runs in the sandbox too
 
 /** One non-persistent Vercel Sandbox per agent. Only ANTHROPIC_API_KEY + EXA_API_KEY enter the sandbox. Abort stops the sandbox (kills the command) and rejects. */
 export const sandboxRunner = (env: Record<string, string | undefined> = process.env): AgentRunner =>

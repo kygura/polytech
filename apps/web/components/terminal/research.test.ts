@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clock, edgeNow, failText, refusalText, researchPct, viewState, type LiveRun } from "./research";
+import { clock, edgeNow, failText, refusalText, researchPct, verdictLine, verdictOf, viewState, type LiveRun } from "./research";
 
 const run = (o: Partial<LiveRun> = {}): LiveRun => ({
   podId: "pod_1", conditionId: "0x1", status: "running", stage: "agents", error: null, startedAt: 2_000,
@@ -71,5 +71,31 @@ describe("edgeNow", () => {
     expect(edgeNow(0.47, "YES", 0.4, 0.04)).toBeCloseTo(7 - 0.04 * 0.4 * 0.6 * 100, 9);
     expect(edgeNow(0.3, "NO", 0.61, 0)).toBeCloseTo(9, 9);
     expect(edgeNow(0.3, "NO", null, 0)).toBeNull();
+  });
+});
+
+describe("verdict", () => {
+  const th = { k: "thesis" as const, pYes: 0.006, side: "YES" as const, sizeUsd: 0, edgeC: 0.2, at: 1 };
+  it("a thesis that sized to $0 is a pass, however the gap reads", () => {
+    expect(verdictOf(th, 0.2)).toEqual({ k: "pass", side: null, edgeC: null, ret: null });
+    expect(verdictOf({ k: "judge", pYes: 0.5, at: 1 }, null)).toMatchObject({ k: "pass" });
+  });
+  it("a sized thesis trades while the live edge clears 1¢, else the edge is gone", () => {
+    expect(verdictOf({ ...th, pYes: 0.5, sizeUsd: 40, edgeC: 4 }, 3)).toEqual({ k: "trade", side: "YES", edgeC: 3, ret: expect.closeTo(0.03 / 0.47, 9) });
+    expect(verdictOf({ ...th, sizeUsd: 40, edgeC: 4 }, null)).toMatchObject({ k: "trade", edgeC: 4 });
+    expect(verdictOf({ ...th, sizeUsd: 40, edgeC: 4 }, 0.4)).toMatchObject({ k: "gone" });
+  });
+  it("return on the stake: a 3¢ edge on a NO worth 99¢ costs 96¢", () => {
+    expect(verdictOf({ ...th, pYes: 0.01, side: "NO", sizeUsd: 40, edgeC: 3 }, null)!.ret).toBeCloseTo(0.03 / 0.96, 9);
+  });
+  it("no verdict before research finishes", () => {
+    expect(verdictOf(null, null)).toBeNull();
+    expect(verdictOf({ k: "none" }, null)).toBeNull();
+    expect(verdictOf({ k: "failed", error: null }, null)).toBeNull();
+  });
+  it("verdict line: the thesis's first sentence", () => {
+    expect(verdictLine("Fairly priced: 0.6¢ vs 0.4¢ is inside our noise. The Fed raised…")).toBe("Fairly priced: 0.6¢ vs 0.4¢ is inside our noise.");
+    expect(verdictLine("no full stop")).toBe("no full stop");
+    expect(verdictLine("  ")).toBeNull();
   });
 });

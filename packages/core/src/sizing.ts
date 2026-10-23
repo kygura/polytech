@@ -28,6 +28,14 @@ export type SizeResult = WatchCore & {
 };
 
 const MIN_ORDER_USD = 1; // dust below the exchange minimum is not an order
+/**
+ * Below this all-in price a buy is a lottery ticket: the crowd already overpays longshots (favourite-longshot bias) and a
+ * model cannot calibrate tail odds, so the edge must be at least the price itself (fair >= 2x cost), not just minEdge.
+ * The expensive side of the same market (NO at 90c+ against an overpriced YES) keeps the plain minEdge rule.
+ */
+export const LONGSHOT_K = 0.15;
+/** Edge a buy at all-in price `k` must clear. */
+export const needEdge = (k: number, minEdge: number) => (k < LONGSHOT_K ? Math.max(minEdge, k) : minEdge);
 
 const inUnit = (name: string, x: number) => {
   if (!(x >= 0 && x <= 1)) throw new RangeError(`${name} must be in [0,1], got ${x}`);
@@ -84,13 +92,13 @@ function evalSide(side: Side, a: SizeInput, pHatYes: number): SizeResult | null 
   const hi = Math.min(s.kelly * fStar * B, s.capFrac * B, depth);
   const ok = (usd: number) => {
     const k = kAt(usd);
-    return k != null && pPost - k >= s.minEdge;
+    return k != null && pPost - k >= needEdge(k, s.minEdge);
   };
   let sizeUsd = 0;
   if (hi > 0 && ok(0)) {
     if (ok(hi)) sizeUsd = hi;
     else {
-      // e(S) falls as S climbs the book: bisect for the largest S with e >= minEdge
+      // e(S) falls as S climbs the book: bisect for the largest S with e >= needEdge
       let lo = 0, up = hi;
       for (let i = 0; i < 60; i++) {
         const m = (lo + up) / 2;

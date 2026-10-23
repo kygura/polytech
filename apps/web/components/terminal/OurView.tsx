@@ -54,13 +54,14 @@ export function OurView(p: Props) {
     body = p.disabled ? <span className={css.dim}>Not researched yet. Research is off on this server: ANTHROPIC_API_KEY is not set.</span>
       : <><span>Not researched yet</span><Button variant="primary" size="sm" onClick={p.onResearch} disabled={p.starting}>{p.starting ? "Starting…" : "Research"}<kbd>r</kbd></Button></>;
     if (!p.disabled) sub = "5 AI analysts read the rules and sources, then a judge sets a fair value (~3 min).";
-  } else if (s.k === "judge") {
+  } else if (s.k === "judge" || s.sizeUsd < 1) {
+    // researched, nothing sized: a pass. The gap is shown neutral, never as a green "edge".
     const close = p.yes != null && Math.abs(s.pYes - p.yes) < 0.03;
     body = <>
       <span title={TIP.fair}>Fair value <b className={css.n}>{c(s.pYes)}</b></span>
       <span className={css.dim}>{close ? "≈" : "·"}</span>
       <span title={TIP.market}>Market <b className={css.n}>{c(p.yes)}</b></span>
-      <span className={css.dim}>{close ? "— no edge worth trading" : "— no trade suggested: the gap does not survive fees and our confidence"}</span>
+      <span className={css.dim}>{close ? "— fairly priced, no edge worth trading" : "— no trade: the gap does not survive fees and our confidence"}</span>
       <span className={css.dim} title={new Date(s.at).toLocaleString()}>researched {ago(p.now - s.at)}</span>
       {again()}
     </>;

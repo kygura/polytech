@@ -156,16 +156,20 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
     }
     const todo = rows.filter(({ m }) => alive.has(m.conditionId) || structural.has(m.conditionId));
     const cached = new Map((await d.db.select().from(s.rrCache)).map((c) => [`${c.conditionId}:${c.rulesHash}`, c]));
-    const R = new Map<string, number>();
+    const R = new Map<string, number>(), amb = new Map<string, number>(); // amb: rule_ambiguity, LLM-rated markets only
     const crowd = (snap: SnapRow) => ({ top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }); // ponytail: comment skew not wired
     const score = ({ m, snap }: Pick<(typeof todo)[number], "m" | "snap">, r: number) =>
-      screen({ market: m, snap: toSnap(snap), R: r, structural: structural.has(m.conditionId), settings: st, now, crowd: crowd(snap) });
+      screen({ market: m, snap: toSnap(snap), R: r, structural: structural.has(m.conditionId), settings: st, now, crowd: crowd(snap), ambiguity: amb.get(m.conditionId) });
     const hR = (x: (typeof todo)[number]) => x.r.heuristicR ?? heuristicR(""); // scored by the sweep; rows swept before heuristic_r existed take the base score
     const need: typeof todo = [];
     for (const x of todo) {
       const hit = cached.get(`${x.m.conditionId}:${x.r.rulesHash ?? ""}`);
-      if (hit && !((hit.detail as { fallback?: boolean } | null)?.fallback && d.rScore)) R.set(x.m.conditionId, hit.r);
-      else need.push(x);
+      const det = hit?.detail as { fallback?: boolean; ambiguity?: number | null } | null | undefined;
+      // re-rate heuristic fallbacks, and rows rated before rule_ambiguity was kept, once an LLM is available (inside the per-run cap)
+      if (hit && !(d.rScore && (det?.fallback || det?.ambiguity === undefined))) {
+        R.set(x.m.conditionId, hit.r);
+        if (typeof det?.ambiguity === "number") amb.set(x.m.conditionId, det.ambiguity);
+      } else need.push(x);
     }
     const sp = d.rScore ? (await d.db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0] : undefined;
     const capped = (sp?.anthropicUsd ?? 0) >= st.budget.dailySpendCapUsd; // daily spend cap hit: heuristic only
@@ -177,15 +181,19 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       const fresh: (typeof s.rrCache.$inferInsert)[] = [];
       await Promise.all(batch.map(async (x) => {
         const { m, r: row } = x;
-        let r: number | undefined, fallback = false;
+        let r: number | undefined, a: number | undefined, fallback = false;
         let tm: ReturnType<typeof setTimeout> | undefined;
         try {
           const rules = d.rScore ? await ruleText(d.pm, row) : undefined; // the db keeps only the hash: fetch the text for the markets actually classified
-          r = rules ? clamp01(await Promise.race([d.rScore!(rules, t0 + o.budgetMs), new Promise<never>((_, no) => (tm = setTimeout(() => no(new Error("R timeout")), R_TIMEOUT_MS)))])) : undefined;
+          const got = rules ? await Promise.race([d.rScore!(rules, t0 + o.budgetMs), new Promise<never>((_, no) => (tm = setTimeout(() => no(new Error("R timeout")), R_TIMEOUT_MS)))]) : undefined;
+          if (typeof got === "number") r = clamp01(got);
+          else if (got) { r = clamp01(got.R); a = clamp01(got.ambiguity); }
         } catch { /* outage/timeout: fall through */ } finally { clearTimeout(tm); }
         if (r === undefined) { r = hR(x); fallback = true; }
         R.set(m.conditionId, r);
-        fresh.push({ conditionId: m.conditionId, rulesHash: row.rulesHash ?? "", r, detail: { fallback } });
+        if (a !== undefined) amb.set(m.conditionId, a);
+        // ambiguity null = rated without one (a bare-R scorer): not re-rated for it; undefined only on rows older than the field
+        fresh.push({ conditionId: m.conditionId, rulesHash: row.rulesHash ?? "", r, detail: fallback ? { fallback } : { fallback, ambiguity: a ?? null } });
       }));
       await d.db.insert(s.rrCache).values(fresh).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: sql`excluded.r`, detail: sql`excluded.detail` } });
       if (d.rScore) { llm += batch.length; await addSpend(d.db, now, batch.length * R_CALL_USD, 0); }

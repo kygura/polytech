@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentOutput } from "@pm/core";
+import type { AgentOutput, QuoteCheck } from "@pm/core";
 import { withBackoff, type BackoffOpts } from "./backoff";
 import type { Client } from "./classify";
 import { JUDGE_PROMPT, focusLine, type Brief } from "./prompts";
@@ -13,11 +13,21 @@ export const JudgeOut = z.object({
   thesis: z.string(),
   catalysts: z.array(z.object({ date: z.string(), label: z.string() })),
   kill_criteria: z.array(z.string()),
+  /** The facts the verdict rests on, taken from the analysts' key_facts (same url), each graded on its source and its claim. */
+  key_evidence: z.array(z.object({
+    url: z.string(),
+    claim: z.string(),
+    reputation: z.enum(["high", "medium", "low"]),
+    claim_strength: z.enum(["verified", "partial", "weak"]),
+    why: z.string(),
+  })),
 });
 export type JudgeOut = z.infer<typeof JudgeOut>;
 
 export type BookSummary = { pMid: number; bestBid: number | null; bestAsk: number | null; bidDepthUsd: number; askDepthUsd: number };
-export type JudgeInput = { brief: Brief; outputs: AgentOutput[]; book: BookSummary; model?: string; deadline?: number; signal?: AbortSignal /* abort => the request stops */ };
+/** An analyst result as the judge sees it: each fact carries whether its quote was found in the text the runner fetched. */
+export type CheckedOutput = Omit<AgentOutput, "key_facts"> & { key_facts: (AgentOutput["key_facts"][number] & { quote_check: QuoteCheck })[] };
+export type JudgeInput = { brief: Brief; outputs: CheckedOutput[]; book: BookSummary; model?: string; deadline?: number; signal?: AbortSignal /* abort => the request stops */ };
 export type Judge = (i: JudgeInput) => Promise<{ judge: JudgeOut; usage: Usage }>;
 
 export const fakeJudge: Judge = async ({ outputs }) => {
@@ -29,6 +39,7 @@ export const fakeJudge: Judge = async ({ outputs }) => {
       thesis: "Fake judge: mean of agent probabilities.",
       catalysts: [],
       kill_criteria: [],
+      key_evidence: [],
     },
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
   };

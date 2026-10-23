@@ -1,10 +1,9 @@
 import { AnthropicOutageError, PodCancelledError, PodFailedError, PodTimeoutError, costUsd, disabledRunner, modelFor, runPod, type AgentResult, type PodStage } from "@pm/agents";
-import { canStartPod, crowd, shouldReResearch, sizeTrade, type ResearchProfile, type Steering } from "@pm/core";
+import { canStartPod, crowd, evidenceConfidence, shouldReResearch, sizeTrade, urlKey, type ResearchProfile, type Steering } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
-import { categoryConfidence } from "./calib";
 import { DAY, addSpend, feeExpOf, feeOf, ruleText, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
 import { matchMarkets, listProfiles, type Match } from "./profiles";
@@ -171,7 +170,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       await setStage("sizing");
 
       const j = pod.judge;
-      const c = Math.min(j.confidence, await categoryConfidence(db, mrow.category)); // c <= 0.4 until 30 resolved in the category
+      // the judge's confidence stands only when its verdict rests on a strong fact (high-reputation source, verified claim) an analyst cited
+      const ev = evidenceConfidence(j.confidence, j.key_evidence, pod.evidence.map((e) => ({ url: e.url, quoteCheck: e.quote_check }))), c = ev.c;
       const cr = crowd({ top10Share: snap.top10Share ?? 0, netFlow: snap.book.netFlow, skew: 0 });
       const core = sizeTrade({
         bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid, pHat: j.p_hat, c, daysLeft: (market.endDate - now) / DAY,
@@ -208,7 +208,11 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
           rAnn: core.rAnn, rank: core.rank, catalysts: j.catalysts.map((x) => `${x.date} ${x.label}`), killCriteria: j.kill_criteria,
           createdAt: new Date(now), expiresAt: new Date(Math.min(market.endDate, now + 72 * 3_600_000)),
           detail: {
-            thesis: j.thesis, pYes: j.p_hat, pMidYes: snap.mid, k: core.k, e: core.e, shares: core.shares, payoff: core.payoff,
+            thesis: j.thesis, pYes: j.p_hat, pMidYes: snap.mid, strongFacts: ev.strong,
+            keyEvidence: j.key_evidence.map((k) => {
+              const qs = pod.evidence.filter((e) => urlKey(e.url) === urlKey(k.url)).map((e) => e.quote_check);
+              return { ...k, quoteCheck: qs.includes("found") ? "found" : qs.includes("not_found") ? "not_found" : "unfetched" };
+            }), k: core.k, e: core.e, shares: core.shares, payoff: core.payoff,
             expectedProfit: core.expectedProfit, daysLeft: core.daysLeft, capped: j.capped, judgeConfidence: j.confidence, trigger,
             model: judgeModel, roleMix: pod.agents.filter((a) => a.ok).map((a) => a.role).join("+"),
           },

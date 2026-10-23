@@ -3,7 +3,7 @@ import type { ALLOWED_MODELS } from "@pm/core";
 export type ModelRole = "rules" | "source" | "base_rate" | "news" | "red_team" | "judge" | "r_classifier" | "triage";
 
 export const DEFAULT_MODELS: Record<ModelRole, (typeof ALLOWED_MODELS)[number]> = {
-  rules: "claude-haiku-5-5",
+  rules: "claude-sonnet-5-5", // resolving the rules needs a capable reader, not maximum reasoning
   source: "claude-sonnet-5-5",
   base_rate: "claude-sonnet-5-5",
   news: "claude-sonnet-5-5",

@@ -52,6 +52,15 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     expect([...small, ...size].some((x) => x.thesisId)).toBe(true);
   });
 
+  it("evidence gate: the fake judge grades no evidence, so every thesis records 0 strong facts and c <= 0.4", async () => {
+    const ths = await d.db.select().from(s.theses);
+    expect(ths.length).toBeGreaterThan(0);
+    for (const t of ths) {
+      expect((t.detail as { strongFacts?: number }).strongFacts).toBe(0);
+      expect(t.c).toBeLessThanOrEqual(0.4);
+    }
+  });
+
   it("structural tab holds the neg-risk arb, ladder and mirror", async () => {
     const st = await read.watchlist(r, "structural");
     const by = new Map(st.map((x) => [x.conditionId, x]));

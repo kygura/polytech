@@ -4,7 +4,9 @@ import { withBackoff } from "./backoff";
 import type { Client } from "./classify";
 import { ROLE_PROMPTS, userPrompt } from "./prompts";
 import { costUsd } from "./router";
-import { validated, type AgentRunner, type ToolCall } from "./runner";
+import { MAX_PAGES, PAGE_CHARS, validated, type AgentRunner, type ToolCall } from "./runner";
+import type { Page } from "@pm/core";
+import { pdfToText } from "./safe-fetch.mjs";
 import { jsonSchema } from "./schema";
 
 const SCHEMA = jsonSchema(AgentOutput) as Anthropic.Tool.InputSchema;
@@ -13,7 +15,7 @@ const MAX_TOOL_CALLS = 200;
 const SEARCH_USD = 0.01; // web search is billed per request ($10 / 1000) on top of tokens
 const NUDGES = 2; // turns that ended without submit_result before the agent gives up
 
-/** Haiku is the rules reader: a light pass. Sonnet/Opus agents research at medium effort to fit the pod's agent window. */
+/** Haiku runs a light pass; Sonnet/Opus agents research at medium effort to fit the pod's agent window. */
 const effortFor = (model: string): "low" | "medium" => (model.includes("haiku") ? "low" : "medium");
 
 /**
@@ -36,7 +38,11 @@ export const apiRunner = (client: Client): AgentRunner =>
     ];
     const system = `${opts.system ?? ROLE_PROMPTS[role as RoleKey]}\n\nUse web_search and web_fetch for sources. When done, call ${SUBMIT} once with the result; never write the result as plain text.`;
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: userPrompt(brief) + (opts.hint ? `\n\n${opts.hint}` : "") }];
-    const toolCalls: ToolCall[] = [], byId = new Map<string, ToolCall>();
+    const toolCalls: ToolCall[] = [], byId = new Map<string, ToolCall>(), pages: Page[] = [];
+    const read = (url: string, text: string) => { if (pages.length < MAX_PAGES && url && text) pages.push({ url, text: text.slice(0, PAGE_CHARS) }); };
+    const pdfs: { url: string; data: string }[] = [];
+    // a PDF that will not parse is simply not checkable: its quotes stay unfetched
+    const readPdfs = () => Promise.all(pdfs.splice(0).map(async (p) => read(p.url, await pdfToText(Buffer.from(p.data, "base64")).catch(() => ""))));
     let inTok = 0, outTok = 0, searches = 0, nudges = 0;
 
     try {
@@ -64,11 +70,21 @@ export const apiRunner = (client: Client): AgentRunner =>
           } else if ((b.type === "web_search_tool_result" || b.type === "web_fetch_tool_result") && !Array.isArray(b.content) && "error_code" in b.content) {
             const c = byId.get(b.tool_use_id);
             if (c) c.ok = false;
+          } else if (b.type === "web_fetch_tool_result" && b.content.type === "web_fetch_result") {
+            const src = b.content.content.source;
+            if (src.type === "text") read(b.content.url, src.data); // fetched page text
+            else if (pages.length + pdfs.length < MAX_PAGES) pdfs.push({ url: b.content.url, data: src.data }); // PDFs come back base64: extracted at submit
+          } else if (b.type === "text") {
+            // search results are encrypted; the passages the model cites from them come back verbatim
+            for (const c of b.citations ?? []) if (c.type === "web_search_result_location") read(c.url, c.cited_text);
           }
         }
         const usage = () => ({ inputTokens: inTok, outputTokens: outTok, costUsd: costUsd(opts.model, inTok, outTok) + searches * SEARCH_USD });
         const submit = msg.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === SUBMIT);
-        if (submit) return { output: submit.input, usage: usage(), toolCalls, durationS: (Date.now() - t) / 1000, sandboxS: 0 };
+        if (submit) {
+          await readPdfs();
+          return { output: submit.input, usage: usage(), toolCalls, pages, durationS: (Date.now() - t) / 1000, sandboxS: 0 };
+        }
         if (msg.stop_reason === "refusal") throw new Error(`agent ${role} refused: ${msg.stop_details?.category ?? "no category"}`);
         if (msg.stop_reason === "max_tokens") throw new Error(`agent ${role} hit max_tokens before submitting`);
         messages.push({ role: "assistant", content: msg.content });

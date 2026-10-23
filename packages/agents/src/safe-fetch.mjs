@@ -103,14 +103,14 @@ export const realNet = {
     new Promise((resolve, reject) => {
       const req = (url.protocol === "https:" ? https : http).get(
         url,
-        { lookup: guardedLookup, signal, headers: { "user-agent": "polytech-research/1.0 (+public sources only)", accept: "text/html,text/plain;q=0.9,application/json;q=0.8,*/*;q=0.1", "accept-encoding": "identity" } },
+        { lookup: guardedLookup, signal, headers: { "user-agent": "polytech-research/1.0 (+public sources only)", accept: "text/html,text/plain;q=0.9,application/pdf;q=0.9,application/json;q=0.8,*/*;q=0.1", "accept-encoding": "identity" } },
         (res) => resolve({ status: res.statusCode ?? 0, location: res.headers.location, contentType: res.headers["content-type"] ?? "", body: res, destroy: () => res.destroy() }),
       );
       req.on("error", reject);
     }),
 };
 
-/** GET a public http(s) URL: SSRF check on every redirect hop, time cap, byte cap. Returns { url, status, contentType, text, truncated }. */
+/** GET a public http(s) URL: SSRF check on every redirect hop, time cap, byte cap. Returns { url, status, contentType, text, bytes, truncated }. */
 export async function safeFetch(raw, net = realNet, { maxBytes = 1_000_000, timeoutMs = 15_000, maxRedirects = 5, signal } = {}) {
   const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   let current = raw;
@@ -138,7 +138,8 @@ export async function safeFetch(raw, net = realNet, { maxBytes = 1_000_000, time
     } finally {
       res.destroy();
     }
-    return { url: url.toString(), status: res.status, contentType: res.contentType, text: Buffer.concat(chunks).toString("utf8"), truncated };
+    const bytes = Buffer.concat(chunks);
+    return { url: url.toString(), status: res.status, contentType: res.contentType, text: bytes.toString("utf8"), bytes, truncated };
   }
   throw new BlockedUrlError("too many redirects");
 }
@@ -166,13 +167,28 @@ export function htmlToText(html) {
     .trim();
 }
 
-/** The fetch_url tool body: guarded fetch -> text -> `<untrusted_content>`. Throws BlockedUrlError / network errors / Error("HTTP n"). */
+/**
+ * Text of a PDF (all pages, merged), via unpdf (pdf.js built for serverless). Imported lazily so non-PDF paths stay stdlib-only;
+ * the sandbox installs it alongside the Agent SDK (sandbox.ts PKG).
+ */
+export async function pdfToText(bytes) {
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return Array.isArray(text) ? text.join("\n") : text;
+}
+
+const PDF_MAX_BYTES = 10_000_000; // official releases run to several MB; a truncated PDF cannot be parsed
+
+/** The fetch_url tool body: guarded fetch -> text (HTML stripped, PDFs extracted) -> `<untrusted_content>`. Throws BlockedUrlError / network errors / Error("HTTP n"). */
 export async function fetchUrlText(url, { net = realNet, signal, maxChars = 20_000 } = {}) {
-  const r = await safeFetch(url, net, { signal });
+  const r = await safeFetch(url, net, { signal, maxBytes: PDF_MAX_BYTES });
   if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
   const ct = r.contentType.toLowerCase();
-  if (ct && !/^(text\/|application\/(json|xml|xhtml))/.test(ct)) throw new Error(`unsupported content type: ${ct.split(";")[0]}`);
-  const text = ct.includes("html") || !ct ? htmlToText(r.text) : r.text;
+  const pdf = ct.startsWith("application/pdf") || (ct.startsWith("application/octet-stream") && r.bytes.subarray(0, 5).toString("latin1") === "%PDF-");
+  if (pdf && r.truncated) throw new Error(`PDF larger than ${PDF_MAX_BYTES / 1e6} MB`);
+  if (!pdf && ct && !/^(text\/|application\/(json|xml|xhtml))/.test(ct)) throw new Error(`unsupported content type: ${ct.split(";")[0]}`);
+  const text = pdf ? await pdfToText(r.bytes) : ct.includes("html") || !ct ? htmlToText(r.text) : r.text;
   const cut = text.length > maxChars || r.truncated;
   return wrapUntrusted(r.url, text.slice(0, maxChars) + (cut ? "\n[truncated]" : ""));
 }

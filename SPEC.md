@@ -68,7 +68,7 @@ packages/db     Drizzle schema + migrations
 
 Each research agent is an Agent SDK `query()` run inside a Vercel Sandbox. Agents and orchestrator calls (judge, R classifier) all authenticate with `ANTHROPIC_API_KEY`. On rate-limit or overload errors the runner backs off and retries; total spend is bounded by the budget knobs.
 
-The **model router** picks a Claude model per role (configurable in Settings). Defaults: research roles on Sonnet, rules reader on Haiku, judge on Opus. Diversity comes from role separation and blind estimation, not from mixing providers.
+The **model router** picks a Claude model per role (configurable in Settings). Defaults: research roles on Sonnet, rules reader on Sonnet, judge on Opus. Diversity comes from role separation and blind estimation, not from mixing providers.
 
 ## Polymarket data layer
 
@@ -103,7 +103,7 @@ Two passes: hard filters on the whole universe, then a priority score on survivo
 - ≥ $200 depth within 5¢ of mid on the side traded
 - Excluded categories by config (e.g. sports in-play, 15-min crypto up/down)
 
-**Pass 2 — priority:** `Priority = R × I × L × T × (1 + 0.5·C)`
+**Pass 2 — priority:** `Priority = R × I × L × T × (1 + 0.5·C) × A × N`
 
 | Factor | Measures | Inputs |
 |---|---|---|
@@ -112,6 +112,8 @@ Two passes: hard filters on the whole universe, then a priority score on survivo
 | L liquidity fit (0–1) | Can target size fill? | Depth to fill target within 3¢ slippage, OI, 24h volume |
 | T time value (0–1) | Return per day of capital | Days to resolution, decays past 60 days |
 | C crowding (0–1) | One-sidedness | Top-10 holder share, net taker flow 24h, comment sentiment skew |
+| A attention (0.3–1) | How few participants have done the work | 24h volume: 1 up to $5k, −0.35 per 10× above, floor 0.3 ($50k → 0.65, $500k+ → 0.3). Ranks busy markets behind, never excludes them. |
+| N rules nuance (1–1.5) | Rules that need careful reading | 1 + 0.5 × the R classifier's rule ambiguity (cached with R; 1 when unrated). Headline traders misread these; the pod's rules reader (Sonnet) resolves the reading. |
 
 L is computed against two size targets; each market is tagged **small-cap** or **size** and ranked in separate lists.
 
@@ -128,7 +130,7 @@ Each shortlisted market gets a pod: five Agent SDK agents with fixed roles, then
 
 | Role | Job | Output | Default model |
 |---|---|---|---|
-| Rules reader | Parse resolution text, source, edge cases, likely crowd misreads | Resolution checklist, ambiguity flags | Haiku |
+| Rules reader | Parse resolution text, source, edge cases; resolve each ambiguity to the reading the resolver will most likely apply; likely crowd misreads | Resolved checklist, residual ambiguity | Sonnet |
 | Primary-source hunter | Find the document/schedule/dataset/docket that settles it | Sourced facts with dates | Sonnet + Exa |
 | Base-rate analyst | Reference classes, historical frequencies; runs small scripts | Prior with method | Sonnet |
 | News and flow scanner | Last 7 days of news; is it priced in? | Event timeline | Sonnet + Exa |
@@ -145,7 +147,7 @@ Each shortlisted market gets a pod: five Agent SDK agents with fixed roles, then
 
 **Re-research triggers:** price moves > 8¢ since thesis; a catalyst date passes; new high-relevance Exa hit on a saved query; thesis > 72 h old with < 14 days to resolution.
 
-**Calibration loop:** every judge estimate stored with the market price at the time. Nightly job computes Brier and log loss by category, role mix and model. Those set confidence `c` per category; `c ≤ 0.4` until a category has 30 resolved forecasts.
+**Calibration loop:** every judge estimate stored with the market price at the time. Nightly job computes Brier and log loss by category, role mix and model. They are reported, not applied: confidence `c` is the judge's, gated on evidence, and capped at 0.4 unless the verdict rests on at least one strong fact: one the judge grades high on source reputation (for that kind of claim) and verified on the claim itself (a specific, dated, checkable fact bearing on resolution), on a url an analyst actually cited. The graded facts are stored on the thesis (`keyEvidence`, `strongFacts`).
 
 ## Sizing and projected returns
 

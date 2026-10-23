@@ -113,3 +113,30 @@ export function edgeNow(pYes: number, side: Outcome, ask: number | null | undefi
 
 /** Below this many cents an edge is not worth trading (fees and slippage eat it). */
 export const MIN_EDGE_C = 1;
+
+/**
+ * One call per researched market, shown beside the question: `trade` = the thesis was sized and the edge still clears
+ * MIN_EDGE_C at the live ask; `gone` = it was sized but the price has since moved; `pass` = researched, nothing worth
+ * trading (no sized thesis: the gap was inside fees and our confidence). null while unresearched / running / failed.
+ */
+export type Verdict = {
+  k: "trade" | "gone" | "pass"; side: Outcome | null; edgeC: number | null;
+  /** Return on the stake if fair value is right, held to resolution: edge / all-in cost. A 3¢ edge on a 96¢ NO is 3.1%. */
+  ret: number | null;
+};
+export function verdictOf(s: ViewState | null, liveEdgeC: number | null): Verdict | null {
+  const pass: Verdict = { k: "pass", side: null, edgeC: null, ret: null };
+  if (s?.k === "judge") return pass;
+  if (s?.k !== "thesis") return null;
+  if (s.sizeUsd < 1) return pass;
+  const e = liveEdgeC ?? s.edgeC, cost = (s.side === "YES" ? s.pYes : 1 - s.pYes) - e / 100;
+  return { k: e >= MIN_EDGE_C ? "trade" : "gone", side: s.side, edgeC: e, ret: cost > 0 ? e / 100 / cost : null };
+}
+
+/** The judge's thesis opens with its call ("Fairly priced: …" / "Mispriced: …"); older theses: the first sentence. */
+export function verdictLine(thesis: string | null | undefined): string | null {
+  const t = thesis?.trim();
+  if (!t) return null;
+  const m = /^(.+?[.!?])(\s|$)/.exec(t);
+  return (m ? m[1]! : t).slice(0, 220);
+}
