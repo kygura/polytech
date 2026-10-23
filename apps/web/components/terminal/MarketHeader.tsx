@@ -42,7 +42,8 @@ export function HeaderBadges({ flags: f, now }: { flags: HeaderFlags; now: numbe
  * Our call on this market, beside the question so it reads before the chart: Trade / Edge gone / Pass. Click opens the
  * research tab (the judge's full reasoning); the tooltip carries the judge's one-line verdict.
  */
-export type KeyEvidence = { url: string; claim: string; reputation: string; claim_strength: string; why: string };
+export type KeyEvidence = { url: string; claim: string; reputation: string; claim_strength: string; why: string; quoteCheck?: string };
+const QUOTE: Record<string, string> = { found: "quote checked", not_found: "quote NOT on the page", unfetched: "quote unchecked" };
 const host = (u: string) => /^https?:\/\/(?:www\.)?([^/:?#\s]+)/i.exec(u)?.[1] ?? u;
 
 export function VerdictChip({ v, line, fair, market, tick, daysLeft, evidence, onOpen }: {
@@ -57,10 +58,11 @@ export function VerdictChip({ v, line, fair, market, tick, daysLeft, evidence, o
   const ret = v.ret == null ? "" : ` · ${(v.ret * 100).toFixed(1).replace(/\.0$/, "")}%${d ? ` in ${d}d` : ""}`;
   const [label, cls] = v.k === "trade" ? [`Trade ${v.side} ${e}${ret}`, css.up] : v.k === "gone" ? [`Edge gone (${e})`, css.warn] : ["Pass · fairly priced", css.dim];
   // what the call rests on, as the judge graded it (source reputation · claim strength), so it can be argued with
-  const strong = evidence?.filter((f) => f.reputation === "high" && f.claim_strength === "verified").length ?? 0;
+  // strong = high · verified with its quote found in the fetched page (older theses have no quoteCheck: grades only)
+  const strong = evidence?.filter((f) => f.reputation === "high" && f.claim_strength === "verified" && (f.quoteCheck ?? "found") === "found").length ?? 0;
   const backed = evidence == null ? null : [
-    strong ? "Rests on:" : "No high-reputation, verified fact: confidence capped, the market keeps most of the weight.",
-    ...evidence.slice(0, 4).map((f) => `• ${host(f.url)} (${f.reputation} · ${f.claim_strength}): ${f.claim.length > 90 ? `${f.claim.slice(0, 89)}…` : f.claim}`),
+    strong ? "Rests on:" : "No high-reputation, verified fact with a checked quote: confidence capped, the market keeps most of the weight.",
+    ...evidence.slice(0, 4).map((f) => `• ${host(f.url)} (${f.reputation} · ${f.claim_strength}${f.quoteCheck ? ` · ${QUOTE[f.quoteCheck] ?? f.quoteCheck}` : ""}): ${f.claim.length > 90 ? `${f.claim.slice(0, 89)}…` : f.claim}`),
   ].join("\n");
   const tip = [line, `Fair ${c(fair)} vs market ${c(market)}.`, backed, v.k === "trade" && v.ret != null ? "Return if our fair value is right, held to resolution." : null,
     "Click for the full reasoning. Disagree? Steer… (⇧S) re-runs it with your angle."].filter(Boolean).join("\n");

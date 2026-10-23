@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentOutput } from "@pm/core";
+import type { AgentOutput, QuoteCheck } from "@pm/core";
 import { withBackoff, type BackoffOpts } from "./backoff";
 import type { Client } from "./classify";
 import { JUDGE_PROMPT, focusLine, type Brief } from "./prompts";
@@ -25,7 +25,9 @@ export const JudgeOut = z.object({
 export type JudgeOut = z.infer<typeof JudgeOut>;
 
 export type BookSummary = { pMid: number; bestBid: number | null; bestAsk: number | null; bidDepthUsd: number; askDepthUsd: number };
-export type JudgeInput = { brief: Brief; outputs: AgentOutput[]; book: BookSummary; model?: string; deadline?: number; signal?: AbortSignal /* abort => the request stops */ };
+/** An analyst result as the judge sees it: each fact carries whether its quote was found in the text the runner fetched. */
+export type CheckedOutput = Omit<AgentOutput, "key_facts"> & { key_facts: (AgentOutput["key_facts"][number] & { quote_check: QuoteCheck })[] };
+export type JudgeInput = { brief: Brief; outputs: CheckedOutput[]; book: BookSummary; model?: string; deadline?: number; signal?: AbortSignal /* abort => the request stops */ };
 export type Judge = (i: JudgeInput) => Promise<{ judge: JudgeOut; usage: Usage }>;
 
 export const fakeJudge: Judge = async ({ outputs }) => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AgentOutput } from "@pm/core";
+import { AgentOutput, type Page } from "@pm/core";
 import { withBackoff, type BackoffOpts } from "./backoff";
 import type { AgentRole, Brief } from "./prompts";
 
@@ -8,7 +8,10 @@ export type RunOpts = { model: string; timeoutMs: number; exaCallCap: number; hi
 /** One tool invocation by an agent: `input` is JSON text (<= 500 chars), `ok` false when the matching tool_result was an error. Runners return at most 200. */
 export type ToolCall = { ts: number; name: string; input: string; ok: boolean };
 export type Usage = { inputTokens: number; outputTokens: number; costUsd: number };
-export type Run = { output: AgentOutput; usage: Usage; durationS: number; sandboxS: number; toolCalls?: ToolCall[] };
+/** `pages`: text the runner actually read (fetched pages, search results, cited passages), for the quote check. Not stored. */
+export type Run = { output: AgentOutput; usage: Usage; durationS: number; sandboxS: number; toolCalls?: ToolCall[]; pages?: Page[] };
+/** Bounds on `pages`, so a sandbox run's stdout stays small. */
+export const PAGE_CHARS = 20_000, MAX_PAGES = 60;
 export type AgentRunner = (role: AgentRole, brief: Brief, opts: RunOpts) => Promise<Run>;
 /** Implementations return unvalidated output; `validated` parses, retries once, backs off. */
 export type RawRunner = (role: AgentRole, brief: Brief, opts: RunOpts) => Promise<Omit<Run, "output"> & { output: unknown }>;
@@ -62,6 +65,8 @@ export const fakeRaw: RawRunner = async (role, brief, opts) => {
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
     durationS: 0,
     sandboxS: 0,
+    // the runner "read" fact 1's page, so its quote checks as found; facts 2-3 come back unfetched
+    pages: role === "rules" ? [] : [{ url: `https://example.com/${role}/${hex}/1`, text: `Page text. Example quote 1 supporting the ${role} finding. More text.` }],
     toolCalls: role === "rules" ? [] : [
       { ts: Date.now(), name: "mcp__exa__search", input: JSON.stringify({ query: `${brief.question} ${role}`.slice(0, 120), numResults: 5 }), ok: true },
       { ts: Date.now(), name: "mcp__exa__contents", input: JSON.stringify({ urls: [`https://example.com/${role}/${hex}/1`] }), ok: true },

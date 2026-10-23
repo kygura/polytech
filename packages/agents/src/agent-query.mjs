@@ -8,9 +8,12 @@ const BUILTIN = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "W
 const WEB = ["WebSearch"]; // fallback when no Exa key. WebFetch stays disallowed: fetch_url replaces it (SSRF-guarded)
 const MAX_TOOL_CALLS = 200;
 
-/** input: {system, prompt, schema, model, exaCallCap, exaKey, timeoutMs, maxTurns?, signal?}. Returns {output, usage, toolCalls}. */
+/** input: {system, prompt, schema, model, exaCallCap, exaKey, timeoutMs, maxTurns?, signal?}. Returns {output, usage, toolCalls, pages}. */
 export async function runAgent(input) {
   let calls = 0;
+  // text the agent actually read, for the quote check (core quote.ts); bounded like runner.ts PAGE_CHARS / MAX_PAGES
+  const pages = [];
+  const read = (url, text) => { if (pages.length < 60 && typeof url === "string" && typeof text === "string" && text) pages.push({ url, text: text.slice(0, 20000) }); };
   const ac = new AbortController();
   const exa = async (path, body) => {
     if (++calls > input.exaCallCap) return { content: [{ type: "text", text: "Exa call cap reached" }], isError: true };
@@ -23,6 +26,7 @@ export async function runAgent(input) {
     const retrieved_at = new Date().toISOString();
     const j = await res.json();
     const results = (j.results ?? []).map((r) => ({ url: r.url, title: r.title, published: r.publishedDate, text: r.text, retrieved_at }));
+    for (const r of results) read(r.url, r.text);
     return { content: [{ type: "text", text: JSON.stringify(results) }] };
   };
   const search = tool("search", "Web search via Exa; returns url, title, published date, text, retrieved_at.", { query: z.string(), numResults: z.number().optional() }, ({ query: q, numResults }) =>
@@ -34,7 +38,9 @@ export async function runAgent(input) {
   const fetchUrl = tool("fetch_url", "Fetch a public http(s) web page and return its text, wrapped in <untrusted_content>. Private and internal addresses are refused.", { url: z.string() }, async ({ url }) => {
     if (++fetches > input.exaCallCap) return { content: [{ type: "text", text: "fetch_url call cap reached" }], isError: true };
     try {
-      return { content: [{ type: "text", text: await fetchUrlText(url, { signal: ac.signal }) }] };
+      const text = await fetchUrlText(url, { signal: ac.signal });
+      read(url, text);
+      return { content: [{ type: "text", text }] };
     } catch (e) {
       return { content: [{ type: "text", text: `fetch_url failed: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
     }
@@ -89,5 +95,6 @@ export async function runAgent(input) {
     output: last.structured_output,
     usage: { inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"), costUsd: last.total_cost_usd ?? sum("costUSD") },
     toolCalls,
+    pages,
   };
 }
