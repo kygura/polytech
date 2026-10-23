@@ -77,7 +77,7 @@ export function factorA(snap: Pick<Snapshot, "vol24h">): number {
 
 /**
  * Rules nuance: markets whose rules need careful reading are where headline traders misprice, and the research pod resolves
- * the ambiguity with its strongest model (rules reader). 1 + 0.5 x the classifier's rule_ambiguity (0..1); unrated -> 1.
+ * the ambiguity in its rules reader. 1 + 0.5 x the classifier's rule_ambiguity (0..1); unrated -> 1.
  * Outright unsettleable rules are already penalised through R.
  */
 export function factorN(ambiguity: number | null | undefined): number {
