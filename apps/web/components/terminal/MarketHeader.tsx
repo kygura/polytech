@@ -42,13 +42,17 @@ export function HeaderBadges({ flags: f, now }: { flags: HeaderFlags; now: numbe
  * Our call on this market, beside the question so it reads before the chart: Trade / Edge gone / Pass. Click opens the
  * research tab (the judge's full reasoning); the tooltip carries the judge's one-line verdict.
  */
-export function VerdictChip({ v, line, fair, market, tick, onOpen }: {
-  v: Verdict; line: string | null; fair: number | null; market: number | null; tick: number; onOpen: () => void;
+export function VerdictChip({ v, line, fair, market, tick, daysLeft, onOpen }: {
+  v: Verdict; line: string | null; fair: number | null; market: number | null; tick: number; daysLeft: number | null; onOpen: () => void;
 }) {
   const c = (p: number | null) => (p == null ? "—" : `${cents(p, tick)}¢`);
   const e = v.edgeC == null ? "" : `${v.edgeC >= 0 ? "+" : "−"}${Math.abs(v.edgeC).toFixed(1).replace(/\.0$/, "")}¢`;
-  const [label, cls] = v.k === "trade" ? [`Trade ${v.side} ${e}`, css.up] : v.k === "gone" ? [`Edge gone (${e})`, css.warn] : ["Pass · fairly priced", css.dim];
-  const tip = [line, `Fair ${c(fair)} vs market ${c(market)}.`, "Click for the full reasoning. Disagree? Steer… (⇧S) re-runs it with your angle."].filter(Boolean).join("\n");
+  const d = daysLeft == null ? null : Math.max(1, Math.round(daysLeft));
+  // return on the stake to resolution, not the cents gap: +3¢ on a 96¢ NO is "3.1% in 30d"; the payoff multiple is never the headline
+  const ret = v.ret == null ? "" : ` · ${(v.ret * 100).toFixed(1).replace(/\.0$/, "")}%${d ? ` in ${d}d` : ""}`;
+  const [label, cls] = v.k === "trade" ? [`Trade ${v.side} ${e}${ret}`, css.up] : v.k === "gone" ? [`Edge gone (${e})`, css.warn] : ["Pass · fairly priced", css.dim];
+  const tip = [line, `Fair ${c(fair)} vs market ${c(market)}.`, v.k === "trade" && v.ret != null ? "Return if our fair value is right, held to resolution." : null,
+    "Click for the full reasoning. Disagree? Steer… (⇧S) re-runs it with your angle."].filter(Boolean).join("\n");
   return <button type="button" className={`${css.vChip} ${cls}`} onClick={onOpen} title={tip} aria-label={`Our verdict: ${label}`}>{label}</button>;
 }
 

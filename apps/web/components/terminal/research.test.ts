@@ -77,13 +77,16 @@ describe("edgeNow", () => {
 describe("verdict", () => {
   const th = { k: "thesis" as const, pYes: 0.006, side: "YES" as const, sizeUsd: 0, edgeC: 0.2, at: 1 };
   it("a thesis that sized to $0 is a pass, however the gap reads", () => {
-    expect(verdictOf(th, 0.2)).toEqual({ k: "pass", side: null, edgeC: null });
+    expect(verdictOf(th, 0.2)).toEqual({ k: "pass", side: null, edgeC: null, ret: null });
     expect(verdictOf({ k: "judge", pYes: 0.5, at: 1 }, null)).toMatchObject({ k: "pass" });
   });
   it("a sized thesis trades while the live edge clears 1¢, else the edge is gone", () => {
-    expect(verdictOf({ ...th, sizeUsd: 40, edgeC: 4 }, 3)).toEqual({ k: "trade", side: "YES", edgeC: 3 });
+    expect(verdictOf({ ...th, pYes: 0.5, sizeUsd: 40, edgeC: 4 }, 3)).toEqual({ k: "trade", side: "YES", edgeC: 3, ret: expect.closeTo(0.03 / 0.47, 9) });
     expect(verdictOf({ ...th, sizeUsd: 40, edgeC: 4 }, null)).toMatchObject({ k: "trade", edgeC: 4 });
     expect(verdictOf({ ...th, sizeUsd: 40, edgeC: 4 }, 0.4)).toMatchObject({ k: "gone" });
+  });
+  it("return on the stake: a 3¢ edge on a NO worth 99¢ costs 96¢", () => {
+    expect(verdictOf({ ...th, pYes: 0.01, side: "NO", sizeUsd: 40, edgeC: 3 }, null)!.ret).toBeCloseTo(0.03 / 0.96, 9);
   });
   it("no verdict before research finishes", () => {
     expect(verdictOf(null, null)).toBeNull();
