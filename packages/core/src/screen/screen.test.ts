@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type Market, type Snapshot } from "../types";
-import { crowd, factorA, factorI, factorL, factorT, pass1, priority, screen } from "./screen";
+import { crowd, factorA, factorI, factorN, factorL, factorT, pass1, priority, screen } from "./screen";
 
 const NOW = Date.UTC(2026, 9, 15);
 const DAY = 86_400_000;
@@ -134,6 +134,12 @@ describe("factorA (attention)", () => {
   });
 });
 
+describe("factorN (rules nuance)", () => {
+  it("1 + 0.5 x ambiguity, clamped; unrated -> 1", () => {
+    expect([factorN(0), factorN(0.6), factorN(1), factorN(3), factorN(null), factorN(undefined), factorN(NaN)]).toEqual([1, 1.3, 1.5, 1.5, 1, 1, 1]);
+  });
+});
+
 describe("priority", () => {
   it("R*I*L*T*(1+0.5C)", () => {
     expect(priority({ R: 0.8, I: 0.5, L: 0.5, T: 1, C: 0.4 }, S)).toBeCloseTo(0.8 * 0.5 * 0.5 * 1 * 1.2, 12);
@@ -149,6 +155,6 @@ describe("screen", () => {
     expect(r.T).toBe(1);
     expect(r.C).toBeCloseTo(0.4 / 3, 12);
     expect(r.structural).toBe(true);
-    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C) * r.A, 12);
+    expect(r.priority).toBeCloseTo(r.R * r.I * r.L * r.T * (1 + 0.5 * r.C) * r.A * r.N, 12);
   });
 });

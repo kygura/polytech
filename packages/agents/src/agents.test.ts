@@ -4,6 +4,7 @@ import { AgentOutput } from "@pm/core";
 import { DEFAULT_STEERING, type Steering } from "@pm/core";
 import { AnthropicOutageError, anthropicJudge, apiRunner, userPrompt, isOverloadText, PodFailedError, PodTimeoutError, buildBrief, classifyR, disabledRunner, fakeJudge, fakeRaw, fakeRunner, modelFor, pickRunner, rulesHash, runPod, validated, withBackoff } from "./index";
 import type { RawRunner } from "./runner";
+import { makePdf } from "./test-pdf";
 
 const mk = (q: string): Market => ({
   conditionId: q, eventId: "e", question: q, rules: "Resolves YES if X per https://example.com.", category: "politics",
@@ -25,7 +26,8 @@ describe("brief", () => {
 
 describe("router", () => {
   it("defaults + override", () => {
-    expect(modelFor("rules")).toBe("claude-haiku-5-5");
+    expect(modelFor("rules")).toBe("claude-opus-5-5");
+    expect(modelFor("r_classifier")).toBe("claude-haiku-5-5"); // the screen-wide flagger stays cheap
     expect(modelFor("judge")).toBe("claude-opus-5-5");
     expect(modelFor("news", { news: "x" })).toBe("x");
   });
@@ -189,7 +191,7 @@ describe("runPod steering", () => {
       steering: steer({ models: { source: "claude-haiku-5-5", judge: "claude-sonnet-5-5" } }),
     });
     const m = Object.fromEntries(calls.map((c) => [c.role, c.o.model]));
-    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-haiku-5-5", red_team: "claude-sonnet-5-5" });
+    expect(m).toMatchObject({ source: "claude-haiku-5-5", news: "claude-opus-5-5", rules: "claude-opus-5-5", red_team: "claude-sonnet-5-5" });
     expect(judgeModel).toBe("claude-sonnet-5-5");
   });
 
@@ -309,15 +311,17 @@ describe("apiRunner", () => {
     expect(sent[1]).toHaveLength(2); // the paused assistant turn went back as-is, no extra user message
   });
 
-  it("keeps the text it read: fetched documents and cited search passages, not PDFs", async () => {
+  it("keeps the text it read: fetched documents, cited search passages and parsed PDFs (a broken PDF is skipped)", async () => {
     const turn = { stop_reason: "tool_use", usage, content: [
       { type: "web_fetch_tool_result", tool_use_id: "f1", content: { type: "web_fetch_result", url: "https://bls.gov/cpi", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "text", media_type: "text/plain", data: "CPI rose 3.7 percent." } } } },
-      { type: "web_fetch_tool_result", tool_use_id: "f2", content: { type: "web_fetch_result", url: "https://x.gov/a.pdf", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "base64", media_type: "application/pdf", data: "JVBE" } } } },
+      { type: "web_fetch_tool_result", tool_use_id: "f2", content: { type: "web_fetch_result", url: "https://x.gov/a.pdf", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "base64", media_type: "application/pdf", data: Buffer.from(makePdf("Payrolls rose by 150,000.")).toString("base64") } } } },
+      { type: "web_fetch_tool_result", tool_use_id: "f3", content: { type: "web_fetch_result", url: "https://x.gov/broken.pdf", retrieved_at: null, content: { type: "document", title: null, citations: null, source: { type: "base64", media_type: "application/pdf", data: "JVBE" } } } },
       { type: "text", text: "noted", citations: [{ type: "web_search_result_location", url: "https://reuters.com/fed", cited_text: "The Fed raised rates by 25 bp.", encrypted_index: "x", title: null }] },
       { type: "tool_use", id: "t", name: "submit_result", input: out },
     ] };
     const r = await apiRunner(scripted(turn).client)("news", brief, opts);
-    expect(r.pages).toEqual([{ url: "https://bls.gov/cpi", text: "CPI rose 3.7 percent." }, { url: "https://reuters.com/fed", text: "The Fed raised rates by 25 bp." }]);
+    expect(r.pages!.slice(0, 2)).toEqual([{ url: "https://bls.gov/cpi", text: "CPI rose 3.7 percent." }, { url: "https://reuters.com/fed", text: "The Fed raised rates by 25 bp." }]);
+    expect(r.pages!.slice(2)).toEqual([{ url: "https://x.gov/a.pdf", text: expect.stringContaining("Payrolls rose by 150,000.") }]);
   });
 
   it("nudges a turn that ends without submit_result, then gives up", async () => {

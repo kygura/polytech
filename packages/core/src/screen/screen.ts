@@ -75,6 +75,15 @@ export function factorA(snap: Pick<Snapshot, "vol24h">): number {
   return v <= QUIET_VOL_USD ? 1 : Math.max(A_FLOOR, 1 - 0.35 * Math.log10(v / QUIET_VOL_USD));
 }
 
+/**
+ * Rules nuance: markets whose rules need careful reading are where headline traders misprice, and the research pod resolves
+ * the ambiguity with its strongest model (rules reader). 1 + 0.5 x the classifier's rule_ambiguity (0..1); unrated -> 1.
+ * Outright unsettleable rules are already penalised through R.
+ */
+export function factorN(ambiguity: number | null | undefined): number {
+  return typeof ambiguity === "number" && Number.isFinite(ambiguity) ? 1 + 0.5 * Math.min(1, Math.max(0, ambiguity)) : 1;
+}
+
 export type CrowdInput = { top10Share: number; netFlow: number; skew: number }; // flow, skew in -1..1
 
 export function crowd(i: CrowdInput): { c: number; side: Side | null } {
@@ -83,22 +92,24 @@ export function crowd(i: CrowdInput): { c: number; side: Side | null } {
   return { c, side: lean > 0.25 ? "YES" : lean < -0.25 ? "NO" : null };
 }
 
-/** A defaults to 1 (no attention discount) for callers that score without a snapshot. */
-export function priority(f: { R: number; I: number; L: number; T: number; C: number; A?: number }, s: Settings): number {
-  return f.R * f.I * f.L * f.T * (1 + s.cCoef * f.C) * (f.A ?? 1);
+/** A and N default to 1 (neutral) for callers that score without a snapshot or a rules rating. */
+export function priority(f: { R: number; I: number; L: number; T: number; C: number; A?: number; N?: number }, s: Settings): number {
+  return f.R * f.I * f.L * f.T * (1 + s.cCoef * f.C) * (f.A ?? 1) * (f.N ?? 1);
 }
 
 export function screen(a: {
   market: Market; snap: Snapshot; R: number; crowd: CrowdInput; structural: boolean; settings: Settings; now: number;
+  /** The R classifier's rule_ambiguity (0..1); omit when unrated. */
+  ambiguity?: number | null;
 }): ScreenResult {
   const { market, snap, settings, now } = a;
   const I = factorI(snap, now);
   const { L, tier } = factorL(snap, settings);
   const T = factorT((market.endDate - now) / DAY, settings);
   const C = crowd(a.crowd).c;
-  const A = factorA(snap);
+  const A = factorA(snap), N = factorN(a.ambiguity);
   return {
-    conditionId: market.conditionId, ts: now, R: a.R, I, L, T, C, A,
-    priority: priority({ R: a.R, I, L, T, C, A }, settings), tier, structural: a.structural,
+    conditionId: market.conditionId, ts: now, R: a.R, I, L, T, C, A, N,
+    priority: priority({ R: a.R, I, L, T, C, A, N }, settings), tier, structural: a.structural,
   };
 }

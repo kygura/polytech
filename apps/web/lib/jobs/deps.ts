@@ -18,7 +18,8 @@ export type Deps = {
   /** Pre-research verdict (Haiku); heuristic from the rules text without a key. */
   triage: Triage;
   /** LLM researchability R in 0..1; absent => deterministic heuristic from rules text. */
-  rScore?: (rules: string, deadline?: number) => Promise<number>;
+  /** R (researchability), or R with the classifier's rule_ambiguity (feeds the screen's rules-nuance factor). */
+  rScore?: (rules: string, deadline?: number) => Promise<number | { R: number; ambiguity: number }>;
   /** Live CLOB exchange; null = not configured (L2 refused). */
   exchange: Exchange | null;
 };
@@ -66,7 +67,10 @@ export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
     judge: over.judge ?? (client ? anthropicJudge(client) : process.env.PM_FIXTURES !== "1" && isProd(process.env) ? disabledJudge : fakeJudge),
     // screen.ts imports this module: load it lazily (no import cycle at module init)
     triage: over.triage ?? (client ? anthropicTriage(client, modelFor("triage", settings.models)) : heuristicTriage((await import("./screen")).heuristicR)),
-    rScore: over.rScore ?? (client ? async (rules, deadline) => (await classifyR(rules, client, undefined, { deadline }, { timeout: 15_000, maxRetries: 0 })).R : undefined),
+    rScore: over.rScore ?? (client ? async (rules, deadline) => {
+      const r = await classifyR(rules, client, undefined, { deadline }, { timeout: 15_000, maxRetries: 0 });
+      return { R: r.R, ambiguity: r.rule_ambiguity };
+    } : undefined),
     exchange: over.exchange !== undefined ? over.exchange : envExchange(),
   };
 }
