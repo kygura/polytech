@@ -1,6 +1,6 @@
 import { and, desc, eq, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { snapshots } from "./schema";
+import { screens, snapshots } from "./schema";
 
 export const latestSnapshot = async (db: Db, conditionId: string) =>
   (await db.select().from(snapshots).where(eq(snapshots.conditionId, conditionId)).orderBy(desc(snapshots.ts)).limit(1))[0];
@@ -15,3 +15,10 @@ export const pruneSnapshots = (db: Db, watched: string[], now = Date.now(), days
     watched.length ? or(old, notInArray(snapshots.conditionId, watched)) : undefined,
   ));
 };
+
+/** Screen runs are only read at the latest run, the last hour (sets) and the newest row per market: keep those and `days` of runs, delete the rest. */
+export const pruneScreens = (db: Db, now = Date.now(), days = 2) =>
+  db.delete(screens).where(and(
+    lt(screens.ts, new Date(now - days * 86_400_000)),
+    sql`exists (select 1 from ${screens} n where n.condition_id = ${screens.conditionId} and n.ts > ${screens.ts})`,
+  ));

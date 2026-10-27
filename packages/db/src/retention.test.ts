@@ -1,5 +1,5 @@
 import { beforeAll, expect, it } from "vitest";
-import { getDb, insertSnapshots, migrate, pruneSnapshots, schema as s } from "./index";
+import { getDb, insertSnapshots, migrate, pruneScreens, pruneSnapshots, schema as s } from "./index";
 
 beforeAll(async () => {
   process.env.PGLITE_DIR = "memory://";
@@ -15,4 +15,14 @@ it("keeps latest per market; recent history only for watched; deletes the rest",
   ]);
   await pruneSnapshots(db, ["w"], now);
   expect((await db.select().from(s.snapshots)).map((r) => r.mid).sort()).toEqual([2, 3, 6, 8]);
+});
+
+it("prunes screen runs older than the window, keeping the newest row per market", async () => {
+  const db = getDb(), now = Date.now(), d = (n: number) => new Date(now - n * 86_400_000);
+  await db.insert(s.screens).values([
+    { conditionId: "a", ts: d(5) }, { conditionId: "a", ts: d(3) }, { conditionId: "a", ts: d(1) }, // old runs go, recent kept
+    { conditionId: "b", ts: d(6) }, { conditionId: "b", ts: d(4) }, // dropped out of the screen: newest kept
+  ]);
+  await pruneScreens(db, now);
+  expect((await db.select().from(s.screens)).map((r) => `${r.conditionId}${Math.round((now - r.ts.getTime()) / 86_400_000)}`).sort()).toEqual(["a1", "b4"]);
 });

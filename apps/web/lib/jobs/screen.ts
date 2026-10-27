@@ -3,7 +3,7 @@ import {
   crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
-import { schema as s, type Db } from "@pm/db";
+import { pruneScreens, schema as s, type Db } from "@pm/db";
 import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -224,6 +224,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       console.warn("screen: market_latest write failed:", String((e as Error)?.message ?? e).slice(0, 160));
     }
     memoClear("watch:");
+    await pruneScreens(d.db, now).catch((e) => console.warn("screen: prune failed:", String(e?.message ?? e).slice(0, 120))); // ~17k rows a run: unpruned, the table outgrows the db
 
     const list = await shortlist(d.db, 20);
     const res = {
@@ -245,7 +246,7 @@ async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; sn
   const latest = new Map<string, (typeof th)[number]>();
   for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
   if (!latest.size) return new Map<string, Opportunity>();
-  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest)).map((r) => [r.c, r.f]));
+  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest).where(inArray(s.marketLatest.conditionId, [...latest.keys()]))).map((r) => [r.c, r.f]));
   const out = new Map<string, Opportunity>();
   for (const { m, snap } of rows) {
     const t = latest.get(m.conditionId), pYes = (t?.detail as { pYes?: number } | null | undefined)?.pYes;

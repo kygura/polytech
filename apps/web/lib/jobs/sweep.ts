@@ -85,7 +85,8 @@ export async function sweepUniverse(d: Deps) {
     // and only the screenable slice: ~250k markets are open, ~26k have liquidity >= minLiquidityUsd and resolve within minDays..maxDays (server-side filters)
     const { minDays, maxDays } = d.settings.filters, liquidityMin = d.settings.universe.minLiquidityUsd, now = d.now();
     const endMin = now + minDays * 864e5, endMax = now + maxDays * 864e5;
-    const known = new Map((await d.db.select({ id: t.conditionId, fee: t.feeRate, status: t.status, end: t.endDate, pmId: t.pmId, rulesHash: t.rulesHash, resolutionSource: t.resolutionSource }).from(t)).map((r) => [r.id, r]));
+    // open rows only: a closed market that reappears in the listing is treated as new (fee lookup, resolution source), the rest never needed reading
+    const known = new Map((await d.db.select({ id: t.conditionId, fee: t.feeRate, status: t.status, end: t.endDate, pmId: t.pmId, rulesHash: t.rulesHash, resolutionSource: t.resolutionSource }).from(t).where(inArray(t.status, OPEN))).map((r) => [r.id, r]));
     const t0 = Date.now();
     // stream: upsert each page and keep only ids (+ condition for fee fetches), never the ~26k full markets (OOM on Vercel)
     const seen = new Set<string>(), needFee: string[] = [];
@@ -206,8 +207,9 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const [books, oiParts, prevRows, histRows, researched] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
     soft("oi", chunks(conds, OI_CHUNK), (c) => d.pm.oi(c)),
-    byIds(ids && conds, (c) => d.db.select().from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
-    byIds(ids && conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
+    byIds(conds, (c) => d.db.select({ conditionId: ml.conditionId, mid: ml.mid, bookHash: ml.bookHash, midChangedAt: ml.midChangedAt, lastTradeTs: ml.lastTradeTs, flow24h: ml.flow24h, priority: ml.priority })
+      .from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
+    byIds(conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
     d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses),
   ]);
   const book = new Map(books.map((b) => [b.token_id, b]));
