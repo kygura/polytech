@@ -3,7 +3,7 @@ import {
   crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
-import { schema as s, type Db } from "@pm/db";
+import { pruneScreens, schema as s, type Db } from "@pm/db";
 import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -126,6 +126,46 @@ export const smallCapTooBusy = (tier: Tier, vol24h: number, structural: boolean,
 
 const by = (rows: { m: { conditionId: string; eventId: string; negRiskGroup: string | null } }[], id: string) => rows.find((r) => r.m.conditionId === id)!.m;
 
+/** A market from the Gamma listing: the row the sweep would store, and Gamma's YES touch. */
+export type Listed = { row: typeof s.markets.$inferInsert; bid: number | null; ask: number | null };
+/** Markets the sweep stores per run: the screen re-ranks these on real books, research and the screener only ever see them. */
+export const KEEP_TOP = 600;
+/** Plus the legs of the best structural sets, whole sets, up to about this many legs. */
+export const KEEP_STRUCT = 400;
+
+/**
+ * Pre-screen of the whole listing in memory, on Gamma's own quotes: no book fetch, nothing read back. Each market gets a one-level
+ * book at its touch, sized by half its Gamma liquidity per side, then the screen's pass 1, structural detectors and priority, with R
+ * from `cachedR` (`${conditionId}:${rulesHash}`) or the sweep's heuristic. Returns the ids worth storing: the `top` best by priority
+ * (pass-1 failures rank last, so a universe smaller than `top` is kept whole) and the legs of the best structural sets.
+ */
+export function preRank(listed: Listed[], st: AppSettings, now: number, cachedR: Map<string, number>, o = { top: KEEP_TOP, struct: KEEP_STRUCT }): Set<string> {
+  const rows = listed.map(({ row, bid, ask }) => {
+    const r = { tags: [], status: "active", negRiskAugmented: false, ...row } as typeof s.markets.$inferSelect;
+    const side = (r.liquidity ?? 0) / 2, mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+    const snap: SnapRow = {
+      id: 0, conditionId: r.conditionId, ts: new Date(now), mid, bestBid: bid, bestAsk: ask, depth5cUsd: null, vol24h: r.vol24h ?? null, oi: null, top10Share: null, lastTradeTs: null,
+      book: { bids: bid ? [{ price: bid, size: side / bid }] : [], asks: ask ? [{ price: ask, size: side / ask }] : [], netFlow: 0, flowUnknown: true }, // no trade data here: not "stale"
+    };
+    return { r, m: toMarket(r), snap };
+  });
+  const structural = detectStructural(rows, st.capFrac * st.bankroll);
+  const prio = (x: (typeof rows)[number]) => {
+    if (!pass1(x.m, toSnap(x.snap), st, now).ok) return -1;
+    const R = cachedR.get(`${x.r.conditionId}:${x.r.rulesHash ?? ""}`) ?? x.r.heuristicR ?? heuristicR("");
+    return screen({ market: x.m, snap: toSnap(x.snap), R, structural: structural.has(x.m.conditionId), settings: st, now, crowd: { top10Share: 0, netFlow: 0, skew: 0 } }).priority;
+  };
+  const keep = new Set(rows.map((x) => [x, prio(x)] as const).sort((a, b) => b[1] - a[1]).slice(0, o.top).map(([x]) => x.m.conditionId));
+  const sets = [...new Map([...structural.values()].map((x) => [x.legs.join(","), x])).values()].sort((a, b) => b.lockedC - a.lockedC);
+  let legs = 0;
+  for (const x of sets) {
+    if (legs >= o.struct) break;
+    x.legs.forEach((id) => keep.add(id));
+    legs += x.legs.length;
+  }
+  return keep;
+}
+
 export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: number } = {}) {
   const t0 = Date.now(), o = { budgetMs: BUDGET_MS, maxLlm: MAX_LLM, ...opts };
   return withLock(d, "screen", 10 * 60_000, async () => {
@@ -224,6 +264,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       console.warn("screen: market_latest write failed:", String((e as Error)?.message ?? e).slice(0, 160));
     }
     memoClear("watch:");
+    await pruneScreens(d.db, now).catch((e) => console.warn("screen: prune failed:", String(e?.message ?? e).slice(0, 120))); // ~17k rows a run: unpruned, the table outgrows the db
 
     const list = await shortlist(d.db, 20);
     const res = {
@@ -245,7 +286,7 @@ async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; sn
   const latest = new Map<string, (typeof th)[number]>();
   for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
   if (!latest.size) return new Map<string, Opportunity>();
-  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest)).map((r) => [r.c, r.f]));
+  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest).where(inArray(s.marketLatest.conditionId, [...latest.keys()]))).map((r) => [r.c, r.f]));
   const out = new Map<string, Opportunity>();
   for (const { m, snap } of rows) {
     const t = latest.get(m.conditionId), pYes = (t?.detail as { pYes?: number } | null | undefined)?.pYes;

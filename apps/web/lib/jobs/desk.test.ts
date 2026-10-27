@@ -17,7 +17,7 @@ beforeAll(async () => {
   await sweepUniverse(d); await snapshotBooks(d, "all");
   const all = (await d.db.select({ c: s.markets.conditionId }).from(s.markets).where(eq(s.markets.status, "active"))).map((r) => r.c);
   const snaps = await latestSnaps(d.db, all);
-  ok = all.filter((c) => { const b = snaps.get(c); return b?.book?.asks.length && b.book.bids.length && b.mid != null; });
+  ok = all.filter((c) => { const b = snaps.get(c); return b?.book?.asks.length && b.book.bids.length && b.mid != null && b.mid > 0.15 && b.mid < 0.85; }); // mid-range: the tests price limits 5-10c either side
 }, 60_000);
 
 describe("triage", () => {

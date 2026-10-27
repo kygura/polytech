@@ -1,6 +1,6 @@
 import { rulesHash } from "@pm/agents";
 import { bookHash, bookMetrics, classifyResolutionSource, holderMetrics, tradeMetrics, type TradeInput } from "@pm/core";
-import { insertSnapshots, pruneSnapshots, schema as s } from "@pm/db";
+import { insertSnapshots, pruneMarkets, pruneSnapshots, referencedMarkets, schema as s } from "@pm/db";
 import type { Market as PmMarket, Trade } from "@pm/pm";
 import { and, eq, gte, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
@@ -8,7 +8,7 @@ import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { monitor } from "./monitor";
 import { workingPaperIds, workPaperOrders } from "./paperOrder";
-import { heuristicR, shortlist, watchlistIds } from "./screen";
+import { heuristicR, preRank, shortlist, watchlistIds, type Listed } from "./screen";
 
 const MAX_FEE_FETCHES = 200;
 const WALK_BUDGET_MS = 150_000; // the cron route allows 300 s: walk <= 150 s (+ one page), fees <= FEE_DEADLINE_MS, then closing
@@ -78,7 +78,11 @@ export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inf
   return out.map((r) => r.id);
 }
 
-/** pm universe (markets + events) -> `markets` upsert. Fee rate fetched once per new market (null = unknown -> category fallback at use). */
+/**
+ * pm universe -> the markets worth keeping. The listing is ranked in memory on Gamma's own quotes (`preRank`) and only the best slice,
+ * plus every market the user's own data references, is upserted; the rest is never stored (Polymarket already serves it) and rows
+ * that fall out are pruned with their latest/history/screen rows. Fee rate fetched once per kept market (null = unknown -> category fallback at use).
+ */
 export async function sweepUniverse(d: Deps) {
   return withLock(d, "sweep", 10 * 60_000, async () => {
     // markets only: each carries its event id and neg-risk group; the events walk is ~1.7 GB of nested markets (OOM on Vercel)
@@ -87,22 +91,24 @@ export async function sweepUniverse(d: Deps) {
     const endMin = now + minDays * 864e5, endMax = now + maxDays * 864e5;
     const known = new Map((await d.db.select({ id: t.conditionId, fee: t.feeRate, status: t.status, end: t.endDate, pmId: t.pmId, rulesHash: t.rulesHash, resolutionSource: t.resolutionSource }).from(t)).map((r) => [r.id, r]));
     const t0 = Date.now();
-    // stream: upsert each page and keep only ids (+ condition for fee fetches), never the ~26k full markets (OOM on Vercel)
-    const seen = new Set<string>(), needFee: string[] = [];
-    let newMarkets = 0, written = 0;
+    // stream: keep each page's slim row (no rules text) and Gamma touch, never the ~26k full markets (OOM on Vercel)
+    const listed = new Map<string, Listed>();
     const { complete, pages } = await d.pm.walkMarkets({ liquidityMin, endDateMin: new Date(endMin).toISOString(), endDateMax: new Date(endMax).toISOString(), budgetMs: WALK_BUDGET_MS }, async (page) => {
-      const rows = [...new Map(page.map((m) => [m.condition_id, m])).values()].map((m) => toMarketRow(m, known.get(m.condition_id)));
-      if (!rows.length) return;
-      written += (await upsertMarkets(d.db, rows)).length;
-      for (const r of rows) {
-        if (seen.has(r.conditionId)) continue;
-        seen.add(r.conditionId);
-        if (!known.has(r.conditionId)) newMarkets++;
-        if (r.feeRate == null && r.yesTokenId && known.get(r.conditionId)?.fee == null) needFee.push(r.conditionId);
-      }
+      for (const m of page) if (!listed.has(m.condition_id)) listed.set(m.condition_id, { row: toMarketRow(m, known.get(m.condition_id)), bid: m.best_bid ?? null, ask: m.best_ask ?? null });
     });
-    if (!complete) console.warn(`sweep: listing incomplete after ${pages} pages (429/5xx/time budget), ${seen.size} markets upserted, closing skipped`);
-    if (!seen.size) return { markets: 0, newMarkets: 0, written: 0, feesFetched: 0, closed: 0, complete };
+    const seen = new Set(listed.keys());
+    if (!complete) console.warn(`sweep: listing incomplete after ${pages} pages (429/5xx/time budget), ${seen.size} markets listed, closing and pruning skipped`);
+    if (!seen.size) return { markets: 0, kept: 0, newMarkets: 0, written: 0, feesFetched: 0, closed: 0, complete };
+
+    const cachedR = new Map((await d.db.select({ c: s.rrCache.conditionId, h: s.rrCache.rulesHash, r: s.rrCache.r }).from(s.rrCache)).map((x) => [`${x.c}:${x.h}`, x.r]));
+    const referenced = await referencedMarkets(d.db);
+    const kept = preRank([...listed.values()], d.settings, now, cachedR);
+    for (const id of referenced) if (listed.has(id)) kept.add(id); // refresh what the user holds or researched while it is listed
+    const rows = [...kept].map((id) => listed.get(id)!.row);
+    let written = 0;
+    for (const c of chunks(rows, 500)) written += (await upsertMarkets(d.db, c)).length;
+    const newMarkets = rows.filter((r) => !known.has(r.conditionId)).length;
+    const needFee = rows.filter((r) => r.feeRate == null && r.yesTokenId && known.get(r.conditionId)?.fee == null).map((r) => r.conditionId);
 
     // fees after the upsert (a first run must not block on thousands of fetches); capped per run, the rest next sweep.
     // Gamma's feeSchedule already filled most rows; the rest ask the CLOB market info (its `fd` curve is authoritative, no `fd` = fee-free). /fee-rate is legacy and not used.
@@ -149,8 +155,10 @@ export async function sweepUniverse(d: Deps) {
     const stillOpen = new Set((await Promise.all(missing.filter(([id]) => held.has(id)).map(async ([id, r]) => ((await d.pm.market(r.pmId ?? id).catch(() => undefined))?.open !== false ? id : null)))).flatMap((id) => id ?? []));
     const gone = missing.map(([id]) => id).filter((id) => !stillOpen.has(id));
     for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
+    // a truncated listing would drop live markets that simply were not walked: prune only after a full one
+    if (!truncated) await pruneMarkets(d.db, [...new Set([...kept, ...referenced, ...held])]);
 
-    const out = { markets: seen.size, newMarkets, written, feesFetched, closed: gone.length, complete };
+    const out = { markets: seen.size, kept: kept.size, newMarkets, written, feesFetched, closed: gone.length, complete };
     await d.kv.set(KICK_AT, Date.now()); // public sweptAt/stale detection, also covers cron sweeps
     publish("sweep.done", out);
     return out;
@@ -206,8 +214,9 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   const [books, oiParts, prevRows, histRows, researched] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
     soft("oi", chunks(conds, OI_CHUNK), (c) => d.pm.oi(c)),
-    byIds(ids && conds, (c) => d.db.select().from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
-    byIds(ids && conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
+    byIds(conds, (c) => d.db.select({ conditionId: ml.conditionId, mid: ml.mid, bookHash: ml.bookHash, midChangedAt: ml.midChangedAt, lastTradeTs: ml.lastTradeTs, flow24h: ml.flow24h, priority: ml.priority })
+      .from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
+    byIds(conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
     d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses),
   ]);
   const book = new Map(books.map((b) => [b.token_id, b]));

@@ -287,14 +287,17 @@ describe("pipeline (fixtures + fake runner/judge)", () => {
     const [base] = await d.db.select().from(s.markets).limit(1);
     const { minDays, maxDays } = d.settings.filters, day = 864e5, now = t;
     const mk = (k: string, end: number) => ({ ...base!, conditionId: cid("gone-" + k), pmId: "gone-" + k, endDate: new Date(end), status: "active" as const });
-    const rows = [mk("soon", now + (minDays / 2) * day), mk("window", now + ((minDays + maxDays) / 2) * day), mk("past", now - day)];
+    const rows = [mk("soon", now + (minDays / 2) * day), mk("window", now + ((minDays + maxDays) / 2) * day), mk("past", now - day), mk("stray", now + (minDays / 2) * day)];
     await d.db.insert(s.markets).values(rows);
     await d.db.insert(s.positions).values({ conditionId: cid("gone-window"), tokenId: "tok", size: 1, avgCost: 0.5 }); // held: stays open
+    await d.db.insert(s.marketFlags).values([{ conditionId: cid("gone-soon"), pinned: true }, { conditionId: cid("gone-past"), pinned: true }]); // referenced: kept, so closing applies
     await sweepUniverse(d);
-    const status = async (k: string) => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, cid("gone-" + k))))[0]!.status;
+    const row = async (k: string) => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, cid("gone-" + k))))[0];
+    const status = async (k: string) => (await row(k))!.status;
     expect(await status("soon")).toBe("active");
     expect(await status("window")).toBe("active");
     expect(await status("past")).toBe("closed");
+    expect(await row("stray")).toBeUndefined(); // nothing of the user's names it and the listing no longer has it: pruned
     await d.db.update(s.positions).set({ closedAt: new Date(t) }).where(eq(s.positions.conditionId, cid("gone-window")));
     await sweepUniverse(d);
     expect(await status("window")).toBe("closed");

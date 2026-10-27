@@ -235,7 +235,7 @@ Twelve Postgres tables. Snapshots and events are append-only so every score and 
 
 | Table | Key columns | Written by |
 |---|---|---|
-| markets | condition_id, event_id, question, rules, category, tags, end_date, neg_risk_group, fee_rate, status | Universe sweep |
+| markets | condition_id, event_id, question, rules, category, tags, end_date, neg_risk_group, fee_rate, status | Universe sweep (kept slice only, see below) |
 | snapshots | condition_id, ts, mid, best_bid, best_ask, depth_5c_usd, vol_24h, oi, top10_share, last_trade_ts | Book/price polls |
 | screens | condition_id, ts, R, I, L, T, C, priority, tier, structural_flag | Screener |
 | pods | id, condition_id, started_at, status, trigger, cost_sandbox_s | Orchestrator |
@@ -299,6 +299,7 @@ The app is deployed at a public URL. Anonymous visitors see the LLM-scouted watc
 
 - Project `polytech` with root directory `apps/web`; dependencies install from the repo root with bun. Neon Postgres and Upstash Redis come from the Vercel Marketplace free tiers. Migrations run during the deploy step.
 - Hobby allows only daily crons. The scouting crons run daily, and the trading crons (paper, propose, sets, expire, sync, reconcile) are removed from `vercel.json`. A public watchlist read starts the scouting chain when the last sweep is older than 30 minutes, under a Redis lock so only one chain runs at a time. On Pro, restore the Rev 5 schedule.
+- The database holds only what Polymarket does not serve (free-tier egress and size). The sweep walks the Gamma listing and ranks it in memory on Gamma's own quotes (`preRank`: one-level books at the touch, the screen's pass 1, structural detectors and priority, cached or heuristic R). It stores the top 600 plus the legs of the best structural sets (about 400) and every market the user's own data names (theses, pods, triage, orders, positions, proposals, sets, flags, journal, alerts, outcomes). The rest is never written, and rows that fall out are pruned with their `market_latest`, `snapshots` and `screens` rows. Snapshot, screen, the screener and the watchlist work on that slice; other markets are reached through search and ingest. Screen runs older than two days are pruned, keeping the newest row per market.
 - Functions are pinned to `arn1` (Stockholm), which is not on Polymarket's restricted list (docs.polymarket.com/api-reference/geoblock). The `dub1` pin was dropped because Ireland is restricted.
 
 ### Done
