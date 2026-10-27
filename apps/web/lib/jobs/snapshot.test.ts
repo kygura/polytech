@@ -67,7 +67,9 @@ describe("snapshot: market_latest in place, history only on change", () => {
   });
 
   it("a changed book gets a history row; mid_changed_at bumps only when the mid moves >= 1c", async () => {
-    const [a, b] = [...yes.keys()];
+    // b needs a spread > 2c: a +2c best bid must not cross the ask, or the mid moves less than 1c
+    const b = (await d.db.select().from(s.marketLatest)).find((r) => r.bestBid != null && r.bestAsk != null && r.bestAsk - r.bestBid > 0.025)?.conditionId;
+    const a = [...yes.keys()].find((c) => c !== b);
     const [ta, tb] = [yes.get(a!)!, yes.get(b!)!];
     const [ma0, mb0] = [await ml(a!), await ml(b!)];
     tweak.set(ta, (x) => ({ ...x, bids: x.bids.map((l, i) => (i === 0 ? { ...l, size: l.size + 7 } : l)) })); // size only
