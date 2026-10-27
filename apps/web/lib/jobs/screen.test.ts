@@ -3,7 +3,8 @@ import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, screenAll, snapshotBooks, sweepUniverse, type Deps } from "./index";
-import { detectStructural, heuristicR, smallCapTooBusy } from "./screen";
+import { detectStructural, heuristicR, preRank, smallCapTooBusy, type Listed } from "./screen";
+import { DEFAULT_APP_SETTINGS } from "./settings";
 
 process.env.PGLITE_DIR = "memory://";
 
@@ -34,6 +35,31 @@ describe("detectStructural", () => {
     ];
     expect(detectStructural(mk(Date.parse("2027-01-01")), 50).get("m1")).toMatchObject({ type: "mirror" });
     expect(detectStructural(mk(Date.parse("2028-01-01")), 50).size).toBe(0);
+  });
+});
+
+describe("preRank", () => {
+  const st = DEFAULT_APP_SETTINGS, now = Date.parse("2026-10-15T12:00:00Z");
+  const endDate = new Date(now + ((st.filters.minDays + st.filters.maxDays) / 2) * 864e5);
+  const listed = (id: string, bid: number | null, ask: number | null, o: { q?: string; liquidity?: number } = {}): Listed => ({
+    row: { conditionId: id, question: o.q ?? `Will ${id} happen`, category: "other", tags: [], endDate, status: "active", feeRate: 0, yesTokenId: `y-${id}`, liquidity: o.liquidity ?? 50_000, vol24h: 1_000, rulesHash: "h", heuristicR: 0.5 },
+    bid, ask,
+  });
+  const xs = [listed("a", 0.4, 0.41), listed("b", 0.6, 0.61), listed("noquote", null, null), listed("thin", 0.5, 0.51, { liquidity: 0 })];
+  const none = { top: 0, struct: 0 };
+
+  it("keeps the best `top` by priority, pass-1 failures last; a universe smaller than `top` is kept whole", () => {
+    expect(preRank(xs, st, now, new Map(), { ...none, top: 10 })).toEqual(new Set(["a", "b", "noquote", "thin"]));
+    expect([...preRank(xs, st, now, new Map(), { ...none, top: 2 })].sort()).toEqual(["a", "b"]);
+  });
+  it("ranks on the cached R when its rules hash matches", () => {
+    expect(preRank(xs, st, now, new Map([["a:h", 0.9], ["b:h", 0.1]]), { ...none, top: 1 })).toEqual(new Set(["a"]));
+    expect(preRank(xs, st, now, new Map([["a:h", 0.1], ["b:h", 0.9]]), { ...none, top: 1 })).toEqual(new Set(["b"]));
+    expect(preRank(xs, st, now, new Map([["a:other", 0.1], ["b:h", 0.9]]), { ...none, top: 1 })).toEqual(new Set(["b"]));
+  });
+  it("adds whole structural sets on top of the ranked slice", () => {
+    const pair = [listed("m1", 0.6, 0.62, { q: "Will Federal Data Privacy Act pass" }), listed("m2", 0.4, 0.42, { q: "Will Federal Data Privacy Act pass" })];
+    expect(preRank([...xs, ...pair], st, now, new Map(), { top: 1, struct: 1 })).toEqual(new Set([...preRank(xs, st, now, new Map(), { ...none, top: 1 }), "m1", "m2"]));
   });
 });
 
