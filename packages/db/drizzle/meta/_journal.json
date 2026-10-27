@@ -113,6 +113,13 @@
       "when": 1792699433226,
       "tag": "0015_paper_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793140694616,
+      "tag": "0016_enable_rls_exposed_tables",
+      "breakpoints": true
     }
   ]
 }
