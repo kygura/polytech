@@ -1,0 +1,27 @@
+ALTER TABLE "agent_runs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "alerts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "autonomy_events" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "evidence" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "fills" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "journal" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "kv" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "market_flags" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "market_latest" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "markets" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "orders" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "outcomes" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "paper_orders" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "pods" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "positions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "proposal_sets" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "proposals" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "reconciliations" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "research_profiles" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "rr_cache" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "screens" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "settings" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "snapshots" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "spend" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "theses" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "triage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "views" ENABLE ROW LEVEL SECURITY;

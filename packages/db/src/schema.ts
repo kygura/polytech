@@ -24,7 +24,7 @@ export const markets = pgTable("markets", {
   heuristicR: dp("heuristic_r"), // rules-text cue score from the sweep (screen R without the LLM); the text itself is fetched from Gamma on demand
   resolutionSource: text("resolution_source"), // official_data | scheduled_event | media_report | subjective | unknown
   negRiskAugmented: boolean("neg_risk_augmented").notNull().default(false),
-});
+}).enableRLS();
 
 /** One row per market, updated in place by the snapshot job. */
 export const marketLatest = pgTable("market_latest", {
@@ -52,7 +52,7 @@ export const marketLatest = pgTable("market_latest", {
   priority: dp("priority"), // latest screen score
   structural: jsonb("structural").$type<string[]>(), // structural kinds this market is in
   opportunity: jsonb("opportunity").$type<{ side: string; edge: number; stake: number; o: number; contrarian: boolean } | null>(),
-});
+}).enableRLS();
 
 export const views = pgTable("views", {
   id: text("id").primaryKey(),
@@ -60,7 +60,7 @@ export const views = pgTable("views", {
   query: text("query").notNull(),
   columns: jsonb("columns").$type<string[]>().notNull().default([]),
   createdAt: ts("created_at").notNull().defaultNow(),
-});
+}).enableRLS();
 
 export const alerts = pgTable("alerts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -70,7 +70,7 @@ export const alerts = pgTable("alerts", {
   data: jsonb("data").$type<Record<string, unknown>>(),
   createdAt: ts("created_at").notNull().defaultNow(),
   ackedAt: ts("acked_at"),
-}, (t) => [index("alerts_acked_created").on(t.ackedAt, t.createdAt)]); // dedupe in code: same kind + market not re-raised within 6 h
+}, (t) => [index("alerts_acked_created").on(t.ackedAt, t.createdAt)]).enableRLS(); // dedupe in code: same kind + market not re-raised within 6 h
 
 /** Per-thesis calibration row; filled by the calibrate job. */
 export const journal = pgTable("journal", {
@@ -94,7 +94,7 @@ export const journal = pgTable("journal", {
   drift24h: dp("drift_24h"),
   drift7d: dp("drift_7d"),
   paperPnl: dp("paper_pnl"),
-});
+}).enableRLS();
 
 export const snapshots = pgTable("snapshots", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -110,7 +110,7 @@ export const snapshots = pgTable("snapshots", {
   lastTradeTs: ts("last_trade_ts"),
   // YES-token levels kept for sizing/fills + 24h net taker flow (-1..1) for crowding
   book: jsonb("book").$type<{ bids: { price: number; size: number }[]; asks: { price: number; size: number }[]; netFlow: number; flowUnknown?: boolean }>(),
-}, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]);
+}, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]).enableRLS();
 
 export const screens = pgTable("screens", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -125,7 +125,7 @@ export const screens = pgTable("screens", {
   tier: text("tier"),
   structuralFlag: boolean("structural_flag").notNull().default(false),
   structuralDetail: jsonb("structural_detail").$type<Record<string, unknown>>(),
-}, (t) => [index("screens_cond_ts").on(t.conditionId, t.ts)]);
+}, (t) => [index("screens_cond_ts").on(t.conditionId, t.ts)]).enableRLS();
 
 export const pods = pgTable("pods", {
   id: text("id").primaryKey(),
@@ -139,7 +139,7 @@ export const pods = pgTable("pods", {
   cancelRequestedAt: ts("cancel_requested_at"),
   stage: text("stage"), // rules | agents | judge | sizing | done
   error: text("error"), // why a failed pod failed (reason + scrubbed message), shown on the research desk
-});
+}).enableRLS();
 
 /** Cheap pre-research verdict per market: primitive rules first, then a Haiku read of the question and rules. Newest row per market wins. */
 export const triage = pgTable("triage", {
@@ -150,7 +150,7 @@ export const triage = pgTable("triage", {
   failedRules: jsonb("failed_rules").$type<string[]>().notNull().default([]), // primitive rules that failed; non-empty = skipped without a model call
   model: text("model"), // null when the rules alone decided
   createdAt: ts("created_at").notNull().defaultNow(),
-});
+}).enableRLS();
 
 export const researchProfiles = pgTable("research_profiles", {
   id: text("id").primaryKey(),
@@ -162,7 +162,7 @@ export const researchProfiles = pgTable("research_profiles", {
   lastRunAt: ts("last_run_at"),
   createdAt: ts("created_at").notNull().defaultNow(),
   updatedAt: ts("updated_at").notNull().defaultNow(),
-});
+}).enableRLS();
 
 export const agentRuns = pgTable("agent_runs", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -176,7 +176,7 @@ export const agentRuns = pgTable("agent_runs", {
   startedAt: ts("started_at"),
   finishedAt: ts("finished_at"),
   toolCalls: jsonb("tool_calls").$type<{ ts: number; name: string; input: string; ok: boolean }[]>(), // input <= 500 chars, capped at 200 entries
-});
+}).enableRLS();
 
 export const evidence = pgTable("evidence", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -188,7 +188,7 @@ export const evidence = pgTable("evidence", {
   retrievedAt: ts("retrieved_at").notNull().defaultNow(),
   claim: text("claim").notNull(),
   direction: integer("direction").notNull(), // +1 / -1
-});
+}).enableRLS();
 
 export const theses = pgTable("theses", {
   id: text("id").primaryKey(),
@@ -208,7 +208,7 @@ export const theses = pgTable("theses", {
   expiresAt: ts("expires_at"),
   // thesis text, YES-side pYes/pMidYes, k, shares, payoff, expectedProfit, daysLeft, capped, trigger
   detail: jsonb("detail").$type<Record<string, unknown>>(),
-}, (t) => [index("theses_cond").on(t.conditionId)]);
+}, (t) => [index("theses_cond").on(t.conditionId)]).enableRLS();
 
 export const outcomes = pgTable("outcomes", {
   conditionId: text("condition_id").primaryKey(),
@@ -216,7 +216,7 @@ export const outcomes = pgTable("outcomes", {
   result: text("result").notNull(),
   brier: dp("brier"),
   logLoss: dp("log_loss"),
-});
+}).enableRLS();
 
 export const orders = pgTable("orders", {
   id: text("id").primaryKey(),
@@ -237,7 +237,7 @@ export const orders = pgTable("orders", {
   createdAt: ts("created_at").notNull().defaultNow(),
   setId: uuid("set_id").references(() => proposalSets.id), // neg-risk set leg; thesisId = `set:${setId}` (sets are not theses)
   proposalId: uuid("proposal_id"), // single-leg order: the proposal that sent it (no FK: proposals.order_id already points back)
-});
+}).enableRLS();
 
 export const fills = pgTable("fills", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -249,7 +249,7 @@ export const fills = pgTable("fills", {
   txHash: text("tx_hash"),
   paper: boolean("paper").notNull().default(true),
   tradeId: text("trade_id").unique(), // live exchange trade id; null for paper (multiple nulls allowed)
-});
+}).enableRLS();
 
 export const positions = pgTable("positions", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -261,7 +261,7 @@ export const positions = pgTable("positions", {
   openedAt: ts("opened_at").notNull().defaultNow(),
   closedAt: ts("closed_at"),
   paper: boolean("paper").notNull().default(true),
-});
+}).enableRLS();
 
 /** Working manual paper orders: a limit that did not fill on arrival rests here; a stop waits for its trigger. Fills land in orders/fills/positions. */
 export const paperOrders = pgTable("paper_orders", {
@@ -282,7 +282,7 @@ export const paperOrders = pgTable("paper_orders", {
   triggeredAt: ts("triggered_at"),
   bookTs: ts("book_ts"), // the book it last looked at: the next fill or trigger check needs a newer one (a snapshot's levels count once)
   closedAt: ts("closed_at"),
-}, (t) => [index("paper_orders_status_idx").on(t.status, t.conditionId)]);
+}, (t) => [index("paper_orders_status_idx").on(t.status, t.conditionId)]).enableRLS();
 
 export const autonomyEvents = pgTable("autonomy_events", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -292,33 +292,33 @@ export const autonomyEvents = pgTable("autonomy_events", {
   scope: text("scope").notNull().default("global"), // global | category:<name>
   reason: text("reason").notNull(),
   actor: text("actor").notNull(), // user | auto-downgrade | kill
-});
+}).enableRLS();
 
 // Extras the UI/actions need beyond SPEC's 12 tables.
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1), // single row
   data: jsonb("data").notNull(),
-});
+}).enableRLS();
 
 export const marketFlags = pgTable("market_flags", {
   conditionId: text("condition_id").primaryKey(),
   pinned: boolean("pinned").notNull().default(false),
   muted: boolean("muted").notNull().default(false),
-});
+}).enableRLS();
 
 export const spend = pgTable("spend", {
   day: date("day").primaryKey(),
   anthropicUsd: dp("anthropic_usd").notNull().default(0),
   exaCalls: integer("exa_calls").notNull().default(0),
   sandboxS: dp("sandbox_s").notNull().default(0),
-});
+}).enableRLS();
 
 export const rrCache = pgTable("rr_cache", {
   conditionId: text("condition_id").notNull(),
   rulesHash: text("rules_hash").notNull(),
   r: dp("r").notNull(),
   detail: jsonb("detail"),
-}, (t) => [primaryKey({ columns: [t.conditionId, t.rulesHash] })]);
+}, (t) => [primaryKey({ columns: [t.conditionId, t.rulesHash] })]).enableRLS();
 
 export const proposals = pgTable("proposals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -346,7 +346,7 @@ export const proposals = pgTable("proposals", {
 }, (t) => [
   index("proposals_status").on(t.status),
   uniqueIndex("proposals_one_pending_per_thesis").on(t.thesisId).where(sql`${t.status} = 'pending'`),
-]);
+]).enableRLS();
 
 export type SetLegRow = { conditionId: string; token: string; shares: number; limit: number; price: number }; // limit = FOK cap, price = touch at proposal
 
@@ -372,7 +372,7 @@ export const proposalSets = pgTable("proposal_sets", {
 }, (t) => [
   index("proposal_sets_status").on(t.status),
   uniqueIndex("proposal_sets_one_pending_per_event").on(t.eventId).where(sql`${t.status} = 'pending'`),
-]);
+]).enableRLS();
 
 export const reconciliations = pgTable("reconciliations", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -383,11 +383,11 @@ export const reconciliations = pgTable("reconciliations", {
   usdcLedger: dp("usdc_ledger").notNull(),
   usdcExchange: dp("usdc_exchange").notNull(),
   mismatches: jsonb("mismatches").$type<{ key: string; ledger: number; exchange: number }[]>().notNull().default([]),
-});
+}).enableRLS();
 
 /** Shared kv for serverless instances (locks, rate limits, freshness marks) when no Upstash store is configured. `value` is JSON; expired rows are ignored and pruned lazily. */
 export const kvStore = pgTable("kv", {
   key: text("key").primaryKey(),
   value: jsonb("value"),
   expiresAt: ts("expires_at"),
-});
+}).enableRLS();
