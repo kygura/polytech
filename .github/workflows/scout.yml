@@ -5,9 +5,10 @@
 # The alert pass (monitor job) also runs on every beat; deduped server-side, so extra beats are cheap.
 name: scout
 
+# Paused: schedule off while the Supabase project is paused. To resume, restore:
+#   schedule:
+#     - cron: "*/30 * * * *" # ~1,440 runner-min/month, inside the 2,000 free for a private repo
 on:
-  schedule:
-    - cron: "*/30 * * * *" # ponytail: ~1,440 runner-min/month, inside the 2,000 free for a private repo; go tighter if public
   workflow_dispatch:
 
 jobs:

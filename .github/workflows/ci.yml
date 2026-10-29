@@ -1,8 +1,8 @@
 name: ci
 
+# Paused: manual runs only. To resume, restore `push:` and `pull_request:` triggers.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   check:
