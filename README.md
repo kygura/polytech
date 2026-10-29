@@ -45,3 +45,11 @@ Live trading has shipped. In `git log`:
 - Research profiles, market name search, sweep and pod timeout fixes (a1d4016).
 
 `TASKS.md` describes the original phase 1-5 build and is outdated where it says execution is refused server-side and no wallet key handling exists. Rev 6 of `SPEC.md` is current.
+
+## Paused
+
+The project is paused in three places. Resume in this order, so nothing runs against a dead database:
+
+1. Supabase: restore the `polytech` project (`yocphnzilmbnfsueqemn`) from its dashboard.
+2. Vercel: unpause the `polytech` project from its dashboard. This brings back the site and the daily crons in `apps/web/vercel.json`.
+3. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.
