@@ -26,6 +26,10 @@ export const hostedDb = (): boolean => !process.env.DB_FILE && !!process.env.TUR
 function localUrl(): string {
   const f = process.env.DB_FILE ?? resolve(here, "../../../.data/polytech.db");
   if (f === ":memory:" || f.startsWith("file:")) return f;
+  // Vercel's filesystem is read-only: without Turso credentials the fallback would die in mkdir with an opaque ENOENT.
+  if (process.env.VERCEL && !process.env.DB_FILE) {
+    throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN are not set in this Vercel environment (preview and production need them); no local database file on Vercel.");
+  }
   mkdirSync(dirname(f), { recursive: true });
   return `file:${f}`;
 }
