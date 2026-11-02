@@ -48,12 +48,12 @@ Live trading has shipped. In `git log`:
 
 ## Paused
 
-The project is paused on Vercel and in GitHub Actions, and its database has moved from Supabase (Postgres) to Turso (libSQL). Resume in this order, so nothing runs against a missing or empty database:
+GitHub Actions is paused (scout heartbeat, CI). The database has moved from Supabase (Postgres, now paused) to Turso (libSQL), connected to the Vercel project by the Turso integration, which sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for preview and production. Turso starts empty: the first scout kick sweeps the markets back in; the Supabase theses, journal and paper book are not carried over (to carry them over, see the next section, before step 2). Resume in this order, so nothing runs against a missing or unmigrated database:
 
-1. Turso: the `polytech` database exists and is migrated: `cd packages/db && TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... bun run db:migrate`. To keep the Supabase data, copy it now (next section).
-2. Vercel env: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set, `DATABASE_URL` removed. With no Upstash vars, locks and rate limits use the database's `kv` table.
-3. Vercel: unpause the `polytech` project from its dashboard. This brings back the site and the daily crons in `apps/web/vercel.json`.
-4. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.
+1. Vercel env: the two Turso vars present; remove `DATABASE_URL` and the Supabase integration's `POSTGRES_*` / `SUPABASE_*` vars (nothing reads them now). With no Upstash vars, locks and rate limits use the database's `kv` table.
+2. Deploy this commit to production (merge it to master). Production builds migrate Turso before building (`apps/web/scripts/migrate-deploy.ts`, the `buildCommand` in `apps/web/vercel.json`), and the build log must say `db: migrations applied to the hosted database`; anything else means it didn't see `TURSO_DATABASE_URL`. Env changes only reach new deployments: a dashboard Redeploy of the old production deployment rebuilds the Postgres code.
+3. Check that the production deployment is this commit's and `/api/status` answers.
+4. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both. A kick every 30 min sweeps and refreshes the watchlist books; the full pass (every kept market's book, screen, research) runs every 2 h or when the sweep finds new or closed markets (`apps/web/lib/cadence.ts`).
 
 ## Moving data off Supabase
 
@@ -64,4 +64,4 @@ cd packages/db
 PG_URL=postgresql://... TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... bun run db:copy-from-postgres
 ```
 
-It migrates the target, then reads every schema table from the Postgres table of the same name (referenced tables first) and inserts in chunks with `ON CONFLICT DO NOTHING`, so a rerun only adds missing rows. Timestamps become epoch ms, `date` becomes `YYYY-MM-DD`, bigint ids become numbers, jsonb becomes JSON text; Postgres columns the schema no longer has are left behind with a warning. It ends with per-table counts (Postgres, before, inserted, after) and exits 1 if a table has fewer rows than its source. Run it before step 3: once the app writes to Turso, a Postgres row whose id is already taken there is skipped. Without `TURSO_DATABASE_URL` it fills the local file instead, which makes a dry run. Once the counts match, Supabase can be paused again.
+It migrates the target, then reads every schema table from the Postgres table of the same name (referenced tables first) and inserts in chunks with `ON CONFLICT DO NOTHING`, so a rerun only adds missing rows. Timestamps become epoch ms, `date` becomes `YYYY-MM-DD`, bigint ids become numbers, jsonb becomes JSON text; Postgres columns the schema no longer has are left behind with a warning. It ends with per-table counts (Postgres, before, inserted, after) and exits 1 if a table has fewer rows than its source. Run it after a migrate and before step 2's deploy: once the app writes to Turso, a Postgres row whose id is already taken there is skipped (and still counts as present). Without `TURSO_DATABASE_URL` it fills the local file instead, which makes a dry run. Pause Supabase again once the counts match.

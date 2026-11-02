@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { readdirSync, readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { getDb, insertSnapshots, latestSnapshot, memoryKv, migrate, schema as s } from "./index";
 
@@ -65,6 +66,19 @@ describe("db (libsql memory)", () => {
     expect((await db.select().from(s.paperOrders))[0]).toMatchObject({ status: "working", filledShares: 0, limitPrice: null, triggeredAt: null });
     for (const t of Object.values(s)) expect((await db.select().from(t)).length).toBeGreaterThan(0);
     expect((await db.select().from(s.theses))[0]?.catalysts).toEqual(["x"]);
+  });
+});
+
+describe("migrations", () => {
+  it("guard every CREATE TABLE / INDEX with IF NOT EXISTS and DROP INDEX with IF EXISTS (CLAUDE.md)", () => {
+    const dir = new URL("../drizzle/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const sql = readFileSync(new URL(f, dir), "utf8");
+      expect(sql.match(/\bCREATE\s+(UNIQUE\s+)?(TABLE|INDEX)\s+(?!\s|IF NOT EXISTS\b)/gi), f).toBeNull();
+      expect(sql.match(/\bDROP\s+INDEX\s+(?!\s|IF EXISTS\b)/gi), f).toBeNull();
+    }
   });
 });
 
