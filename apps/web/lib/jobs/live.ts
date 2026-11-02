@@ -2,7 +2,7 @@ import { autoAllowed, checkOrder, effectiveMode, exitDecision, gtdExpiry, liveli
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, notInArray, notLike, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, notInArray, sql } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode, downgradeOn } from "./autonomy";
 import { today, withLock, type Deps } from "./deps";
@@ -16,6 +16,8 @@ const TTL = 15 * MIN; // SPEC: proposals expire after 15 min (core proposalExpir
 const tickOf = (m: Pick<Row, "tickSize">) => m.tickSize ?? 0.01;
 const onGrid = (x: number, tick: number) => Math.abs(x / tick - Math.round(x / tick)) <= 1e-6;
 const SHARE_STEP = 100; // shares rounded down to 0.01 so cost never exceeds the risk-checked sizeUsd
+/** Not a neg-risk set leg (thesisId `set:...`). GLOB, not LIKE: SQLite LIKE ignores ASCII case. */
+const notSetLeg = sql`${s.orders.thesisId} not glob 'set:*'`;
 
 type Proposal = typeof s.proposals.$inferSelect;
 type Row = typeof s.markets.$inferSelect;
@@ -34,7 +36,7 @@ function updated(p: Pick<Proposal, "id">, state: string, extra: { reason?: strin
   publish("proposal.updated", { id: p.id, state: uiState(state), ...extra });
 }
 
-/** CAS on status: only a row still in `from` changes. Returns false when someone else got there first. Neon HTTP has no transactions. */
+/** CAS on status: only a row still in `from` changes (one atomic statement, no transaction needed). Returns false when someone else got there first. */
 async function cas(d: Pick<Deps, "db">, id: string, from: string, set: Partial<Proposal>) {
   return (await d.db.update(s.proposals).set(set).where(and(eq(s.proposals.id, id), eq(s.proposals.status, from))).returning({ id: s.proposals.id })).length === 1;
 }
@@ -51,7 +53,7 @@ export async function halted(d: Pick<Deps, "db">) {
 
 /** orderId -> shares filled so far (live book). */
 export async function liveFilled(db: Deps["db"]) {
-  const rows = await db.select({ o: s.fills.orderId, n: sql<number>`sum(${s.fills.size})::float8` }).from(s.fills).where(eq(s.fills.paper, false)).groupBy(s.fills.orderId);
+  const rows = await db.select({ o: s.fills.orderId, n: sql<number>`sum(${s.fills.size})` }).from(s.fills).where(eq(s.fills.paper, false)).groupBy(s.fills.orderId);
   return new Map(rows.map((r) => [r.o, r.n]));
 }
 /**
@@ -72,7 +74,7 @@ export async function liveMode(d: Pick<Deps, "db" | "settings">, m: Row): Promis
 const FALLBACK: Record<string, string> = { STRUCTURAL_NOT_AUTO: "STRUCTURAL_AUTO_OFF", L3_PER_TRADE: "PER_TRADE", L3_DAILY_NOTIONAL: "DAILY_AUTO_NOTIONAL", CATEGORY_NOT_ALLOWED: "CATEGORY_NOT_ALLOWED" };
 /** Notional of auto-sent orders created today (rejected/cancelled excluded). Read under the live-send lock so two auto sends cannot both pass the daily cap. */
 async function autoToday(d: Pick<Deps, "db" | "now">) {
-  const [r] = await d.db.select({ n: sql<number>`coalesce(sum(${s.orders.limitPrice} * ${s.orders.size}), 0)::float8` }).from(s.orders)
+  const [r] = await d.db.select({ n: sql<number>`coalesce(sum(${s.orders.limitPrice} * ${s.orders.size}), 0)` }).from(s.orders)
     .where(and(eq(s.orders.paper, false), eq(s.orders.approval, "auto"), eq(s.orders.side, "BUY"), gte(s.orders.createdAt, new Date(`${today(d.now())}T00:00:00Z`)), notInArray(s.orders.status, ["rejected", "cancelled"])));
   return r!.n;
 }
@@ -171,7 +173,7 @@ async function autoSent({ p, tk, question, side }: Exclude<Inserted, string>, d:
 
 /** Entry orders still resting for a killed thesis, or one superseded by a newer thesis (re-research): cancel the unfilled remainder. Failures stay live for the next run. */
 async function cancelStaleEntries(d: Deps) {
-  const open = await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), eq(s.orders.status, "live"), isNotNull(s.orders.clobOrderId), notLike(s.orders.thesisId, "set:%")));
+  const open = await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), eq(s.orders.status, "live"), isNotNull(s.orders.clobOrderId), notSetLeg));
   if (!open.length) return;
   const ths = await d.db.select().from(s.theses).where(inArray(s.theses.conditionId, [...new Set(open.map((o) => o.conditionId))])).orderBy(desc(s.theses.createdAt));
   const latest = new Map<string, string>();
@@ -200,7 +202,7 @@ async function proposeExits(d: Deps, top: Mode, skip: (r: string) => void) {
   const book = await openBook(db, false);
   if (!book.length) return 0;
   const toks = book.map((x) => x.p.tokenId), conds = [...new Set(book.map((x) => x.p.conditionId))];
-  const entries = await db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), notLike(s.orders.thesisId, "set:%"), inArray(s.orders.tokenId, toks))).orderBy(desc(s.orders.createdAt));
+  const entries = await db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), notSetLeg, inArray(s.orders.tokenId, toks))).orderBy(desc(s.orders.createdAt));
   const ths = await db.select().from(s.theses).where(inArray(s.theses.conditionId, conds)).orderBy(desc(s.theses.createdAt));
   const exits = await db.select({ c: s.proposals.conditionId }).from(s.proposals).where(and(eq(s.proposals.kind, "exit"), inArray(s.proposals.status, ["pending", "approved", "rejected"]), inArray(s.proposals.conditionId, conds)));
   const selling = await db.select({ t: s.orders.tokenId }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "SELL"), inArray(s.orders.status, LIVE_OPEN), inArray(s.orders.tokenId, toks)));
@@ -360,7 +362,7 @@ async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decisio
 
   // Double-send guard = the pending->approved CAS (one winner) + an order row written before place that is never re-sent while sending/unknown.
   // The (thesis, attempt) idempotency key below is an audit trail only, not the guard.
-  const attempt = (await d.db.select({ n: sql<number>`count(*)::int` }).from(s.orders).where(and(eq(s.orders.thesisId, p.thesisId), eq(s.orders.paper, false))))[0]!.n;
+  const attempt = (await d.db.select({ n: sql<number>`count(*)` }).from(s.orders).where(and(eq(s.orders.thesisId, p.thesisId), eq(s.orders.paper, false))))[0]!.n;
   const orderId = `ord_${crypto.randomUUID().slice(0, 12)}`;
   try {
     await d.db.insert(s.orders).values({

@@ -56,7 +56,7 @@ async function orderErrors(d: Pick<Deps, "db">) {
 
 /**
  * Pull trades + open orders; book new live fills (unique trade id => idempotent), move orders out of the open statuses, upsert live positions.
- * Order of writes (Neon HTTP has no tx): fill row first, then position. A crash between them loses a position update, which reconcile flags (fail-safe); the reverse would double-apply on retry.
+ * Order of writes (no transaction): fill row first, then position. A crash between them loses a position update, which reconcile flags (fail-safe); the reverse would double-apply on retry.
  */
 export async function syncFills(d: Deps) {
   const res = { fills: 0, updated: 0, failedUnknown: 0, error: undefined as string | undefined };
