@@ -5,7 +5,7 @@ import { count, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deps, latestSnaps, snapshotBooks, sweepUniverse, takeSnapshots, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const fx = createPm({ fixtures: true });
 let T = Date.parse("2026-10-15T12:00:00Z");

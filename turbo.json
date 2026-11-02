@@ -25,13 +25,14 @@
     }
   },
   "globalPassThroughEnv": [
-    "DATABASE_URL",
+    "TURSO_DATABASE_URL",
+    "TURSO_AUTH_TOKEN",
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
     "PM_FIXTURES",
     "ANTHROPIC_API_KEY",
     "EXA_API_KEY",
     "CRON_SECRET",
-    "PGLITE_DIR"
+    "DB_FILE"
   ]
 }

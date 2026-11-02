@@ -5,7 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { currentMode, decide, deps, orderUi, expireProposals, kill, propose, read, reconcileJob, rebaseline, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 delete process.env.NTFY_TOPIC;
 
 const MIN = 60_000;

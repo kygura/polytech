@@ -1,5 +1,8 @@
 {
-  "regions": ["arn1"],
+  "regions": [
+    "arn1"
+  ],
+  "buildCommand": "bun scripts/migrate-deploy.ts && turbo run build",
   "crons": [
     {
       "path": "/api/cron/sweep",

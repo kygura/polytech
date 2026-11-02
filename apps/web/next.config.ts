@@ -3,7 +3,7 @@ import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@pm/core", "@pm/pm", "@pm/agents", "@pm/db"],
-  serverExternalPackages: ["@electric-sql/pglite"],
+  serverExternalPackages: ["@libsql/client", "libsql"],
   // DESIGN 12.1.2: Fleet became Runs, Calibration became Journal.
   async redirects() {
     return [

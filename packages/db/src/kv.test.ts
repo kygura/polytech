@@ -1,17 +1,17 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { getDb, migrate } from "./client";
-import { pgKv, type Kv } from "./kv";
+import { dbKv, type Kv } from "./kv";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let kv: Kv;
 
 beforeAll(async () => {
   await migrate();
-  kv = pgKv(getDb());
-}, 60_000); // PGlite migrate is slow under the full parallel test run
+  kv = dbKv(getDb());
+}, 60_000); // migrate can be slow under the full parallel test run
 
-describe("pgKv (kv table)", () => {
+describe("dbKv (kv table)", () => {
   it("lock: one holder; release only frees our own hold; an expired hold can be taken over", async () => {
     const a = await kv.lock("job", 60_000);
     expect(a).not.toBeNull();

@@ -4,7 +4,7 @@ import { count, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deps, latestSnaps, takeSnapshots, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 // 250 synthetic markets (> the 200-market crowd cap) behind a stub CLOB / Data API.
 const N = 250;

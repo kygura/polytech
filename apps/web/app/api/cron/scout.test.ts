@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 process.env.PM_FIXTURES = "1";
 process.env.CRON_SECRET = "cron-secret-for-tests-0123456789abcdef";
 delete process.env.ANTHROPIC_API_KEY;

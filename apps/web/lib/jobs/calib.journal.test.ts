@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { calibrateNightly, deps, getSettings, journalNightly, putSettings, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const DAY = 864e5;
 let T = Date.parse("2026-10-15T12:00:00Z");

@@ -3,7 +3,7 @@ import {
   crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
-import { pruneScreens, schema as s, type Db } from "@pm/db";
+import { newestSnapshots, pruneScreens, schema as s, type Db } from "@pm/db";
 import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -48,15 +48,16 @@ const mirrorKey = (q: string) => {
 };
 
 type SnapRow = typeof s.snapshots.$inferSelect;
+const IN_MAX = 10_000;
 /**
  * Latest snapshot per condition. History rows are skipped while the book is unchanged, so the row's age is the newer of its own ts and
  * market_latest.ts (written every run, after the history row): "this book, last seen at".
  */
-export const latestSnaps = async (db: Db, ids?: string[]) => {
+export const latestSnaps = async (db: Db, ids?: string[]): Promise<Map<string, SnapRow>> => {
+  // SQLite binds at most 32766 params per statement: a whole-universe id list goes in slices (each market is in exactly one)
+  if (ids && ids.length > IN_MAX) return new Map((await Promise.all(chunks(ids, IN_MAX).map((c) => latestSnaps(db, c)))).flatMap((m) => [...m]));
   const [rows, seen] = await Promise.all([
-    db.selectDistinctOn([s.snapshots.conditionId]).from(s.snapshots)
-      .where(ids ? inArray(s.snapshots.conditionId, ids) : undefined)
-      .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts)),
+    newestSnapshots(db, ids),
     db.select({ c: s.marketLatest.conditionId, ts: s.marketLatest.ts }).from(s.marketLatest).where(ids ? inArray(s.marketLatest.conditionId, ids) : undefined),
   ]);
   const at = new Map(seen.map((x) => [x.c, x.ts]));
@@ -252,8 +253,10 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       } satisfies typeof s.screens.$inferInsert];
     });
     // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen.
-    const parts = chunks(out, 500);
-    await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
+    // One batch (a transaction in one request) rather than an interactive transaction: no write lock is held across awaits, which on a
+    // local file would make every other writer fail with SQLITE_BUSY meanwhile.
+    const [head, ...tail] = chunks(out, 500).map((c) => d.db.insert(s.screens).values(c));
+    if (head) await d.db.batch([head, ...tail]);
 
     // market_latest carries the screen output for the DSL / screener: priority, structural kinds, opportunity (sized live theses). Derived data: a failure here must not lose the screens above.
     let latest = true;
@@ -282,7 +285,7 @@ type Opportunity = NonNullable<(typeof s.marketLatest.$inferInsert)["opportunity
 
 /** Sizing of every live thesis against the stored book (both sides, fees per level, exit depth, 24h flow, extremize). Only rows that would trade (stake > 0). */
 async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], now: number) {
-  const th = await d.db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt));
+  const th = await d.db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), gt(s.theses.expiresAt, new Date(now)))).orderBy(desc(s.theses.createdAt));
   const latest = new Map<string, (typeof th)[number]>();
   for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
   if (!latest.size) return new Map<string, Opportunity>();
@@ -345,6 +348,6 @@ export async function shortlist(db: Db, per = 20): Promise<{ conditionId: string
 export async function watchlistIds(d: Pick<Deps, "db" | "now">): Promise<string[] | undefined> {
   const run = await latestScreens(d.db);
   if (!run.length) return undefined;
-  const th = await d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(sql`${s.theses.expiresAt} > ${new Date(d.now())}`);
+  const th = await d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(gt(s.theses.expiresAt, new Date(d.now())));
   return [...new Set([...run.map((r) => r.conditionId), ...th.map((t) => t.c)])];
 }

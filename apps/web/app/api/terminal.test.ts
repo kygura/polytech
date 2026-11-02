@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY;
 

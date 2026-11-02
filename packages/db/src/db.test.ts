@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
+import { readdirSync, readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { getDb, insertSnapshots, latestSnapshot, memoryKv, migrate, schema as s } from "./index";
 
-describe("db (pglite memory)", () => {
+describe("db (libsql memory)", () => {
   beforeAll(async () => {
-    process.env.PGLITE_DIR = "memory://";
+    process.env.DB_FILE = ":memory:";
     await migrate();
   }, 60_000);
 
@@ -68,6 +69,19 @@ describe("db (pglite memory)", () => {
   });
 });
 
+describe("migrations", () => {
+  it("guard every CREATE TABLE / INDEX with IF NOT EXISTS and DROP INDEX with IF EXISTS (CLAUDE.md)", () => {
+    const dir = new URL("../drizzle/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const sql = readFileSync(new URL(f, dir), "utf8");
+      expect(sql.match(/\bCREATE\s+(UNIQUE\s+)?(TABLE|INDEX)\s+(?!\s|IF NOT EXISTS\b)/gi), f).toBeNull();
+      expect(sql.match(/\bDROP\s+INDEX\s+(?!\s|IF EXISTS\b)/gi), f).toBeNull();
+    }
+  });
+});
+
 describe("memory kv", () => {
   it("lock is exclusive, releasable, and expires", async () => {
     const kv = memoryKv();
@@ -115,7 +129,7 @@ describe("memory kv", () => {
 
 describe("process-wide singletons", () => {
   it("separate module instances (next dev RSC vs route handler) share one db and one kv", async () => {
-    process.env.PGLITE_DIR = "memory://";
+    process.env.DB_FILE = ":memory:";
     const { vi } = await import("vitest");
     vi.resetModules();
     const a = await import("./client"), ka = await import("./kv");

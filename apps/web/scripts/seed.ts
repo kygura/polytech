@@ -1,4 +1,4 @@
-// Local demo: fixtures -> sweep -> snapshots -> screen -> 8 fake-runner pods -> L1 -> paper fills. Uses .data/pglite unless DATABASE_URL.
+// Local demo: fixtures -> sweep -> snapshots -> screen -> 8 fake-runner pods -> L1 -> paper fills. Uses .data/polytech.db (DB_FILE overrides) unless TURSO_DATABASE_URL.
 process.env.PM_FIXTURES ??= "1";
 
 async function main() {
@@ -22,6 +22,6 @@ async function main() {
   const researched = [...small, ...size].filter((w) => w.thesisId);
   console.log(`watchlist small-cap=${small.length} size=${size.length} structural=${structural.length}`);
   console.log(`theses=${researched.length} paper fills=${book.fills.length} open positions=${book.summary.open}`);
-  process.exit(0); // PGlite keeps the event loop alive
+  process.exit(0); // open handles (db client, kv, timers) would keep the event loop alive
 }
 main().catch((e) => { console.error(e); process.exit(1); });

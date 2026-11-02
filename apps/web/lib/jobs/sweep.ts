@@ -2,7 +2,7 @@ import { rulesHash } from "@pm/agents";
 import { bookHash, bookMetrics, classifyResolutionSource, holderMetrics, tradeMetrics, type TradeInput } from "@pm/core";
 import { insertSnapshots, pruneMarkets, pruneSnapshots, referencedMarkets, schema as s } from "@pm/db";
 import type { Market as PmMarket, Trade } from "@pm/pm";
-import { and, eq, gte, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -50,13 +50,18 @@ export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; reso
 };
 
 const t = s.markets;
-/** liquidity / volume churn every minute: rewrite only when the value moved > 5% (or appeared). */
-const moved = (c: { name: string }) =>
-  sql`(excluded."${sql.raw(c.name)}" is not null and (${sql.raw(`"markets"."${c.name}"`)} is null or abs(excluded."${sql.raw(c.name)}" - ${sql.raw(`"markets"."${c.name}"`)}) > 0.05 * greatest(abs(${sql.raw(`"markets"."${c.name}"`)}), 1)))`;
 const stored = (c: { name: string }) => sql.raw(`"markets"."${c.name}"`);
+/** liquidity / volume churn every minute: rewrite only when the value moved > 5% (or appeared). Scalar max() is NULL on a NULL arg, but it is only reached with a stored value. */
+const moved = (c: { name: string }) =>
+  sql`(${ex(c)} is not null and (${stored(c)} is null or abs(${ex(c)} - ${stored(c)}) > 0.05 * max(abs(${stored(c)}), 1)))`;
 // the columns whose change justifies a write. rules is covered by rules_hash. fee_rate / fee_exponent compare the coalesced value, tick_size too.
+// `is not` is the null-safe "distinct from", one per column
 const SAME = [t.eventId, t.question, t.category, t.tags, t.endDate, t.negRiskGroup, t.status, t.pmId, t.yesTokenId, t.noTokenId, t.rulesHash, t.heuristicR, t.resolutionSource, t.negRiskAugmented];
-const changed = sql`((${sql.join(SAME.map(stored), sql`, `)}, ${stored(t.tickSize)}, ${stored(t.feeRate)}, ${stored(t.feeExponent)}) is distinct from (${sql.join(SAME.map(ex), sql`, `)}, coalesce(excluded."tick_size", ${stored(t.tickSize)}), coalesce(excluded."fee_rate", ${stored(t.feeRate)}), coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})) or ${moved(t.liquidity)} or ${moved(t.vol24h)})`;
+const changed = sql`(${sql.join([
+  ...SAME.map((c) => sql`${stored(c)} is not ${ex(c)}`),
+  ...[t.tickSize, t.feeRate, t.feeExponent].map((c) => sql`${stored(c)} is not coalesce(${ex(c)}, ${stored(c)})`),
+  moved(t.liquidity), moved(t.vol24h),
+], sql` or `)})`;
 
 /** Insert-or-update a page of markets; rows whose meaningful columns are unchanged are not written (not returned either). Returns the written condition ids. */
 export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inferInsert)[]): Promise<string[]> {
@@ -321,7 +326,7 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
     // watched = shortlist (priority>0 or pinned) + live theses + open positions; unwatched markets keep only their latest row
     const [sl, th, pos] = await Promise.all([
       shortlist(d.db, 20),
-      d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(sql`${s.theses.expiresAt} > ${new Date(now)}`),
+      d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(gt(s.theses.expiresAt, new Date(now))),
       d.db.selectDistinct({ c: s.positions.conditionId }).from(s.positions).where(isNull(s.positions.closedAt)),
     ]);
     await pruneSnapshots(d.db, [...new Set([...sl.map((x) => x.conditionId), ...th.map((x) => x.c), ...pos.map((x) => x.c)])], now);

@@ -1,12 +1,13 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
+import { sql } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, screenAll, snapshotBooks, sweepUniverse, type Deps } from "./index";
 import { detectStructural, heuristicR, preRank, smallCapTooBusy, type Listed } from "./screen";
 import { DEFAULT_APP_SETTINGS } from "./settings";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 type Rows = Parameters<typeof detectStructural>[0];
 const row = (id: string, o: { q?: string; end?: number; group?: string; bid: number; ask: number }) => ({
@@ -164,8 +165,9 @@ describe("screenAll LLM budget", () => {
 
   it("screens insert is all-or-nothing", async () => {
     await reset();
-    const db = new Proxy(d.db, { get: (o, k) => k === "transaction" ? (cb: (tx: unknown) => Promise<unknown>) => o.transaction((tx) => cb(new Proxy(tx, { get: (x, m) => m === "insert" ? (tbl: unknown) => { const q = x.insert(tbl as never); return tbl === s.screens ? { values: async (v: never) => { await q.values(v); throw new Error("boom"); } } : q; } : Reflect.get(x, m).bind?.(x) ?? Reflect.get(x, m) }))) : Reflect.get(o, k).bind?.(o) ?? Reflect.get(o, k) });
-    await expect(screenAll({ ...d, db } as Deps)).rejects.toThrow("boom");
+    // a statement failing after the screens chunks (NOT NULL condition_id): the whole batch rolls back
+    const db = new Proxy(d.db, { get: (o, k) => k === "batch" ? (qs: Parameters<typeof o.batch>[0]) => o.batch([...qs, o.run(sql`insert into ${s.screens} (condition_id) values (null)`)]) : Reflect.get(o, k).bind?.(o) ?? Reflect.get(o, k) });
+    await expect(screenAll({ ...d, db } as Deps)).rejects.toThrow("NOT NULL constraint failed");
     expect(await d.db.select().from(s.screens)).toHaveLength(0);
   });
 

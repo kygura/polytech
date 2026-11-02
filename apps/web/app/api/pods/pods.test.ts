@@ -2,7 +2,7 @@ import { schema as s } from "@pm/db";
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
 

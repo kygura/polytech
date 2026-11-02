@@ -157,7 +157,7 @@ export async function paperBook(d: Deps) {
       if ((await currentMode(db)) !== "L1") { reject("MODE_CHANGED"); break; } // killed mid-run
       const key = `${t.id}:paper`;
       if ((await db.select({ id: s.orders.id }).from(s.orders).where(eq(s.orders.idempotencyKey, key))).length) { reject("ALREADY_FILLED"); continue; }
-      // Neon HTTP has no tx: position -> fill -> order (idempotency key) last, so a crash never leaves an order without its position
+      // no transaction: position -> fill -> order (idempotency key) last, so a crash never leaves an order without its position
       const orderId = id("ord");
       const pos = applyFill({ shares: 0, avgCost: 0, realizedPnl: 0 }, { side: "buy", shares: f.shares, price: f.avgPrice, fee: f.fee });
       await db.insert(s.positions).values({ conditionId: t.conditionId, tokenId, size: pos.shares, avgCost: pos.avgCost, realizedPnl: 0, openedAt: new Date(now), paper: true });

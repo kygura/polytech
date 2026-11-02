@@ -1,9 +1,23 @@
-import { and, desc, eq, isNotNull, lt, notExists, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, notExists, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./client";
 import { alerts, journal, marketFlags, marketLatest, markets, orders, outcomes, paperOrders, pods, positions, proposalSets, proposals, screens, snapshots, theses, triage } from "./schema";
 
 export const latestSnapshot = async (db: Db, conditionId: string) =>
   (await db.select().from(snapshots).where(eq(snapshots.conditionId, conditionId)).orderBy(desc(snapshots.ts)).limit(1))[0];
+
+/**
+ * Postgres DISTINCT ON replacement: ids of the newest row per market (by ts, ties to the higher id) among rows matching `where`.
+ * Use as `inArray(t.id, newestPer(db, t, where))`.
+ */
+export function newestPer(db: Db, t: typeof snapshots | typeof screens, where?: SQL) {
+  const r = db.select({ id: t.id, rn: sql<number>`row_number() over (partition by ${t.conditionId} order by ${t.ts} desc, ${t.id} desc)`.as("rn") })
+    .from(t as typeof snapshots).where(where).as("newest");
+  return db.select({ id: r.id }).from(r).where(eq(r.rn, 1));
+}
+
+/** Newest snapshot row per market (all markets, or `ids`). */
+export const newestSnapshots = (db: Db, ids?: string[]) =>
+  db.select().from(snapshots).where(inArray(snapshots.id, newestPer(db, snapshots, ids ? inArray(snapshots.conditionId, ids) : undefined)));
 
 export const insertSnapshots = (db: Db, rows: (typeof snapshots.$inferInsert)[]) => db.insert(snapshots).values(rows);
 

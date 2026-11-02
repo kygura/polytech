@@ -5,7 +5,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { cancelPaperOrder, deps, latestSnaps, listPaperOrders, placePaperOrder, read, researchMarket, restingBuy, restingSell, sellFill, snapshotBooks, stopHit, sweepUniverse, triageMarkets, triageRules, workPaperOrders, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 let d: Deps, ok: string[];
 const calls: string[] = [];
