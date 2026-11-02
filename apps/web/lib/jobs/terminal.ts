@@ -62,7 +62,7 @@ export async function journalView(r: ReadDeps, o: { category?: string; model?: s
       o.model ? eq(s.journal.model, o.model) : undefined,
       o.days ? gte(s.theses.createdAt, new Date(r.now() - o.days * DAY)) : undefined,
     ))
-    .orderBy(desc(sql`coalesce(${s.theses.createdAt}, ${s.journal.resolvedAt})`));
+    .orderBy(sql`coalesce(${s.theses.createdAt}, ${s.journal.resolvedAt}) desc nulls first`);
   const jr: JournalRow[] = rows.map(({ j }) => ({ ...j, model: j.model ?? "unknown", pHat: j.pHat!, side: j.side === "NO" ? "NO" : "YES", result: j.result === "YES" || j.result === "NO" ? j.result : null }));
   const [cal, st] = await Promise.all([calibration(r, { category: o.category, model: o.model, sinceDays: o.days }), getSettings(db)]);
   return { summary: summarize(jr), rows: jr.slice(0, 5000) /* the client computes rolling Brier / drift / breakdown from these: no 200-row cap */, bins: cal.bins, suggested: st.suggested };

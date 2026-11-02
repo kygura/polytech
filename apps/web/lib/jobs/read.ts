@@ -1,7 +1,7 @@
 import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, ruleText, type Deps } from "./deps";
@@ -234,7 +234,7 @@ export async function researchLive(r: ReadDeps, o: { ids?: string[]; limit?: num
   const judge = new Map(judged.map((j) => [j.podId, j.out as { p_hat?: number; thesis?: string; confidence?: number } | null]));
   const day = new Date(now).toISOString().slice(0, 10);
   const sp = (await db.select().from(s.spend).where(eq(s.spend.day, day)))[0];
-  const [{ n: podsToday }] = (await db.select({ n: sql<number>`count(*)::int` }).from(s.pods).where(gte(s.pods.startedAt, new Date(`${day}T00:00:00Z`)))) as [{ n: number }];
+  const [{ n: podsToday }] = (await db.select({ n: count() }).from(s.pods).where(gte(s.pods.startedAt, new Date(`${day}T00:00:00Z`)))) as [{ n: number }];
   return {
     budget: {
       running: pods.filter((x) => x.p.status === "running").length, maxRunning: st.budget.maxConcurrentSandboxes,
@@ -363,14 +363,14 @@ export async function bookLive(r: ReadDeps) {
  * modeled = side mid at proposal; approved = a human sent it. Edge: realized P&L of live positions closed in the last 30 d per share bought in that window, in cents.
  */
 export async function liveGateStats(db: ReadDeps["db"], now: Date) {
-  const rows = await db.select({ o: s.orders, px: sql<number>`(sum(${s.fills.price} * ${s.fills.size}) / sum(${s.fills.size}))::float8`, last: sql<Date>`max(${s.fills.ts})`, n: sql<number>`sum(${s.fills.size})::float8` })
+  const rows = await db.select({ o: s.orders, px: sql<number>`cast(sum(${s.fills.price} * ${s.fills.size}) as real) / sum(${s.fills.size})`, last: sql<Date>`max(${s.fills.ts})`.mapWith(s.fills.ts), n: sql<number>`sum(${s.fills.size})` })
     .from(s.orders).innerJoin(s.fills, eq(s.fills.orderId, s.orders.id)).where(and(eq(s.orders.paper, false), isNull(s.orders.setId))).groupBy(s.orders.id);
   const props = new Map((await db.select({ id: s.proposals.id, p: s.proposals.priceAtProposal }).from(s.proposals).where(isNotNull(s.proposals.orderId))).map((x) => [x.id, x.p]));
-  const trades = rows.map(({ o, px, last }) => ({ approved: o.approval === "user", side: o.side as "BUY" | "SELL", modeledPrice: (o.proposalId && props.get(o.proposalId)) || o.limitPrice, fillPrice: px, at: new Date(last) }));
+  const trades = rows.map(({ o, px, last }) => ({ approved: o.approval === "user", side: o.side as "BUY" | "SELL", modeledPrice: (o.proposalId && props.get(o.proposalId)) || o.limitPrice, fillPrice: px, at: last }));
   const g = gateStats(trades, now);
   const since = new Date(now.getTime() - 30 * 86_400_000);
-  const bought = rows.filter((x) => x.o.side === "BUY" && new Date(x.last) >= since).reduce((a, x) => a + x.n, 0);
-  const pnl = (await db.select({ v: sql<number>`coalesce(sum(${s.positions.realizedPnl}), 0)::float8` }).from(s.positions).where(and(eq(s.positions.paper, false), gte(s.positions.closedAt, since))))[0]!.v;
+  const bought = rows.filter((x) => x.o.side === "BUY" && x.last >= since).reduce((a, x) => a + x.n, 0);
+  const pnl = (await db.select({ v: sql<number>`coalesce(sum(${s.positions.realizedPnl}), 0)` }).from(s.positions).where(and(eq(s.positions.paper, false), gte(s.positions.closedAt, since))))[0]!.v;
   return { ...g, avgSlippageC: g.avgSlippage == null ? null : g.avgSlippage * 100, realizedEdge30dC: bought > 0 ? (pnl / bought) * 100 : null, realizedEdge30d: bought > 0 ? pnl / bought : 0 };
 }
 
@@ -409,7 +409,7 @@ export async function proposals(r: ReadDeps) {
   const q = () => db.select({ p: s.proposals, m: s.markets }).from(s.proposals).innerJoin(s.markets, eq(s.markets.conditionId, s.proposals.conditionId));
   const [open, recent] = await Promise.all([
     q().where(inArray(s.proposals.status, ["pending", "approved"])).orderBy(asc(s.proposals.expiresAt)),
-    q().where(inArray(s.proposals.status, ["sent", "rejected", "expired", "failed"])).orderBy(desc(s.proposals.decidedAt)).limit(10),
+    q().where(inArray(s.proposals.status, ["sent", "rejected", "expired", "failed"])).orderBy(sql`${s.proposals.decidedAt} desc nulls first`).limit(10),
   ]);
   const ids = [...new Set([...open, ...recent].map((x) => x.p.conditionId))];
   const snaps = ids.length ? await latestSnaps(db, ids) : new Map<string, never>();
