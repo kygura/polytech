@@ -273,7 +273,8 @@ describe.each(backends)("store on %s", (_name, mk) => {
   });
 });
 
-describe.runIf(!!url)("redis: a commit the transport sends twice applies once", () => {
+// registered only with a Redis to talk to: the describe body opens the connection
+if (url) describe("redis: a commit the transport sends twice applies once", () => {
   // The Upstash client resends a request when fetch throws after the server ran it; ioredis resends in-flight commands after a
   // reconnect. Model that: every commit script call runs twice and the caller sees the second reply.
   const r = new Redis(url!, { maxRetriesPerRequest: 2 });

@@ -1,5 +1,6 @@
 import type { Filter, Range, SortField } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
+import { memo } from "./memo";
 
 // Screener query: a Filter compiled to a predicate and a comparator over joined rows (markets + market_latest + market_flags +
 // newest thesis per market). User values are only ever compared as data (substring / equality / numeric range): nothing is parsed
@@ -104,33 +105,37 @@ const newestTheses = (rows: ThesisRow[]) => {
   return out;
 };
 
-/** Every active market joined with its latest/flags rows and newest thesis: what `compileFilter` runs over. One round trip (parallel reads). */
-export async function screenerRows(db: Db): Promise<ScreenerJoin[]> {
+async function joinScreener(db: Db): Promise<ScreenerJoin[]> {
   const [mk, latest, flags, ths] = await Promise.all([db.markets.find("status", { status: "active" }), db.marketLatest.all(), db.marketFlags.all(), db.theses.all()]);
   const L = new Map(latest.map((x) => [x.conditionId, x])), F = new Map(flags.map((x) => [x.conditionId, x])), T = newestTheses(ths);
   return mk.map((m) => ({ m, ml: L.get(m.conditionId) ?? null, flags: F.get(m.conditionId) ?? null, thesis: T.get(m.conditionId) ?? null }));
 }
 
+const SCREENER_MEMO = "screener:rows", SCREENER_TTL_MS = 10_000;
+
+/**
+ * Every active market joined with its latest/flags rows and newest thesis: what `compileFilter` runs over. One round trip (parallel reads).
+ * On Redis each call is four full reads, so the joined rows are shared process-wide for 10 s (callers must not mutate them). The in-process
+ * backend (tests, local dev) is read fresh every time.
+ */
+export function screenerRows(db: Db): Promise<ScreenerJoin[]> {
+  return db.backend.kind === "redis" ? memo(SCREENER_MEMO, SCREENER_TTL_MS, () => joinScreener(db)) : joinScreener(db);
+}
+
 /**
  * d24c: YES mid now minus the YES mid 24 h ago, in cents. "24 h ago" = the newest snapshot at or before now - 24 h with a mid (snapshot rows
- * skip unchanged books, so an old row is still the right price). Null when the market has no snapshot that old. Per-market index reads,
- * batched; rows with a null mid are skipped by reading further back for just those markets.
+ * skip unchanged books, so an old row is still the right price). Null when the market has no snapshot that old. One batched read of the
+ * condMid index, which holds only rows with a mid.
  */
 export async function change24h(db: Db, ids: string[], now: number): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  let todo = [...new Set(ids)];
-  const max = new Date(now - DAY_MS);
-  for (let offset = 0, limit = 4; todo.length; offset += limit, limit *= 2) {
-    const got = await db.snapshots.findEach("condMid", todo.map((conditionId) => ({ conditionId })), { order: "desc", max, offset, limit });
-    const next: string[] = [];
-    todo.forEach((id, i) => {
-      const rows = got[i] ?? [];
-      const hit = rows.find((r) => r.mid != null);
-      if (hit) out.set(id, hit.mid!);
-      else if (rows.length === limit) next.push(id); // a full page of null mids: there may be an older row with one
-    });
-    todo = next;
-  }
+  const todo = [...new Set(ids)];
+  if (!todo.length) return out;
+  const got = await db.snapshots.findEach("condMid", todo.map((conditionId) => ({ conditionId })), { order: "desc", max: new Date(now - DAY_MS), limit: 1 });
+  todo.forEach((id, i) => {
+    const mid = got[i]?.[0]?.mid;
+    if (mid != null) out.set(id, mid);
+  });
   return out;
 }
 

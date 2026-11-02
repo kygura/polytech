@@ -33,11 +33,15 @@ export async function forecastRows(db: Db): Promise<ForecastRow[]> {
   });
 }
 
+/** Per-category confidence c over already-loaded forecast rows: pinned at 0.4 until 30 resolved (core), then skill vs market Brier. */
+export function confidenceFromRows(rows: ForecastRow[], category: string | null): number {
+  const a = aggregate(rows.filter((r) => r.category === (category ?? "other")), () => "all").all;
+  return a ? confidenceForCategory(a.n, a.brier, a.marketBrier) : 0.4;
+}
+
 /** Per-category confidence c: pinned at 0.4 until 30 resolved (core), then skill vs market Brier. */
 export async function categoryConfidence(db: Db, category: string | null): Promise<number> {
-  const rows = (await forecastRows(db)).filter((r) => r.category === (category ?? "other"));
-  const a = aggregate(rows, () => "all").all;
-  return a ? confidenceForCategory(a.n, a.brier, a.marketBrier) : 0.4;
+  return confidenceFromRows(await forecastRows(db), category);
 }
 
 /** Resolved markets (had a thesis or position, no outcome yet) -> `outcomes`. Everything else is computed on read. */

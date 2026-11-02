@@ -10,7 +10,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const b = await parseBody(req, Body);
   if (b.res) return b.res;
   const d = await getDeps(), id = (await params).id;
-  if (!(await read.marketDetail({ db: d.db, now: d.now }, id))) return notFound();
+  if (!(await d.db.markets.get(id))) return notFound(); // existence only: marketDetail would read the whole market page
   await read.setFlag(d, id, b.data);
   return json({ ok: true });
 }

@@ -86,13 +86,19 @@ async function buyInto(d: Deps, leg: Leg, shares: number, price: number, fee: nu
   await record(d, leg, shares, price, fee, now);
 }
 
-/** Take a sale out of the open positions, oldest first; fee charged on the first leg. Returns the realized P&L. */
+/**
+ * Take a sale of up to `shares` out of the open positions, oldest first; fee (for the full `shares`) scaled to what sold, charged on the first
+ * leg. Returns what actually sold (fewer than asked when positions shrank or closed meanwhile; 0 = nothing recorded), its fee and realized P&L.
+ */
 async function sellOut(d: Deps, leg: Leg, shares: number, price: number, fee: number, now: number) {
   const ids = (await openPositions(d, leg.tokenId)).map((p) => p.id);
-  // one transaction over the FIFO walk: re-reads the rows (versions checked at commit), so a concurrent fill or close cannot be lost
-  const pnl = await d.db.tx(async (tx) => {
-    let left = shares, pnl = 0, f = fee;
-    for (const p of (await tx.positions.getMany(ids)).filter((x) => x.paper && x.closedAt === null && x.tokenId === leg.tokenId)) {
+  // one transaction over the FIFO walk: re-reads the rows (versions checked at commit), so a concurrent fill or close cannot be lost. It can
+  // re-run on conflict against changed positions, so the shares sold come from the run that committed, not from the request.
+  const { pnl, sold } = await d.db.tx(async (tx) => {
+    const open = (await tx.positions.getMany(ids)).filter((x) => x.paper && x.closedAt === null && x.tokenId === leg.tokenId);
+    const sold = Math.min(shares, open.reduce((t, p) => t + p.size, 0));
+    let left = sold, pnl = 0, f = sold > 1e-9 ? (fee * sold) / shares : 0;
+    for (const p of open) {
       if (left <= 1e-9) break;
       const take = Math.min(p.size, left);
       const end = applyFill({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, { side: "sell", shares: take, price, fee: f });
@@ -101,10 +107,12 @@ async function sellOut(d: Deps, leg: Leg, shares: number, price: number, fee: nu
       left -= take;
       await tx.positions.update(p.id, { size: end.shares, realizedPnl: end.realizedPnl, ...(end.shares <= 1e-9 ? { closedAt: new Date(now) } : {}) });
     }
-    return pnl;
+    return { pnl, sold };
   });
-  await record(d, leg, shares, price, fee, now);
-  return pnl;
+  if (sold <= 1e-9) return { pnl: 0, sold: 0, fee: 0 };
+  const paid = (fee * sold) / shares;
+  await record(d, leg, sold, price, paid, now);
+  return { pnl, sold, fee: paid };
 }
 
 /**
@@ -161,10 +169,10 @@ export async function placePaperOrder(d: Deps, o: PaperOrder): Promise<PaperOrde
   const want = Math.min(o.shares!, held);
   const f = sellFill(bids.filter((l) => o.limit == null || l.price >= o.limit - 1e-9), want, feeRate, feeExp);
   if (f.shares <= 0 && o.limit == null) return fail("no buyers on the book");
-  const pnl = f.shares > 0 ? await sellOut(d, leg, f.shares, f.avgPrice, f.fee, now) : 0;
-  const left = want - f.shares;
+  const { pnl, sold, fee } = f.shares > 0 ? await sellOut(d, leg, f.shares, f.avgPrice, f.fee, now) : { pnl: 0, sold: 0, fee: 0 };
+  const left = want - sold;
   const working = o.limit != null && left >= DUST_SH ? await rest("limit", null, left) : undefined;
-  return { ok: true, side: "SELL", outcome: o.outcome, shares: f.shares, avgPrice: f.avgPrice, fee: f.fee, usd: f.shares * f.avgPrice, partial: !f.complete || f.shares < o.shares! - 1e-9, realizedPnl: pnl, ...(working ? { working } : {}) };
+  return { ok: true, side: "SELL", outcome: o.outcome, shares: sold, avgPrice: f.avgPrice, fee, usd: sold * f.avgPrice, partial: !f.complete || sold < o.shares! - 1e-9, realizedPnl: pnl, ...(working ? { working } : {}) };
 }
 
 /**
@@ -223,9 +231,9 @@ export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: b
     if (held <= 1e-9) { await close(r, "cancelled", "no shares left to sell"); res.cancelled++; continue; }
     const want = Math.min(r.shares ?? 0, held);
     const f = taker ? sellFill(bids, want, feeRate, feeExp) : restingSell(bids, want, r.limitPrice!);
-    if (f.shares > 0) await sellOut(d, leg, f.shares, f.avgPrice, f.fee, now);
-    const shares = want - f.shares, filledShares = r.filledShares + f.shares;
-    if (shares < DUST_SH) { await close(r, "filled", null, { shares: 0, filledShares, ...seen }); res.filled++; }
+    const { sold } = f.shares > 0 ? await sellOut(d, leg, f.shares, f.avgPrice, f.fee, now) : { sold: 0 };
+    const shares = want - sold, filledShares = r.filledShares + sold;
+    if (shares < DUST_SH && sold > 1e-9) { await close(r, "filled", null, { shares: 0, filledShares, ...seen }); res.filled++; } // nothing sold is never "filled"
     else { await db.paperOrders.update(r.id, { shares, filledShares, ...seen }); res.working++; }
   }
   return res;

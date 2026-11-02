@@ -114,7 +114,7 @@ export async function propose(d: Deps) {
     const held = new Set([...book.map((x) => x.p.conditionId), ...openOrders.map((o) => o.conditionId)]);
     // a category override lowers the mode per market: one candidate pass per live level up to the global mode
     const lv = await Promise.all(LIVE_MODES.slice(0, LIVE_MODES.indexOf(mode) + 1).map(async (m) => ({ m, ...(await candidates(d, m, held, mode)) })));
-    const mk = lv[0]!.mk;
+    const mk = new Map(lv.flatMap((x) => [...x.mk])); // each level's map holds only the markets its own thesis read touched
     // theses with any non-expired entry proposal (looked up for this run's candidates only, by the thesis index)
     const tids = [...new Set(lv.flatMap((x) => x.cands.map((t) => t.id)))];
     const props = await db.proposals.findEach("thesis", tids.map((thesisId) => ({ thesisId })));
@@ -131,7 +131,8 @@ export async function propose(d: Deps) {
     const snaps = await latestSnaps(db, cands.map((c) => c.t.conditionId));
 
     for (const { t, m: tmode } of cands) {
-      const row = mk.get(t.conditionId)!;
+      const row = mk.get(t.conditionId);
+      if (!row) { skip("NO_MARKET"); continue; }
       const a = assess(d, t, row, snaps.get(t.conditionId), now);
       if (!a.ok) { a.failed.forEach(skip); continue; }
       const { sz } = a;

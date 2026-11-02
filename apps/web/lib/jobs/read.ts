@@ -2,7 +2,7 @@ import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliab
 import { schema as s, type Db } from "@pm/db";
 import { createPm } from "@pm/pm";
 import { currentMode } from "./autonomy";
-import { categoryConfidence, forecastRows } from "./calib";
+import { confidenceFromRows, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, ruleText, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
 import { compileFilter, screenerRows } from "./markets";
@@ -160,7 +160,7 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
     db.theses.find("cond", { conditionId }, { order: "desc" }),
     db.marketFlags.get(conditionId),
     db.screens.first("cond", { conditionId }, { order: "desc" }),
-    db.snapshots.find("cond", { conditionId }, { order: "desc", limit: 500 }).then((xs) => xs.map((x) => ({ ts: x.ts, mid: x.mid }))),
+    db.snapshots.findFields("cond", { conditionId }, ["ts", "mid"] as const, { order: "desc", limit: 500 }), // ts/mid only, not the book JSON
     db.positions.find("cond", { conditionId }, { order: "desc" }).then((xs) => xs.filter((p) => p.paper)), // by id desc
     db.pods.find("cond", { conditionId }, { order: "desc" }),
     db.marketLatest.get(conditionId),
@@ -254,13 +254,17 @@ export async function researchLive(r: ReadDeps, o: { ids?: string[]; limit?: num
   const [M, allRuns, ths] = pids.length
     ? await Promise.all([
         marketsById(db, ps.map((p) => p.conditionId)),
-        db.agentRuns.findEach("pod", pids.map((podId) => ({ podId }))).then((x) => x.flat()), // by id asc per pod
+        // counts need podId/role/status only (projected in Redis: no toolCalls/outputJson); judge output from the judge-only index
+        Promise.all([
+          db.agentRuns.findFieldsEach("pod", pids.map((podId) => ({ podId })), ["podId", "role", "status"] as const).then((x) => x.flat()),
+          db.agentRuns.findEach("podJudgeOk", pids.map((podId) => ({ podId }))).then((x) => x.flat()),
+        ]),
         db.theses.findEach("pod", pids.map((podId) => ({ podId }))).then((x) => x.flat()), // by createdAt asc per pod: the newest wins below
       ])
-    : [new Map<string, Mk>(), [], []];
+    : [new Map<string, Mk>(), [[], []] as const, []];
   const pods = ps.map((p) => ({ p, q: M.get(p.conditionId)?.question ?? null })); // left join markets
-  const runs = allRuns.map((a) => ({ podId: a.podId, role: a.role, status: a.status }));
-  const judged = allRuns.filter((a) => a.role === "judge" && a.status === "ok").map((a) => ({ podId: a.podId, out: a.outputJson }));
+  const [runs, judgeRows] = allRuns;
+  const judged = judgeRows.map((a) => ({ podId: a.podId, out: a.outputJson }));
   const th = new Map(ths.map((t) => [t.podId, t]));
   const judge = new Map(judged.map((j) => [j.podId, j.out as { p_hat?: number; thesis?: string; confidence?: number } | null]));
   return {
@@ -291,7 +295,7 @@ export async function calibration(r: ReadDeps, o: { category?: string; model?: s
   return {
     n: rows.length,
     overall: aggregate(rows, () => "all").all ?? null, // { n, brier, logLoss, marketBrier }
-    byCategory: Object.fromEntries(await Promise.all(Object.entries(cats).map(async ([k, v]) => [k, { ...v, c: await categoryConfidence(r.db, k), gate: `${v.n}/30` }]))),
+    byCategory: Object.fromEntries(Object.entries(cats).map(([k, v]) => [k, { ...v, c: confidenceFromRows(all, k), gate: `${v.n}/30` }])),
     byModel: aggregate(rows, (x) => x.model),
     byRoleMix: aggregate(rows, (x) => x.roleMix),
     bins: reliabilityBins(rows), // 10 bins { lo, hi, n, meanPredicted, observed }
