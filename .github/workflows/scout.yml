@@ -5,9 +5,8 @@
 # The alert pass (monitor job) also runs on every beat; deduped server-side, so extra beats are cheap.
 name: scout
 
-# Paused: schedule off while the project is paused (README.md, Paused). To resume, restore:
-#   schedule:
-#     - cron: "*/30 * * * *" # ~1,440 runner-min/month, inside the 2,000 free for a private repo
+# Manual only: the daily Vercel crons (apps/web/vercel.json) run discovery, screen and research; site traffic kicks the cheap sweep.
+# Dispatch this to force a sweep + watchlist refresh between those.
 on:
   workflow_dispatch:
 
