@@ -1,71 +1,56 @@
-import { PGlite } from "@electric-sql/pglite";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
-import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
-import { migrate as migratePg } from "drizzle-orm/postgres-js/migrator";
-import { mkdirSync } from "node:fs";
+import { Redis as Upstash } from "@upstash/redis";
+import { Redis as IORedis } from "ioredis";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import postgres from "postgres";
-import * as schema from "./schema";
+import { upstashEnv } from "./kv";
+import { tables } from "./schema";
+import { memoryBackend, type Backend } from "./store/backend";
+import { ioredisConn, upstashConn } from "./store/conn";
+import { createStore, type Store, type TxDb as TxOf } from "./store/db";
+import { redisBackend } from "./store/redis";
 
-export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
+export type Db = Store<typeof tables>;
+export type TxDb = TxOf<typeof tables>;
 
 const here = dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = resolve(here, "../drizzle");
 
-// Process-wide, not module-level: `next dev` gives RSC pages and route handlers separate module instances, and a second PGlite on the same dir
-// reads/writes a different in-memory copy and aborts on migrate. globalThis is shared by all of them (same pattern as the event bus).
-type Conn = { db?: Db; migrator?: () => Promise<void>; closer?: () => Promise<void> };
+// Process-wide, not module-level: `next dev` gives RSC pages and route handlers separate module instances, and two in-process stores
+// would each hold their own copy. globalThis is shared by all of them (same pattern as the event bus and kv).
+type Conn = { db?: Db };
 const conn: Conn = ((globalThis as { __pmDb?: Conn }).__pmDb ??= {});
 
+/** Key prefix inside Redis. Keep the {braces}: a hash tag puts every key in one cluster slot, which the Lua scripts need. */
+const prefix = () => process.env.REDIS_PREFIX ?? "{pm}:";
+
 /**
- * DATABASE_URL → any Postgres over TCP via postgres-js (Supabase pooler, Neon, self-hosted); else PGlite at <repo>/.data/pglite (PGLITE_DIR overrides, `memory://` for tests).
- * prepare:false keeps it safe behind transaction-mode poolers (Supavisor :6543, PgBouncer); small pool + idle timeout suit serverless instances.
+ * The store backend, picked from the environment:
+ * - UPSTASH_REDIS_REST_URL/TOKEN (or Vercel's KV_REST_API_URL/TOKEN): Upstash over REST. Production on Vercel.
+ * - REDIS_URL: any Redis/Valkey over TCP (self-hosted, local redis-server, CI).
+ * - neither: in-process, saved to <repo>/.data/store.json (STORE_FILE overrides; `memory://` keeps nothing).
+ * - under vitest: always in-process and unsaved, whatever else is set.
+ *   Refused in production on Vercel, where instances do not share memory.
  */
-export function getDb(): Db {
-  if (conn.db) return conn.db;
-  const url = process.env.DATABASE_URL;
-  if (url) {
-    const opts = { prepare: false, idle_timeout: 20, connect_timeout: 10 } as const;
-    // postgres-js pipelines extra queries onto busy connections; behind Supavisor's transaction mode the replies can come back crossed
-    // (a one-row max(ts) result once landed in a theses select and broke /watchlist). max_pipeline 0 keeps one query per connection.
-    // That also stops sql.begin from reserving its connection (UNSAFE_TRANSACTION), so transactions run on a small client of their own.
-    const sql = postgres(url, { ...opts, max: 5, max_pipeline: 0 } as postgres.Options<{}>); // max_pipeline is read at runtime but missing from the typings
-    const txSql = postgres(url, { ...opts, max: 2 });
-    drizzlePg({ client: txSql }); // only for its parser/serializer setup on txSql.options
-    sql.begin = txSql.begin;
-    const d = drizzlePg({ client: sql, schema });
-    // drizzle makes date/time serializers pass-through (it maps column values itself), but raw sql`${new Date()}` params skip that mapping
-    // and postgres-js then rejects the Date. neon-http and PGlite accept Dates, so restore that for timestamp/timestamptz/date.
-    for (const c of [sql, txSql])
-      for (const oid of [1114, 1184, 1082]) {
-        const next = c.options.serializers[oid];
-        c.options.serializers[oid] = (v: unknown) => (v instanceof Date ? (oid === 1082 ? v.toISOString().slice(0, 10) : v.toISOString()) : next!(v));
-      }
-    conn.migrator = () => migratePg(d, { migrationsFolder });
-    conn.closer = () => Promise.all([sql.end({ timeout: 5 }), txSql.end({ timeout: 5 })]).then(() => undefined);
-    return (conn.db = d);
+export function backendFromEnv(env: NodeJS.ProcessEnv = process.env): Backend {
+  // Tests always get a private in-process store, even with Redis credentials in the shell: suites flush() it between cases.
+  // (The store's own conformance suite reaches real Redis through REDIS_TEST_URL and a throwaway prefix.)
+  if (env.VITEST) return memoryBackend(env.STORE_FILE && env.STORE_FILE !== "memory://" ? { file: env.STORE_FILE } : {});
+  const up = upstashEnv();
+  if (up) return redisBackend(upstashConn(new Upstash({ ...up, automaticDeserialization: false })), prefix());
+  if (env.REDIS_URL) return redisBackend(ioredisConn(new IORedis(env.REDIS_URL, { maxRetriesPerRequest: 3 })), prefix());
+  if (env.NODE_ENV === "production" && env.VERCEL) {
+    throw new Error("UPSTASH_REDIS_REST_URL/TOKEN (or KV_REST_API_URL/TOKEN) or REDIS_URL required in production on Vercel (the in-process store is per-instance)");
   }
-  const dir = process.env.PGLITE_DIR ?? resolve(here, "../../../.data/pglite");
-  if (!dir.startsWith("memory://")) mkdirSync(dirname(dir), { recursive: true }); // PGlite only creates the leaf dir
-  const client = new PGlite(dir);
-  const d = drizzlePglite({ client, schema });
-  conn.migrator = () => migratePglite(d, { migrationsFolder });
-  conn.closer = () => client.close();
-  return (conn.db = d);
+  const file = env.STORE_FILE ?? resolve(here, "../../../.data/store.json");
+  return memoryBackend(file === "memory://" ? {} : { file });
 }
 
-export async function migrate(): Promise<Db> {
-  const d = getDb();
-  await conn.migrator!();
-  return d;
+export function getDb(): Db {
+  return (conn.db ??= createStore(backendFromEnv(), tables));
 }
 
-/** Release the pool (CLI scripts; postgres-js keeps the process alive otherwise). */
+/** Release the connection (CLI scripts; ioredis keeps the process alive otherwise) and flush the in-process store to its file. */
 export async function closeDb(): Promise<void> {
-  const close = conn.closer;
-  conn.db = conn.migrator = conn.closer = undefined;
-  await close?.();
+  const d = conn.db;
+  conn.db = undefined;
+  await d?.backend.close();
 }

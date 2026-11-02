@@ -9,20 +9,18 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:reindex": "tsx scripts/reindex.ts",
+    "db:import-pg": "tsx scripts/import-pg.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.10",
     "@upstash/ratelimit": "2.2.0",
     "@upstash/redis": "1.39.0",
-    "drizzle-orm": "0.45.4",
-    "postgres": "3.4.7"
+    "ioredis": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "drizzle-kit": "0.31.11",
     "tsx": "^4.23.15",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "postgres": "3.4.7"
   }
 }

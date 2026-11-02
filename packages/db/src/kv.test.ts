@@ -1,17 +1,27 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { getDb, migrate } from "./client";
-import { pgKv, type Kv } from "./kv";
+import { Redis as IORedis } from "ioredis";
+import { afterAll, describe, expect, it } from "vitest";
+import { memoryKv, redisKv, type Kv } from "./kv";
 
-process.env.PGLITE_DIR = "memory://";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-let kv: Kv;
+// REDIS_TEST_URL: run the same cases on real Redis (CI service; locally `redis-server --port 6390`)
+const url = process.env.REDIS_TEST_URL;
+const conns: IORedis[] = [];
+const kvs: [string, () => Kv][] = [["memory", () => memoryKv()]];
+if (url) kvs.push(["redis", () => {
+  const r = new IORedis(url, { keyPrefix: `pmkvtest${process.pid}:` });
+  conns.push(r);
+  return redisKv(r);
+}]);
+afterAll(async () => {
+  for (const r of conns) {
+    const ks = await r.keys(`pmkvtest${process.pid}:*`);
+    if (ks.length) await r.del(...ks.map((k) => k.slice(`pmkvtest${process.pid}:`.length)));
+    r.disconnect();
+  }
+});
 
-beforeAll(async () => {
-  await migrate();
-  kv = pgKv(getDb());
-}, 60_000); // PGlite migrate is slow under the full parallel test run
-
-describe("pgKv (kv table)", () => {
+describe.each(kvs)("%s kv", (_n, mk) => {
+  const kv = mk();
   it("lock: one holder; release only frees our own hold; an expired hold can be taken over", async () => {
     const a = await kv.lock("job", 60_000);
     expect(a).not.toBeNull();

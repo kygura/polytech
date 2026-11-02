@@ -1,8 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
-import { sql } from "drizzle-orm";
-import { getDb, type Db } from "./client";
-import { kvStore } from "./schema";
+import { Redis as IORedis } from "ioredis";
 
 export interface Kv {
   /** Returns a release fn, or null if held. Auto-expires after ttlMs. */
@@ -45,6 +43,8 @@ export function memoryKv(): Kv {
   };
 }
 
+const RELEASE = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) end return 0";
+
 export function upstashKv(redis: Redis): Kv {
   const limiters = new Map<string, Ratelimit>();
   return {
@@ -53,9 +53,7 @@ export function upstashKv(redis: Redis): Kv {
       const owner = crypto.randomUUID();
       if (!(await redis.set(k, owner, { nx: true, px: ttlMs }))) return null;
       // Owner-checked release (plain DEL could free a re-acquired lock).
-      return async () => {
-        await redis.eval("if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) end return 0", [k], [owner]);
-      };
+      return async () => { await redis.eval(RELEASE, [k], [owner]); };
     },
     async rateLimit(key, limit, windowMs) {
       const id = `${limit}:${windowMs}`;
@@ -72,58 +70,61 @@ export function upstashKv(redis: Redis): Kv {
   };
 }
 
-/**
- * kv on the app's own Postgres (the `kv` table): shared across instances like Upstash, no extra service. Time is the db clock.
- * lock = insert-or-take-over-expired (atomic per statement), released only by its owner. rateLimit = fixed-window counter.
- */
-export function pgKv(db: Db): Kv {
-  const k = kvStore;
-  let calls = 0;
-  const prune = () => (++calls % 50 ? undefined : db.delete(k).where(sql`${k.expiresAt} <= now()`).then(() => undefined, () => undefined));
-  const until = (ttlMs: number) => sql`now() + ${`${Math.max(1, Math.round(ttlMs))} milliseconds`}::interval`;
+/** Sliding log in a sorted set: drop hits older than the window, admit if under the limit. Time comes from the caller. */
+const SLIDING = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1] - ARGV[2])
+local n = redis.call('ZCARD', KEYS[1])
+if n < tonumber(ARGV[3]) then
+  redis.call('ZADD', KEYS[1], ARGV[1], ARGV[4])
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+  return {1, tonumber(ARGV[3]) - n - 1}
+end
+return {0, 0}`;
+
+/** kv on any Redis over TCP (REDIS_URL): self-hosted Redis/Valkey, local redis-server. Values are JSON. */
+export function redisKv(redis: IORedis): Kv {
   return {
     async lock(key, ttlMs) {
-      void prune();
-      const id = `lock:${key}`, owner = crypto.randomUUID();
-      const got = await db.insert(k).values({ key: id, value: owner, expiresAt: until(ttlMs) as never })
-        .onConflictDoUpdate({ target: k.key, set: { value: sql`excluded.value`, expiresAt: sql`excluded.expires_at` }, setWhere: sql`${k.expiresAt} <= now()` })
-        .returning({ key: k.key });
-      if (!got.length) return null;
-      return async () => { await db.delete(k).where(sql`${k.key} = ${id} and ${k.value} = ${JSON.stringify(owner)}::jsonb`); };
+      const k = `lock:${key}`;
+      const owner = crypto.randomUUID();
+      if ((await redis.set(k, owner, "PX", Math.max(1, Math.round(ttlMs)), "NX")) !== "OK") return null;
+      return async () => { await redis.eval(RELEASE, 1, k, owner); };
     },
     async rateLimit(key, limit, windowMs) {
-      const slot = Math.floor(Date.now() / windowMs), id = `rl:${limit}:${windowMs}:${key}:${slot}`;
-      const [row] = await db.insert(k).values({ key: id, value: 1, expiresAt: until(windowMs * 2) as never })
-        .onConflictDoUpdate({ target: k.key, set: { value: sql`to_jsonb((${k.value} #>> '{}')::bigint + 1)` } })
-        .returning({ n: sql<number>`(${k.value} #>> '{}')::bigint` });
-      const n = Number(row?.n ?? limit + 1);
-      return { ok: n <= limit, remaining: Math.max(0, limit - n) };
+      const [ok, remaining] = (await redis.eval(SLIDING, 1, `rl:${limit}:${windowMs}:${key}`, Date.now(), Math.round(windowMs), limit, crypto.randomUUID())) as [number, number];
+      return { ok: ok === 1, remaining };
     },
     async get<T>(key: string) {
-      const [row] = await db.select({ v: k.value }).from(k).where(sql`${k.key} = ${key} and (${k.expiresAt} is null or ${k.expiresAt} > now())`);
-      return (row?.v as T | undefined) ?? null;
+      const v = await redis.get(key);
+      return v === null ? null : (JSON.parse(v) as T);
     },
     async set(key, value, ttlMs) {
-      const exp = ttlMs ? until(ttlMs) : null;
-      await db.insert(k).values({ key, value: value as never, expiresAt: exp as never })
-        .onConflictDoUpdate({ target: k.key, set: { value: sql`excluded.value`, expiresAt: sql`excluded.expires_at` } });
+      const v = JSON.stringify(value);
+      if (ttlMs) await redis.set(key, v, "PX", Math.max(1, Math.round(ttlMs)));
+      else await redis.set(key, v);
     },
   };
 }
 
-// globalThis for the same reason as the db singleton (client.ts): per-module copies would split the memory kv / lock state under `next dev`
+/** Upstash REST credentials (Vercel's Upstash integration sets the KV_* names). */
+export const upstashEnv = () => {
+  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+  return url && token ? { url, token } : null;
+};
+
+// globalThis: `next dev` gives RSC pages and route handlers separate module instances; per-module copies would split the memory kv / lock state
 const kvSlot = ((globalThis as { __pmKv?: { kv?: Kv } }).__pmKv ??= {});
 export function getKv(): Kv {
   if (kvSlot.kv) return kvSlot.kv;
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (url && token) return (kvSlot.kv = upstashKv(new Redis({ url, token })));
-  // hosted Postgres is shared by every instance: the kv table works there too
-  if (process.env.DATABASE_URL) return (kvSlot.kv = pgKv(getDb()));
+  if (process.env.VITEST) return (kvSlot.kv = memoryKv()); // tests never touch a real Redis through getKv (see backendFromEnv)
+  const up = upstashEnv();
+  if (up) return (kvSlot.kv = upstashKv(new Redis(up)));
+  if (process.env.REDIS_URL) return (kvSlot.kv = redisKv(new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: 3 })));
   // Serverless instances don't share memory, so rate limits/locks would be per-instance: refuse.
   if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
-    throw new Error("DATABASE_URL, UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
+    throw new Error("UPSTASH_REDIS_REST_URL/TOKEN (or KV_REST_API_URL/TOKEN) or REDIS_URL required in production on Vercel (memory kv is per-instance)");
   }
-  if (process.env.NODE_ENV === "production") console.warn("kv: Upstash not configured, using in-memory kv (single process only)");
+  if (process.env.NODE_ENV === "production") console.warn("kv: no Redis configured, using in-memory kv (single process only)");
   return (kvSlot.kv = memoryKv());
 }

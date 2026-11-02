@@ -1,47 +1,82 @@
-import { and, desc, eq, isNotNull, lt, notExists, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { alerts, journal, marketFlags, marketLatest, markets, orders, outcomes, paperOrders, pods, positions, proposalSets, proposals, screens, snapshots, theses, triage } from "./schema";
+import type { snapshots } from "./schema";
+import type { Handle } from "./store/db";
+
+/** snapshots and screens share the `cond` index shape; one handle type for the helpers below. */
+const hist = (db: Db, t: "snapshots" | "screens") => db[t] as unknown as Handle<typeof snapshots>;
+
+const DAY = 86_400_000;
+const chunks = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
 export const latestSnapshot = async (db: Db, conditionId: string) =>
-  (await db.select().from(snapshots).where(eq(snapshots.conditionId, conditionId)).orderBy(desc(snapshots.ts)).limit(1))[0];
+  (await db.snapshots.first("cond", { conditionId }, { order: "desc" })) ?? undefined;
 
-export const insertSnapshots = (db: Db, rows: (typeof snapshots.$inferInsert)[]) => db.insert(snapshots).values(rows);
+export const insertSnapshots = (db: Db, rows: (typeof snapshots.$inferInsert)[]) => db.snapshots.insertMany(rows);
 
-/** Keep the newest row per market; keep rows newer than `days` only for `watched` markets; delete the rest. */
-export const pruneSnapshots = (db: Db, watched: string[], now = Date.now(), days = 7) => {
-  const old = lt(snapshots.ts, new Date(now - days * 86_400_000));
-  return db.delete(snapshots).where(and(
-    sql`exists (select 1 from ${snapshots} n where n.condition_id = ${snapshots.conditionId} and n.ts > ${snapshots.ts})`,
-    watched.length ? or(old, notInArray(snapshots.conditionId, watched)) : undefined,
-  ));
+/** Newest row id per market (by the per-market ts index). */
+const newestIds = async (db: Db, t: "snapshots" | "screens", conds: string[]) =>
+  new Set((await hist(db, t).idsEach("cond", conds.map((conditionId) => ({ conditionId })), { order: "desc", limit: 1 })).flat());
+
+/** Keep the newest row per market; keep rows newer than `days` only for `watched` markets; delete the rest. Returns the number deleted. */
+export const pruneSnapshots = async (db: Db, watched: string[], now = Date.now(), days = 7) => {
+  const keepRecent = new Set(watched), cutoff = now - days * DAY;
+  const conds = (await db.snapshots.distinct("cond")).filter((c): c is string => c !== null);
+  let n = 0;
+  for (const part of chunks(conds, 200)) {
+    // watched: rows older than the cutoff go; unwatched (or nothing watched): every row but the newest goes
+    const ids = await db.snapshots.idsEach("cond", part.map((conditionId) => ({ conditionId })), { order: "desc", offset: 1 });
+    const recent = await db.snapshots.idsEach("cond", part.map((conditionId) => ({ conditionId })), { min: cutoff });
+    const doomed = ids.flatMap((list, i) => {
+      if (!keepRecent.size || !keepRecent.has(part[i]!)) return list;
+      const keep = new Set(recent[i]);
+      return list.filter((id) => !keep.has(id));
+    });
+    for (const c of chunks(doomed, 500)) n += (await db.snapshots.deleteMany(c.map(Number))).length;
+  }
+  return n;
 };
 
 /** Screen runs are only read at the latest run, the last hour (sets) and the newest row per market: keep those and `days` of runs, delete the rest. */
-export const pruneScreens = (db: Db, now = Date.now(), days = 2) =>
-  db.delete(screens).where(and(
-    lt(screens.ts, new Date(now - days * 86_400_000)),
-    sql`exists (select 1 from ${screens} n where n.condition_id = ${screens.conditionId} and n.ts > ${screens.ts})`,
-  ));
+export const pruneScreens = async (db: Db, now = Date.now(), days = 2) => {
+  const cutoff = now - days * DAY;
+  let n = 0;
+  for (const part of chunks(await db.screens.ids("byTs", {}, { lt: cutoff }), 500)) {
+    const rows = await db.screens.getMany(part.map(Number));
+    const keep = await newestIds(db, "screens", [...new Set(rows.map((r) => r.conditionId))]);
+    n += (await db.screens.deleteMany(rows.filter((r) => !keep.has(String(r.id))).map((r) => r.id))).length;
+  }
+  // run pointers older than the window, except the newest run
+  const latest = await db.screenRuns.first("byTs", {}, { order: "desc" });
+  const old = (await db.screenRuns.find("byTs", {}, { lt: cutoff })).filter((r) => r.ts.getTime() !== latest?.ts.getTime());
+  if (old.length) await db.screenRuns.deleteMany(old.map((r) => r.ts.getTime()));
+  return n;
+};
 
 /** Every market the user's own data names (research, theses, orders, positions, proposals, sets, flags, journal, alerts): never pruned. */
 export const referencedMarkets = async (db: Db): Promise<Set<string>> => {
-  const ids = (t: typeof theses | typeof positions | typeof proposals | typeof pods | typeof paperOrders | typeof orders | typeof journal | typeof marketFlags | typeof outcomes | typeof triage) =>
-    db.selectDistinct({ c: t.conditionId }).from(t).then((r) => r.map((x) => x.c));
   const lists = await Promise.all([
-    ...[theses, positions, proposals, pods, paperOrders, orders, journal, marketFlags, outcomes, triage].map(ids),
-    db.selectDistinct({ c: alerts.conditionId }).from(alerts).where(isNotNull(alerts.conditionId)).then((r) => r.map((x) => x.c!)),
-    db.select({ l: proposalSets.legs }).from(proposalSets).then((r) => r.flatMap((x) => x.l.map((l) => l.conditionId))),
+    db.theses.distinct("cond"), db.positions.distinct("cond"), db.proposals.distinct("cond"), db.pods.distinct("cond"),
+    db.paperOrders.distinct("cond"), db.orders.distinct("cond"), db.journal.distinct("cond"), db.alerts.distinct("cond"),
+    db.marketFlags.pks(), db.outcomes.pks(), db.triage.pks(),
+    db.proposalSets.all().then((r) => r.flatMap((x) => x.legs.map((l) => l.conditionId))),
   ]);
-  return new Set(lists.flat());
+  return new Set(lists.flat().filter((c): c is string => c !== null));
 };
 
 /** Delete every market outside `keep`, then the latest/history/screen rows of markets no longer stored. An empty `keep` deletes nothing. */
 export const pruneMarkets = async (db: Db, keep: string[]) => {
   if (!keep.length) return;
-  await db.delete(markets).where(notInArray(markets.conditionId, keep));
-  const orphan = (c: typeof marketLatest.conditionId | typeof snapshots.conditionId | typeof screens.conditionId) =>
-    notExists(db.select({ x: sql`1` }).from(markets).where(eq(markets.conditionId, c)));
-  await db.delete(marketLatest).where(orphan(marketLatest.conditionId));
-  await db.delete(snapshots).where(orphan(snapshots.conditionId));
-  await db.delete(screens).where(orphan(screens.conditionId));
+  const k = new Set(keep);
+  const gone = (await db.markets.pks()).filter((c) => !k.has(c));
+  for (const c of chunks(gone, 500)) await db.markets.deleteMany(c);
+  const stored = new Set(await db.markets.pks());
+  const orphanLatest = (await db.marketLatest.pks()).filter((c) => !stored.has(c));
+  for (const c of chunks(orphanLatest, 500)) await db.marketLatest.deleteMany(c);
+  for (const t of ["snapshots", "screens"] as const) {
+    const orphans = (await hist(db, t).distinct("cond")).filter((c): c is string => c !== null && !stored.has(c));
+    for (const part of chunks(orphans, 200)) {
+      const ids = (await hist(db, t).idsEach("cond", part.map((conditionId) => ({ conditionId })))).flat();
+      for (const c of chunks(ids, 500)) await hist(db, t).deleteMany(c.map(Number));
+    }
+  }
 };
