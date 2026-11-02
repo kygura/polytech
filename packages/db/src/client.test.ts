@@ -18,4 +18,11 @@ describe("getDb target", () => {
     delete process.env.DB_FILE;
     expect((await import("./client")).hostedDb()).toBe(true);
   });
+  it("on Vercel without Turso credentials it fails with a clear error, not a mkdir ENOENT", async () => {
+    vi.stubEnv("VERCEL", "1");
+    delete process.env.DB_FILE;
+    delete process.env.TURSO_DATABASE_URL;
+    const c = await import("./client");
+    expect(() => c.getDb()).toThrow(/TURSO_DATABASE_URL/);
+  });
 });
