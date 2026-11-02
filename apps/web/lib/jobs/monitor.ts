@@ -31,12 +31,12 @@ export async function monitor(d: Deps) {
     const prev = (await kv.get<State>(STATE)) ?? { top: [], struct: [] };
 
     const [th, flags, recent, failed, ranked0, flagged0] = await Promise.all([
-      db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt)),
+      db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), gt(s.theses.expiresAt, new Date(now)))).orderBy(desc(s.theses.createdAt)),
       db.select().from(s.marketFlags),
       db.select({ kind: s.alerts.kind, c: s.alerts.conditionId }).from(s.alerts).where(gte(s.alerts.createdAt, new Date(now - cooldownH * H))),
       db.select({ id: s.pods.id, c: s.pods.conditionId, trigger: s.pods.trigger }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(now - (prev.pods ? FAILED_LOOKBACK : FIRST_LOOKBACK))))),
       db.select({ c: ml.conditionId, mid: ml.mid, priority: ml.priority }).from(ml).where(gt(ml.priority, 0)).orderBy(desc(ml.priority), ml.conditionId).limit(RANK_READ),
-      db.select({ c: ml.conditionId, kinds: ml.structural }).from(ml).where(sql`jsonb_array_length(coalesce(${ml.structural}, '[]'::jsonb)) > 0`),
+      db.select({ c: ml.conditionId, kinds: ml.structural }).from(ml).where(sql`json_array_length(coalesce(${ml.structural}, '[]')) > 0`),
     ]);
     const liveTh = new Map<string, (typeof th)[number]>();
     for (const t of th) if (!liveTh.has(t.conditionId)) liveTh.set(t.conditionId, t);
