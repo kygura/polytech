@@ -55,6 +55,10 @@ GitHub Actions is manual only (scout, CI); the daily Vercel crons run the scouti
 3. Check that the production deployment is this commit's and `/api/status` answers.
 4. Scouting cadence: the Vercel crons in `apps/web/vercel.json` run the daily pass (01:00 sweep, 02:00 every kept market's book, 03:00 screen, 04:00 research, 05:00 calibrate, 05:30 alerts, UTC). A site visit kicks a sweep and the watchlist books at most every 30 min, never screen or research (`apps/web/lib/jobs/kick.ts`); so does a manual `scout` dispatch. Nothing polls on a schedule from GitHub. The market page's live book streams from the CLOB WebSocket regardless. CI is manual: put back `push:` / `pull_request:` in `.github/workflows/ci.yml` to resume it.
 
+## Later: an always-on worker for fast markets
+
+The agents and stored snapshots run on a daily cadence (Vercel Hobby crons) plus traffic kicks, so a market that moves or resolves within hours is out of sync for the desk; only the market page's live book is real-time (CLOB WebSocket in the browser). If fast-resolution or news-driven markets prove worth trading, move the scouting loop to a small always-on worker on Railway or Fly (~$5/month): hold the CLOB WebSocket, re-screen on price moves and new listings within seconds, write to the same Turso database. GitHub Actions or a tighter cron does not fix this; polling at any interval lags a socket.
+
 ## Moving data off Supabase
 
 `packages/db/scripts/copy-from-postgres.ts` copies the old Postgres data into the libSQL database, once. The Supabase project `polytech` (`yocphnzilmbnfsueqemn`) is paused: restore it from its dashboard and take its session-pooler or direct connection string (not the transaction pooler).
