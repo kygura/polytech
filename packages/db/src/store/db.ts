@@ -11,7 +11,7 @@
  */
 import { emptyBatch, type Backend, type Batch, type RangeOpts } from "./backend";
 import {
-  decode, encode, indexEntries, indexKey, normalize, part, patchRow, pkArg, pkOf, uniqueEntries, uniqueKey,
+  decode, encode, indexEntries, indexKey, normalize, part, patchRow, pkArg, pkOf, scoreOf, uniqueEntries, uniqueKey,
   type IndexSpec, type Insert, type Row, type TableDef,
 } from "./table";
 
@@ -47,10 +47,21 @@ export class Tx {
         this.reads.set(k2(t, pk), { t, pk, ver: s?.ver ?? "0", row: s ? decode(t, s.json) : null });
       });
     }
+    // copies: callers may mutate what they get, and build() diffs against these snapshots
     return pks.map((pk) => {
       const w = this.writes.get(k2(t, pk));
-      return w ? w.row : (this.reads.get(k2(t, pk))?.row ?? null);
+      const r = w ? w.row : (this.reads.get(k2(t, pk))?.row ?? null);
+      return r === null ? null : structuredClone(r);
     });
+  }
+
+  /** pk owning unique value `v` of constraint `k`, counting this transaction's own pending writes. */
+  async owner(t: TableDef, k: string, v: string): Promise<string | null> {
+    for (const w of this.writes.values()) if (w.t === t && w.row && uniqueEntries(t, w.row).get(k) === v) return w.pk;
+    const o = await this.b.owner(k, v);
+    if (o === null) return null;
+    const w = this.writes.get(k2(t, o));
+    return w && (!w.row || uniqueEntries(t, w.row).get(k) !== v) ? null : o; // released by a pending write
   }
 
   /** A fresh serial id cannot exist yet: skip the read, still commit with "must not exist". */
@@ -60,7 +71,7 @@ export class Tx {
 
   async write(t: TableDef, pk: string, row: Rec | null) {
     if (!this.reads.has(k2(t, pk))) await this.load(t, [pk]);
-    this.writes.set(k2(t, pk), { t, pk, row });
+    this.writes.set(k2(t, pk), { t, pk, row: row === null ? null : structuredClone(row) });
   }
 
   build(): Batch {
@@ -172,7 +183,7 @@ export class Handle<T extends TableDef> {
     const per = { ...o, offset: 0, limit: o.limit === undefined ? undefined : (o.offset ?? 0) + o.limit };
     const parts = await this.x.b.rangeMulti(list.map((m) => indexKey(this.t, index, m as Rec)), this.t.name, rangeOf(per));
     const ix = this.t.indexes[index] as IndexSpec<Rec>;
-    const score = (r: Rec) => { const v = ix.sort ? r[ix.sort] : 0; return v instanceof Date ? v.getTime() : typeof v === "number" ? v : v == null ? -Infinity : Number(v); };
+    const score = (r: Rec) => (ix.sort ? scoreOf(r[ix.sort]) : 0);
     const seen = new Set<string>();
     const rows = parts.flat().filter((s) => !seen.has(s.pk) && !!seen.add(s.pk)).map((s) => ({ pk: s.pk, r: this.dec(s.json) as Rec }));
     rows.sort((a, b) => (score(a.r) - score(b.r)) || (a.pk < b.pk ? -1 : a.pk > b.pk ? 1 : 0));
@@ -185,6 +196,33 @@ export class Handle<T extends TableDef> {
     if (!matches.length) return [];
     const got = await this.x.b.rangeMulti(matches.map((m) => indexKey(this.t, index, m as Rec)), this.t.name, rangeOf(o));
     return got.map((list) => list.map((s) => this.dec(s.json)));
+  }
+  /**
+   * `find`, returning only the given scalar columns (plus nothing else): e.g. a price series as { ts, mid } without each row's
+   * book JSON. Projected inside Redis, so only those fields cross the wire.
+   */
+  async findFields<I extends keyof IxOf<T> & string, const F extends readonly (keyof Row<T> & string)[]>(
+    index: I, match: Match<T, I>, fields: F, o: FindOpts = {},
+  ): Promise<{ [K in F[number]]: Row<T>[K] }[]> {
+    return (await this.findFieldsEach(index, [match], fields, o))[0]!;
+  }
+  /** `findFields` per match (e.g. per pod), batched like findEach. */
+  async findFieldsEach<I extends keyof IxOf<T> & string, const F extends readonly (keyof Row<T> & string)[]>(
+    index: I, matches: readonly Match<T, I>[], fields: F, o: FindOpts = {},
+  ): Promise<{ [K in F[number]]: Row<T>[K] }[][]> {
+    if (!matches.length) return [];
+    const cols = fields.map((f) => {
+      const c = this.t.cols[f];
+      if (!c) throw new Error(`${this.t.name}: unknown column ${f}`);
+      if (c.cfg.kind === "json") throw new Error(`findFields: ${this.t.name}.${f} is a json column (scalar columns only)`);
+      return c.cfg.kind;
+    });
+    const lists = await this.x.b.rangeFields(matches.map((m) => indexKey(this.t, index, m as Rec)), this.t.name, rangeOf(o), [...fields]);
+    return lists.map((recs) => recs.map(({ vals }) => Object.fromEntries(fields.map((f, i) => {
+      const s = vals[i];
+      const k = cols[i];
+      return [f, s === null ? null : k === "date" ? new Date(Number(s)) : k === "num" || k === "int" ? Number(s) : k === "bool" ? s === "1" : s];
+    }))) as { [K in F[number]]: Row<T>[K] }[]);
   }
   /** `ids` per match, batched. */
   async idsEach<I extends keyof IxOf<T> & string>(index: I, matches: readonly Match<T, I>[], o: FindOpts = {}): Promise<string[][]> {
@@ -256,7 +294,7 @@ export class Handle<T extends TableDef> {
       const id = pkOf(this.t, full!);
       if ((await tx.load(this.t, [id]))[0]) return null;
       for (const [k, v] of uniqueEntries(this.t, full!)) {
-        const owner = await tx.b.owner(k, v);
+        const owner = await tx.owner(this.t, k, v);
         if (owner !== null && owner !== id) return null;
       }
       await tx.write(this.t, id, full!);
@@ -308,7 +346,7 @@ export class Handle<T extends TableDef> {
   async upsertBy(unique: string, row: Insert<T>, set?: Patch<T> | SetFn<T>): Promise<Row<T>> {
     const go = () => this.x.run(async (tx) => {
       const { k, v } = uniqueKey(this.t, unique, normalize(this.t, row as Rec));
-      const pk = await tx.b.owner(k, v);
+      const pk = await tx.owner(this.t, k, v);
       const cur = pk === null ? null : (await tx.load(this.t, [pk]))[0];
       if (!cur) {
         const [full] = await this.prepare(tx, [row]);
@@ -356,6 +394,35 @@ export class Handle<T extends TableDef> {
   /** Delete; with `when`, only if it holds for the current row. Returns the deleted row or null. */
   async delete(pk: PkArg, when?: (cur: Row<T>) => boolean): Promise<Row<T> | null> {
     return (await this.deleteMany([pk], when))[0] ?? null;
+  }
+  /**
+   * Delete rows without downloading them (retention of big-row tables). `known` must give the value of every field any index of
+   * the table partitions on (e.g. { conditionId } for snapshots); the caller vouches that each pk has those values. Each row is
+   * removed only if it still exists at the version just read. Tables with unique constraints need the row: use deleteMany.
+   * Returns the number deleted.
+   */
+  async purge(pks: readonly PkArg[], known: Partial<Row<T>>): Promise<number> {
+    if (Object.keys(this.t.unique).length) throw new Error(`purge: ${this.t.name} has unique constraints; use deleteMany`);
+    const keys = Object.keys(this.t.indexes).map((name) => indexKey(this.t, name, known as Rec));
+    let n = 0;
+    for (const ids of chunk([...new Set(pks.map((p) => pkArg(this.t, p)))], 500)) {
+      for (let attempt = 0; ; attempt++) {
+        const vers = await this.x.b.versions(this.t.name, ids);
+        const batch = emptyBatch();
+        ids.forEach((pk, i) => {
+          const ver = vers[i];
+          if (ver === null || ver === undefined) return;
+          batch.expect.push({ t: this.t.name, pk, ver });
+          batch.del.push({ t: this.t.name, pk });
+          for (const k of keys) batch.zrem.push({ k, m: pk });
+        });
+        if (!batch.del.length) break;
+        const res = await this.x.b.commit(batch);
+        if (res.ok) { n += batch.del.length; break; }
+        if (attempt >= 5) throw new WriteConflict(res.ok ? "" : res.key);
+      }
+    }
+    return n;
   }
   async deleteMany(pks: readonly PkArg[], when?: (cur: Row<T>) => boolean): Promise<Row<T>[]> {
     const go = (ids: string[]) => this.x.run(async (tx) => {

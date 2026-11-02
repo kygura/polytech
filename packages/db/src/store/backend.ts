@@ -52,6 +52,10 @@ export interface Backend {
   partitions(t: string, index: string): Promise<string[]>;
   /** Every primary key of a table (no row data). */
   pks(t: string): Promise<string[]>;
+  /** Current row versions (null = absent), without the row data. */
+  versions(t: string, pks: string[]): Promise<(string | null)[]>;
+  /** `rangeMulti`, returning only some top-level fields of each row, as strings (numbers in full precision; null when absent). */
+  rangeFields(ks: string[], t: string, o: RangeOpts, fields: string[]): Promise<{ pk: string; vals: (string | null)[] }[][]>;
   count(k: string, o?: RangeOpts): Promise<number>;
   /** pk that owns unique value `v` in `k`, or null. */
   owner(k: string, v: string): Promise<string | null>;
@@ -169,6 +173,17 @@ export function memoryBackend(opts: { file?: string } = {}): Backend {
       return [...st.zsets.keys()].filter((k) => k.startsWith(p) && st.zsets.get(k)!.size).map((k) => k.slice(p.length));
     },
     async pks(t) { return [...(st.rows.get(t)?.keys() ?? [])]; },
+    async versions(t, pks) { return pks.map((pk) => st.rows.get(t)?.get(pk)?.ver ?? null); },
+    async rangeFields(ks, t, o, fields) {
+      // same string forms as the Lua script: numbers in full precision, booleans "1"/"0", null when absent
+      const str = (x: unknown) => (x === null || x === undefined ? null : typeof x === "boolean" ? (x ? "1" : "0") : typeof x === "number" ? String(x) : typeof x === "string" ? x : JSON.stringify(x));
+      return ks.map((k) => zrange(k, o).flatMap((pk) => {
+        const r = row(t, pk);
+        if (!r) return [];
+        const o2 = JSON.parse(r.json) as Record<string, unknown>;
+        return [{ pk, vals: fields.map((f) => str(o2[f])) }];
+      }));
+    },
     async count(k, o = {}) { return [...(st.zsets.get(k)?.values() ?? [])].filter((s) => inRange(s, o)).length; },
     async owner(k, v) { return st.uniq.get(k)?.get(v) ?? null; },
     async commit(b) {

@@ -26,12 +26,11 @@ export const pruneSnapshots = async (db: Db, watched: string[], now = Date.now()
     // watched: rows older than the cutoff go; unwatched (or nothing watched): every row but the newest goes
     const ids = await db.snapshots.idsEach("cond", part.map((conditionId) => ({ conditionId })), { order: "desc", offset: 1 });
     const recent = await db.snapshots.idsEach("cond", part.map((conditionId) => ({ conditionId })), { min: cutoff });
-    const doomed = ids.flatMap((list, i) => {
-      if (!keepRecent.size || !keepRecent.has(part[i]!)) return list;
-      const keep = new Set(recent[i]);
-      return list.filter((id) => !keep.has(id));
-    });
-    for (const c of chunks(doomed, 500)) n += (await db.snapshots.deleteMany(c.map(Number))).length;
+    for (let i = 0; i < part.length; i++) {
+      const keep = keepRecent.size && keepRecent.has(part[i]!) ? new Set(recent[i]) : new Set<string>();
+      const doomed = ids[i]!.filter((id) => !keep.has(id));
+      if (doomed.length) n += await db.snapshots.purge(doomed, { conditionId: part[i]! }); // no row download (book JSON)
+    }
   }
   return n;
 };
@@ -75,8 +74,13 @@ export const pruneMarkets = async (db: Db, keep: string[]) => {
   for (const t of ["snapshots", "screens"] as const) {
     const orphans = (await hist(db, t).distinct("cond")).filter((c): c is string => c !== null && !stored.has(c));
     for (const part of chunks(orphans, 200)) {
-      const ids = (await hist(db, t).idsEach("cond", part.map((conditionId) => ({ conditionId })))).flat();
-      for (const c of chunks(ids, 500)) await hist(db, t).deleteMany(c.map(Number));
+      const ids = await hist(db, t).idsEach("cond", part.map((conditionId) => ({ conditionId })));
+      for (let i = 0; i < part.length; i++) {
+        if (!ids[i]!.length) continue;
+        // snapshots: purge (no book JSON download); screens' run index needs each row's ts, so read those (small) rows
+        if (t === "snapshots") await db.snapshots.purge(ids[i]!, { conditionId: part[i]! });
+        else for (const c of chunks(ids[i]!, 500)) await db.screens.deleteMany(c.map(Number));
+      }
     }
   }
 };

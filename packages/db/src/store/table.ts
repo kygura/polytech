@@ -9,6 +9,8 @@ export interface ColCfg {
   kind: Kind;
   notNull: boolean;
   def?: () => unknown;
+  /** The default differs per call (now, random uuid): never re-run it when decoding an old row that lacks the column. */
+  volatile?: boolean;
   pk?: boolean;
   serial?: boolean;
   unique?: boolean;
@@ -25,8 +27,8 @@ export class Col<T, N extends boolean, D extends boolean> {
     const f = typeof v === "function" ? (v as () => T) : () => (v !== null && typeof v === "object" ? structuredClone(v) : v);
     return new Col({ ...this.cfg, def: f });
   }
-  defaultNow(): Col<T, N, true> { return new Col({ ...this.cfg, def: () => new Date() }); }
-  defaultRandom(): Col<T, N, true> { return new Col({ ...this.cfg, def: () => crypto.randomUUID() }); }
+  defaultNow(): Col<T, N, true> { return new Col({ ...this.cfg, def: () => new Date(), volatile: true }); }
+  defaultRandom(): Col<T, N, true> { return new Col({ ...this.cfg, def: () => crypto.randomUUID(), volatile: true }); }
   primaryKey(): Col<T, true, D> { return new Col({ ...this.cfg, notNull: true, pk: true }); }
   /** Single-column unique constraint (index name = column name). Nulls never collide. */
   unique(): Col<T, N, D> { return new Col({ ...this.cfg, unique: true }); }
@@ -166,7 +168,9 @@ export function decode(t: TableDef, json: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, c] of Object.entries(t.cols)) {
     const v = o[k];
-    if (v === null || v === undefined) out[k] = c.cfg.def && c.cfg.notNull ? c.cfg.def() : null; // column added after the row was written
+    // column added after the row was written: a constant default reads as that value; a volatile one (now, uuid) as a fixed stand-in,
+    // so reads stay stable until `db:reindex` writes the column (README "Schema changes")
+    if (v === null || v === undefined) out[k] = !(c.cfg.def && c.cfg.notNull) ? null : c.cfg.volatile ? (c.cfg.kind === "date" ? new Date(0) : "") : c.cfg.def();
     else if (c.cfg.kind === "date") out[k] = new Date(v as number);
     else if ((c.cfg.kind === "num" || c.cfg.kind === "int") && typeof v === "string") out[k] = Number(v);
     else out[k] = v;
@@ -174,8 +178,11 @@ export function decode(t: TableDef, json: string): Record<string, unknown> {
   return out;
 }
 
-const scoreOf = (v: unknown) =>
-  v === null || v === undefined ? -Infinity : v instanceof Date ? v.getTime() : typeof v === "number" ? v : typeof v === "boolean" ? Number(v) : fail(`index sort value must be a number or date, got ${typeof v}`);
+/** Sort value -> zset score. Null and NaN sort first (-inf), like an absent value; NaN never reaches ZADD. */
+export const scoreOf = (v: unknown): number => {
+  const s = v === null || v === undefined ? -Infinity : v instanceof Date ? v.getTime() : typeof v === "number" ? v : typeof v === "boolean" ? Number(v) : fail(`index sort value must be a number or date, got ${typeof v}`);
+  return Number.isNaN(s) ? -Infinity : s;
+};
 
 /** Index entries (key -> score) a row belongs to. Key = "<table>:<index>:<parts>". */
 export function indexEntries(t: TableDef, r: Record<string, unknown>): Map<string, number> {

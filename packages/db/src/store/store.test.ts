@@ -200,11 +200,103 @@ describe.each(backends)("store on %s", (_name, mk) => {
     expect(a.name).toBe("x");
   });
 
+  it("distinct reads partitions that hold rows, and drops one when its last row leaves", async () => {
+    await db.items.insertMany([{ id: "a", group: "x" }, { id: "b", group: "y" }, { id: "c", group: "y" }]);
+    expect((await db.items.distinct("status")).sort()).toEqual(["open"]);
+    expect((await db.items.distinct("group" as never)).length).toBeGreaterThanOrEqual(0); // group index is sorted; still one-field
+    await db.items.update("a", { status: "done" });
+    expect((await db.items.distinct("status")).sort()).toEqual(["done", "open"]);
+    await db.items.delete("a");
+    expect((await db.items.distinct("status")).sort()).toEqual(["open"]);
+    await db.tx(async (tx) => { await tx.items.update("b", { status: "z" }); await tx.items.update("c", { status: "z" }); });
+    expect((await db.items.distinct("status")).sort()).toEqual(["z"]);
+  });
+
+  it("findFields projects scalar columns exactly (numbers, dates, nulls, booleans)", async () => {
+    const at = new Date("2026-03-04T05:06:07.089Z");
+    await db.items.insert({ id: "f1", group: "g", score: 0.1 + 0.2, at, flag: true });
+    await db.items.insert({ id: "f2", group: "g", score: null, at: new Date(at.getTime() + 1) });
+    await db.items.insert({ id: "f3", group: "g", score: -Infinity, at: new Date(at.getTime() + 2) });
+    const got = await db.items.findFields("group", { group: "g" }, ["id", "score", "at", "flag", "code"] as const, { order: "asc" });
+    expect(got).toEqual([
+      { id: "f1", score: 0.1 + 0.2, at, flag: true, code: null },
+      { id: "f2", score: null, at: new Date(at.getTime() + 1), flag: false, code: null },
+      { id: "f3", score: -Infinity, at: new Date(at.getTime() + 2), flag: false, code: null },
+    ]);
+    await expect(db.items.findFields("group", { group: "g" }, ["tags"] as const)).rejects.toThrow(/json column/);
+    const each = await db.items.findFieldsEach("group", [{ group: "none" }, { group: "g" }], ["id"] as const, { order: "desc", limit: 2 });
+    expect(each).toEqual([[], [{ id: "f3" }, { id: "f2" }]]);
+  });
+
+  it("purge deletes rows and every index entry without reading them; missing pks are skipped", async () => {
+    const rows = await db.logs.insertMany(Array.from({ length: 30 }, (_, i) => ({ item: i < 20 ? "p" : "q", n: i })));
+    const doomed = rows.filter((r) => r.item === "p" && r.n < 15).map((r) => r.id);
+    expect(await db.logs.purge([...doomed, 9999], { item: "p" })).toBe(15);
+    expect(await db.logs.count("item", { item: "p" })).toBe(5);
+    expect(await db.logs.get(doomed[0]!)).toBeNull();
+    expect(await db.logs.purge((await db.logs.ids("item", { item: "p" })).map(Number), { item: "p" })).toBe(5);
+    expect(await db.logs.distinct("item")).toEqual(["q"]);
+    await expect(db.items.purge(["x"], { group: "g", status: "open" } as never)).rejects.toThrow(/unique/);
+  });
+
+  it("NaN sort values order like null on both backends", async () => {
+    await db.items.insert({ id: "n1", group: "g", score: NaN });
+    await db.items.insert({ id: "n2", group: "g", score: 1 });
+    await db.items.insert({ id: "n0", group: "g", score: null });
+    expect((await db.items.find("byScore", {})).map((r) => r.id)).toEqual(["n0", "n1", "n2"]);
+    expect(Number.isNaN((await db.items.get("n1"))!.score)).toBe(true);
+  });
+
+  it("tx: own writes count for unique checks; mutating a loaded row cannot corrupt the indexes", async () => {
+    const out = await db.tx(async (tx) => {
+      const a = await tx.items.insertIfAbsent({ id: "u1", group: "g", code: "C" });
+      const b = await tx.items.insertIfAbsent({ id: "u2", group: "g", code: "C" }); // C is taken by this tx's own insert
+      return [a?.id, b];
+    });
+    expect(out).toEqual(["u1", null]);
+    const r = (await db.items.get("u1"))!;
+    await db.tx(async (tx) => {
+      const cur = (await tx.items.get("u1"))!;
+      cur.status = "pending"; // caller mutates its copy
+      await tx.items.update("u1", { score: 5 });
+    });
+    expect((await db.items.get("u1"))!.status).toBe(r.status);
+    expect(await db.items.ids("status", { status: "open" })).toContain("u1");
+    expect(await db.items.ids("status", { status: "pending" })).not.toContain("u1");
+  });
+
   it("rejects unknown columns and nulls in not-null columns", async () => {
     await expect(db.items.insert({ id: "z", group: null as never })).rejects.toThrow(/not-null/);
     await expect(db.items.insert({ id: "z", group: "g", nope: 1 } as never)).rejects.toThrow(/unknown column/);
     await db.items.insert({ id: "z", group: "g" });
     await expect(db.items.update("z", { group: null as never })).rejects.toThrow(/not-null/);
+  });
+});
+
+describe.runIf(!!url)("redis: a commit the transport sends twice applies once", () => {
+  // The Upstash client resends a request when fetch throws after the server ran it; ioredis resends in-flight commands after a
+  // reconnect. Model that: every commit script call runs twice and the caller sees the second reply.
+  const r = new Redis(url!, { maxRetriesPerRequest: 2 });
+  conns.push(r);
+  const base = ioredisConn(r);
+  const dup = { ...base, evalsha: async (sha: string, keys: string[], args: string[]) => {
+    const first = await base.evalsha(sha, keys, args);
+    return keys[1]?.includes(":done:") ? base.evalsha(sha, keys, args) : first;
+  } };
+  const b = redisBackend(dup, `{pmdup${process.pid}}:`);
+  const db = createStore(b, tables);
+  beforeEach(() => db.flush());
+  afterAll(() => db.flush());
+
+  it("update, serial insert and insertIfAbsent each land exactly once", async () => {
+    await db.items.insert({ id: "c", group: "g", score: 10 });
+    await db.items.update("c", (cur) => ({ score: cur.score! + 5 }));
+    expect((await db.items.get("c"))!.score).toBe(15);
+    await db.logs.insert({ item: "tok", n: 1 });
+    expect(await db.logs.count("item", { item: "tok" })).toBe(1);
+    const row = await db.items.insertIfAbsent({ id: "d", group: "g", code: "T1" });
+    expect(row?.id).toBe("d");
+    expect(await db.items.update("c", (cur) => (cur.status === "open" ? { status: "taken" } : null))).not.toBeNull(); // CAS winner sees its win
   });
 });
 

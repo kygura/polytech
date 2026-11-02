@@ -5,10 +5,14 @@
  *   <p>t:<table>          hash  pk -> "<ver>|<row json>"
  *   <p>i:<index key>      zset  member = pk, score = sort value (0 for unsorted indexes: then member order)
  *   <p>u:<unique key>     hash  value -> owning pk
+ *   <p>d:<table>:<index>  set   partition suffixes of that index that hold members (distinct values)
  *   <p>seq:<table>        string, id sequence
  *   <p>ver                string, store-wide commit counter (row versions)
+ *   <p>done:<batch id>    string, marks an applied commit for 10 min
  *
- * Every read and the commit run as one Lua script each: one round trip, and a commit is atomic.
+ * Every read and the commit run as one Lua script each: one round trip, and a commit is atomic. Each commit carries a fresh
+ * batch id: a transport that resends a commit whose reply was lost (the Upstash client retries failed fetches, ioredis resends
+ * in-flight commands after a reconnect) gets 'ok' back instead of applying it twice or reporting a conflict with itself.
  */
 import { createHash } from "node:crypto";
 import type { Backend, Batch, CommitResult, RangeOpts, Stored } from "./backend";
@@ -63,6 +67,40 @@ for k = 1, #KEYS do
 end
 return per`,
   pks: `return redis.call('HKEYS', KEYS[1])`,
+  members: `return redis.call('SMEMBERS', KEYS[1])`,
+  versions: `${LUA_HMGET}
+local vs = hmget(KEYS[1], ARGV, 1)
+for i = 1, #vs do if vs[i] then vs[i] = string.match(vs[i], '^(%d+)|') end end
+return vs`,
+  rangeFields: `${LUA_HMGET}
+-- KEYS[1] = rows hash, KEYS[2..] = index keys; one list of {pk, field...} records per index key
+local out = {}
+for k = 2, #KEYS do
+  local ids
+  if ARGV[3] == '1' then ids = redis.call('ZRANGE', KEYS[k], ARGV[2], ARGV[1], 'BYSCORE', 'REV', 'LIMIT', ARGV[4], ARGV[5])
+  else ids = redis.call('ZRANGE', KEYS[k], ARGV[1], ARGV[2], 'BYSCORE', 'LIMIT', ARGV[4], ARGV[5]) end
+  local list = {}
+  if #ids > 0 then
+    local vals = hmget(KEYS[1], ids, 1)
+    for i = 1, #ids do
+      local v = vals[i]
+      if v then
+        local row = cjson.decode(string.sub(v, string.find(v, '|', 1, true) + 1))
+        local rec = {ids[i]}
+        for f = 7, #ARGV do
+          local x = row[ARGV[f]]
+          if x == nil or x == cjson.null then rec[#rec + 1] = false
+          elseif type(x) == 'number' then rec[#rec + 1] = string.format('%.17g', x)
+          elseif type(x) == 'boolean' then rec[#rec + 1] = x and '1' or '0'
+          else rec[#rec + 1] = tostring(x) end
+        end
+        list[#list + 1] = rec
+      end
+    end
+  end
+  out[#out + 1] = list
+end
+return out`,
   count: `return redis.call('ZCOUNT', KEYS[1], ARGV[1], ARGV[2])`,
   owner: `return redis.call('HGET', KEYS[1], ARGV[1])`,
   nextIds: `return redis.call('INCRBY', KEYS[1], ARGV[1])`,
@@ -70,6 +108,7 @@ return per`,
 if c < tonumber(ARGV[1]) then redis.call('SET', KEYS[1], ARGV[1]) end
 return 1`,
   commit: `
+if redis.call('EXISTS', KEYS[2]) == 1 then return {'ok'} end
 local b = cjson.decode(ARGV[1])
 local function ver(k, pk)
   local cur = redis.call('HGET', KEYS[k], pk)
@@ -94,8 +133,15 @@ if #b.p > 0 then
   for _, p in ipairs(b.p) do redis.call('HSET', KEYS[p[1]], p[2], v .. '|' .. p[3]) end
 end
 for _, d in ipairs(b.d) do redis.call('HDEL', KEYS[d[1]], d[2]) end
-for _, z in ipairs(b.zr) do redis.call('ZREM', KEYS[z[1]], z[2]) end
-for _, z in ipairs(b.za) do redis.call('ZADD', KEYS[z[1]], z[2], z[3]) end
+for _, z in ipairs(b.zr) do
+  redis.call('ZREM', KEYS[z[1]], z[2])
+  if redis.call('ZCARD', KEYS[z[1]]) == 0 then redis.call('SREM', KEYS[z[3]], z[4]) end
+end
+for _, z in ipairs(b.za) do
+  redis.call('ZADD', KEYS[z[1]], z[2], z[3])
+  redis.call('SADD', KEYS[z[4]], z[5])
+end
+redis.call('SET', KEYS[2], '1', 'EX', 600)
 return {'ok'}`,
 } as const;
 
@@ -113,8 +159,14 @@ const split = (pk: string, v: string): Stored => {
 
 const globEscape = (s: string) => s.replace(/[*?[\]\\]/g, (c) => "\\" + c);
 
+/** Logical index key "<table>:<index>:<parts>" -> the distinct-set key "<table>:<index>" and the partition suffix. */
+const splitIndexKey = (k: string) => {
+  const a = k.indexOf(":"), b = k.indexOf(":", a + 1);
+  return { set: k.slice(0, b), part: k.slice(b + 1) };
+};
+
 export function redisBackend(conn: RedisConn, prefix = "{pm}:"): Backend {
-  const T = (t: string) => `${prefix}t:${t}`, I = (k: string) => `${prefix}i:${k}`, U = (k: string) => `${prefix}u:${k}`;
+  const T = (t: string) => `${prefix}t:${t}`, I = (k: string) => `${prefix}i:${k}`, U = (k: string) => `${prefix}u:${k}`, D = (k: string) => `${prefix}d:${k}`;
   const run = async (name: keyof typeof S, keys: string[], args: string[]) => {
     try {
       return await conn.evalsha(SHA[name], keys, args);
@@ -168,9 +220,19 @@ export function redisBackend(conn: RedisConn, prefix = "{pm}:"): Backend {
       for (let c = 0; c < ks.length; c += 200) out.push(...((await run("rangeIdsMulti", ks.slice(c, c + 200).map(I), rangeArgs(o, false))) as string[][]));
       return out;
     },
-    async partitions(t, index) {
-      const p = I(`${t}:${index}:`);
-      return [...new Set(await conn.scan(`${globEscape(p)}*`))].map((k) => k.slice(p.length));
+    async partitions(t, index) { return (await run("members", [D(`${t}:${index}`)], [])) as string[]; },
+    async versions(t, pks) {
+      if (!pks.length) return [];
+      return ((await run("versions", [T(t)], pks)) as (string | null)[]).map((v) => v ?? null);
+    },
+    async rangeFields(ks, t, o, fields) {
+      if (o.limit === 0) return ks.map(() => []);
+      const out: { pk: string; vals: (string | null)[] }[][] = [];
+      for (let c = 0; c < ks.length; c += 100) {
+        const lists = (await run("rangeFields", [T(t), ...ks.slice(c, c + 100).map(I)], [...rangeArgs(o, true), ...fields])) as (string | null)[][][];
+        for (const recs of lists) out.push(recs.map(([pk, ...vs]) => ({ pk: pk!, vals: fields.map((_, i) => vs[i] ?? null) })));
+      }
+      return out;
     },
     async pks(t) { return (await run("pks", [T(t)], [])) as string[]; },
     async rangeIds(k, o = {}) {
@@ -180,7 +242,7 @@ export function redisBackend(conn: RedisConn, prefix = "{pm}:"): Backend {
     async count(k, o = {}) { return Number(await run("count", [I(k)], [lo(o), hi(o)])); },
     async owner(k, v) { return ((await run("owner", [U(k)], [v])) as string | null) ?? null; },
     async commit(b: Batch): Promise<CommitResult> {
-      const keys = [`${prefix}ver`], at = new Map<string, number>(), logical = new Map<string, string>();
+      const keys = [`${prefix}ver`, `${prefix}done:${crypto.randomUUID()}`], at = new Map<string, number>(), logical = new Map<string, string>();
       const ix = (phys: string, log: string) => {
         let i = at.get(phys);
         if (i === undefined) { keys.push(phys); at.set(phys, (i = keys.length)); logical.set(phys, log); }
@@ -192,8 +254,8 @@ export function redisBackend(conn: RedisConn, prefix = "{pm}:"): Backend {
         r: b.release.map((r) => [ix(U(r.k), r.k), r.v, r.pk]),
         p: b.put.map((p) => [ix(T(p.t), p.t), p.pk, p.json]),
         d: b.del.map((d) => [ix(T(d.t), d.t), d.pk]),
-        zr: b.zrem.map((z) => [ix(I(z.k), z.k), z.m]),
-        za: b.zadd.map((z) => [ix(I(z.k), z.k), score(z.s), z.m]),
+        zr: b.zrem.map((z) => { const d = splitIndexKey(z.k); return [ix(I(z.k), z.k), z.m, ix(D(d.set), d.set), d.part]; }),
+        za: b.zadd.map((z) => { const d = splitIndexKey(z.k); return [ix(I(z.k), z.k), score(z.s), z.m, ix(D(d.set), d.set), d.part]; }),
       };
       const [res, key] = (await run("commit", keys, [JSON.stringify(payload)])) as [string, string?];
       if (res === "ok") return { ok: true };

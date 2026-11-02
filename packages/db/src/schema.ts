@@ -242,6 +242,8 @@ export const agentRuns = table("agent_runs", {
 }, {
   indexes: {
     pod: { on: ["podId"], sort: "id" },
+    /** The finished judge run of a pod (its output is the verdict); lets pollers skip every agent's tool calls. */
+    podJudgeOk: { on: ["podId"], sort: "id", when: (r) => r.role === "judge" && r.status === "ok" },
     status: { on: ["status"], sort: "id" },
   },
 });

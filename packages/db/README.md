@@ -23,12 +23,16 @@ it: the Lua scripts touch many keys at once, and a hash tag keeps them in one cl
 {pm}:t:<table>        hash   pk -> "<version>|<row json>"
 {pm}:i:<table>:<index>:<values>   zset   member = pk, score = sort field (ms for dates; 0 = pk order)
 {pm}:u:<table>:<constraint>       hash   unique value -> pk
+{pm}:d:<table>:<index>            set    partition values that hold rows (what distinct() reads)
 {pm}:seq:<table>      string serial id sequence
 {pm}:ver              string commit counter (row versions)
+{pm}:done:<batch id>  string marks an applied commit for 10 minutes
 ```
 
 Each read is one Lua script (one round trip). A write commits as one Lua script that checks the versions it was computed
-from, checks unique values, then writes rows and index entries together, so a commit is atomic.
+from, checks unique values, then writes rows and index entries together, so a commit is atomic. Every commit carries a
+fresh batch id: when a client resends a commit whose reply was lost (the Upstash client retries a failed fetch; ioredis
+resends in-flight commands after a reconnect), the resend returns "ok" instead of applying twice or failing as a conflict.
 
 ## API
 
@@ -52,6 +56,8 @@ await db.pods.count("status", { status: "running" });
 await db.alerts.ids("unacked", {});                // pks only
 await db.theses.distinct("cond");                  // values of a one-field index that hold rows
 await db.views.byUnique("name", { name });         // row holding a unique value
+await db.snapshots.findFields("condMid", { conditionId }, ["ts", "mid"] as const, { min: since }); // scalar columns only, projected in Redis
+await db.agentRuns.findFieldsEach("pod", pids.map((podId) => ({ podId })), ["podId", "role", "status"] as const);
 
 // writes (each is its own transaction)
 await db.alerts.insert({ kind, message });         // serial ids and defaults filled; throws UniqueViolation on a taken key/unique value
@@ -64,6 +70,7 @@ await db.markets.update(id, { status: "closed" });                          // p
 await db.proposals.update(id, (r) => (r.status === "pending" ? { status: "approved" } : null)); // compare-and-set: null = lost/no-op
 await db.orders.updateMany(ids, (r) => (r.status === "live" ? { status: "cancelled" } : null)); // per-row CAS, atomic per chunk
 await db.pods.delete(id); await db.screens.deleteMany(ids, (r) => r.ts < cutoff);
+await db.snapshots.purge(ids, { conditionId });    // delete without downloading rows: you supply every index's partition fields
 
 // multi-row, multi-table atomic transaction (optimistic: fn re-runs on conflict, so no side effects inside)
 await db.tx(async (tx) => {
@@ -88,7 +95,9 @@ Code that needs the Postgres order sorts explicitly.
 ## Schema changes
 
 There are no migrations: rows are JSON, and a column added to `schema.ts` reads as its default (or null) on old rows.
-A new or changed index only covers rows written after it exists; run `bun run db:reindex` once per store to add old rows to it.
+A new or changed index only covers rows written after it exists; run `bun run db:reindex` once per store to add old rows to it
+(it also fills the `d:` distinct sets, for a Redis written before they existed). A NOT NULL column added with `defaultNow()` or
+`defaultRandom()` reads as a fixed stand-in (epoch / empty string) on old rows until something rewrites them.
 Removing a column needs nothing; stale fields are ignored on read and dropped on the next write.
 
 ## Scripts

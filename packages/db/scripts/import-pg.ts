@@ -24,7 +24,8 @@ const dry = args.has("--dry-run"), overwrite = args.has("--overwrite");
 const url = process.env.PG_URL ?? process.env.DATABASE_URL;
 if (!url) throw new Error("set PG_URL (the old Postgres connection string)");
 
-const pg = postgres(url, { prepare: false, max: 2, connect_timeout: 15, transform: postgres.camel });
+// camelCase column names only: postgres.camel would also rewrite keys inside json/jsonb values (usage.input_tokens -> inputTokens)
+const pg = postgres(url, { prepare: false, max: 2, connect_timeout: 15, transform: { column: { from: postgres.toCamel, to: postgres.fromCamel } } });
 const db = getDb();
 if (db.backend.kind === "memory" && !process.env.STORE_FILE) console.warn("warning: no Redis configured; importing into the local file store");
 
