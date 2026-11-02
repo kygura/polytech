@@ -5,11 +5,9 @@
 # The alert pass (monitor job) also runs on every beat; deduped server-side, so extra beats are cheap.
 name: scout
 
-# Every 2 h: the full-pass cadence (FULL_PASS_MS), so every beat runs the full pass and the data never reads as stale (STALE_MS = 2.5 h).
-# ~360 runner-min/month (12 one-minute runs a day), well inside the 2,000 free for a private repo. Odd minute to dodge the top-of-hour queue.
+# Manual only: the daily Vercel crons (apps/web/vercel.json) run discovery, screen and research; site traffic kicks the cheap sweep.
+# Dispatch this to force a sweep + watchlist refresh between those.
 on:
-  schedule:
-    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 jobs:

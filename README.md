@@ -48,12 +48,12 @@ Live trading has shipped. In `git log`:
 
 ## Paused
 
-GitHub Actions CI is paused; the scout heartbeat runs every 2 h. The database has moved from Supabase (Postgres, now paused) to Turso (libSQL), connected to the Vercel project by the Turso integration, which sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for preview and production. Turso starts empty: the first scout kick sweeps the markets back in; the Supabase theses, journal and paper book are not carried over (to carry them over, see the next section, before step 2). Resume in this order, so nothing runs against a missing or unmigrated database:
+GitHub Actions is manual only (scout, CI); the daily Vercel crons run the scouting pass. The database has moved from Supabase (Postgres, now paused) to Turso (libSQL), connected to the Vercel project by the Turso integration, which sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for preview and production. Turso starts empty: the first scout kick sweeps the markets back in; the Supabase theses, journal and paper book are not carried over (to carry them over, see the next section, before step 2). Resume in this order, so nothing runs against a missing or unmigrated database:
 
 1. Vercel env: the two Turso vars present; remove `DATABASE_URL` and the Supabase integration's `POSTGRES_*` / `SUPABASE_*` vars (nothing reads them now). With no Upstash vars, locks and rate limits use the database's `kv` table.
 2. Deploy this commit to production (merge it to master). Production builds migrate Turso before building (`apps/web/scripts/migrate-deploy.ts`, the `buildCommand` in `apps/web/vercel.json`), and the build log must say `db: migrations applied to the hosted database`; anything else means it didn't see `TURSO_DATABASE_URL`. Env changes only reach new deployments: a dashboard Redeploy of the old production deployment rebuilds the Postgres code.
 3. Check that the production deployment is this commit's and `/api/status` answers.
-4. GitHub Actions: done for scout, which kicks every 2 h (`17 */2 * * *` in `.github/workflows/scout.yml`): each kick sweeps and, since the full pass is 2 h old by then, refreshes every kept market's book, screens and researches (`apps/web/lib/cadence.ts`). CI is still manual: put back the `push:` and `pull_request:` triggers in `.github/workflows/ci.yml` to resume it, keeping `workflow_dispatch:`.
+4. Scouting cadence: the Vercel crons in `apps/web/vercel.json` run the daily pass (01:00 sweep, 02:00 every kept market's book, 03:00 screen, 04:00 research, 05:00 calibrate, 05:30 alerts, UTC). A site visit kicks a sweep and the watchlist books at most every 30 min, never screen or research (`apps/web/lib/jobs/kick.ts`); so does a manual `scout` dispatch. Nothing polls on a schedule from GitHub. The market page's live book streams from the CLOB WebSocket regardless. CI is manual: put back `push:` / `pull_request:` in `.github/workflows/ci.yml` to resume it.
 
 ## Moving data off Supabase
 
