@@ -1,9 +1,6 @@
 import { DEFAULT_STEERING, ProfileFilterSchema, type ResearchProfile } from "@pm/core";
-import { schema as s } from "@pm/db";
-import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
 
@@ -17,8 +14,8 @@ const post = (body?: unknown) => new Request("http://x/", { method: "POST", body
 let j: typeof import("../../../lib/jobs"), d: import("../../../lib/jobs").Deps, mr: typeof import("../markets/[id]/research/route"), run: typeof import("./profiles/[id]/run/route");
 let pool: string[]; // researchable markets
 const mkProfile = (name: string, o: object = {}) => j.createProfile(d.db, { name, enabled: false, filter: ProfileFilterSchema.parse({ includeConditionIds: pool, limit: 2 }), steering: DEFAULT_STEERING, everyMin: null, ...o } as never) as Promise<ResearchProfile>;
-const podsOf = (c: string) => d.db.select().from(s.pods).where(eq(s.pods.conditionId, c));
-const rolesOf = async (podId: string) => (await d.db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId))).map((r) => r.role);
+const podsOf = (c: string) => d.db.pods.find("cond", { conditionId: c });
+const rolesOf = async (podId: string) => (await d.db.agentRuns.find("pod", { podId })).map((r) => r.role);
 
 beforeAll(async () => {
   j = await import("../../../lib/jobs") as never;
@@ -85,7 +82,7 @@ describe("profile run + cron", () => {
 
   it("runProfile stops when the daily pod budget is exhausted", async () => {
     const p = await mkProfile("budget", { filter: ProfileFilterSchema.parse({ includeConditionIds: pool, skipIfResearchedWithinHours: 0, limit: 4 }) });
-    const n = (await d.db.select().from(s.pods)).length;
+    const n = await d.db.pods.count("byStarted", {}); // every pod
     const tight = { ...d, settings: { ...d.settings, budget: { ...d.settings.budget, maxPodsPerDay: n + 1 } } };
     const r = await j.runProfile(tight, p, await j.matchMarkets(d.db, p.filter, d.now())) as { done: number; stopped: string | null };
     expect(r.done).toBe(1);
@@ -100,9 +97,9 @@ describe("profile run + cron", () => {
     await mkProfile("never-scheduled", { enabled: true, everyMin: null, filter: f });
     await mkProfile("disabled", { enabled: false, everyMin: 60, filter: f });
     const recent = await mkProfile("recent", { enabled: true, everyMin: 60, filter: f });
-    await d.db.update(s.researchProfiles).set({ lastRunAt: new Date(d.now() - 10 * 60_000) }).where(eq(s.researchProfiles.id, recent.id));
+    await d.db.researchProfiles.update(recent.id, { lastRunAt: new Date(d.now() - 10 * 60_000) });
     const old = await mkProfile("old", { enabled: true, everyMin: 60, filter: f });
-    await d.db.update(s.researchProfiles).set({ lastRunAt: new Date(d.now() - 90 * 60_000) }).where(eq(s.researchProfiles.id, old.id));
+    await d.db.researchProfiles.update(old.id, { lastRunAt: new Date(d.now() - 90 * 60_000) });
     expect((await j.runDueProfiles(d)).sort()).toEqual([due.id, old.id].sort());
     expect((await j.getProfile(d.db, recent.id))!.lastRunAt!.getTime()).toBeLessThan(d.now() - 5 * 60_000);
   });

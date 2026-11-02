@@ -1,5 +1,3 @@
-import { schema as s } from "@pm/db";
-import { desc } from "drizzle-orm";
 import type { ReactNode } from "react";
 import { Shell } from "../../components/Shell";
 import { currentMode, read } from "../../lib/jobs";
@@ -11,7 +9,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const r = await read.readDeps();
   const [mode, lastSnapshotAt] = await Promise.all([
     currentMode(r.db),
-    r.db.select({ ts: s.snapshots.ts }).from(s.snapshots).orderBy(desc(s.snapshots.ts)).limit(1).then((x) => x[0]?.ts.getTime() ?? null),
+    r.db.snapshots.first("byTs", {}, { order: "desc" }).then((x) => x?.ts.getTime() ?? null),
   ]);
   return <Shell mode={mode} lastSnapshotAt={lastSnapshotAt} now={r.now()}>{children}</Shell>;
 }

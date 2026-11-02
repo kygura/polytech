@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 process.env.CRON_SECRET = "cron-secret-for-tests-0123456789abcdef";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
@@ -81,10 +80,10 @@ describe("http api", () => {
 
   it("research answers 409 with the reason when the pod is skipped (no book)", async () => {
     const route = await import("./markets/[id]/research/route");
-    const a = await import("../../lib/api"), { schema: sc } = await import("@pm/db");
+    const a = await import("../../lib/api");
     const d = await a.getDeps();
     const c = cid("nobook");
-    await d.db.insert(sc.markets).values({ conditionId: c, question: "q", rules: "", tags: [], status: "active" } as any);
+    await d.db.markets.insert({ conditionId: c, question: "q", tags: [], status: "active" }); // (no rules column: the text is fetched from Gamma)
     const r = await route.POST(post(), ctx({ id: c }) as any);
     expect(r.status).toBe(409);
     expect(await r.json()).toMatchObject({ reason: "NO_BOOK" });

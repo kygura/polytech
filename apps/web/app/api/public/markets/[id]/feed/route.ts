@@ -1,5 +1,3 @@
-import { eq } from "drizzle-orm";
-import { schema as s } from "@pm/db";
 import { getDeps, json, notFound } from "../../../../../../lib/api";
 import { marketFeed } from "../../../../../../lib/feed";
 import { publicFeedLimit } from "../../../../../../lib/public";
@@ -14,7 +12,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const limited = await publicFeedLimit(req);
   if (limited) return limited;
   const d = await getDeps();
-  const m = (await d.db.select({ conditionId: s.markets.conditionId, yesTokenId: s.markets.yesTokenId, tickSize: s.markets.tickSize }).from(s.markets).where(eq(s.markets.conditionId, (await params).id)))[0];
+  const row = await d.db.markets.get((await params).id);
+  const m = row && { conditionId: row.conditionId, yesTokenId: row.yesTokenId, tickSize: row.tickSize };
   if (!m?.yesTokenId) return notFound();
   const feed = await marketFeed(d.pm, { ...m, yesTokenId: m.yesTokenId }, d.now()).catch((e) => {
     console.error(`feed ${m.conditionId}:`, e instanceof Error ? e.message : e);

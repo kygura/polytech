@@ -4,7 +4,6 @@ import {
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
 import { pruneScreens, schema as s, type Db } from "@pm/db";
-import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { memoClear } from "./memo";
@@ -53,14 +52,15 @@ type SnapRow = typeof s.snapshots.$inferSelect;
  * market_latest.ts (written every run, after the history row): "this book, last seen at".
  */
 export const latestSnaps = async (db: Db, ids?: string[]) => {
+  // no ids: every market with history (the old DISTINCT ON over the whole table); keyed in conditionId order like it was
+  const conds = (ids ? [...new Set(ids)] : (await db.snapshots.distinct("cond")).filter((c): c is string => c !== null)).sort();
+  if (!conds.length) return new Map<string, SnapRow>();
   const [rows, seen] = await Promise.all([
-    db.selectDistinctOn([s.snapshots.conditionId]).from(s.snapshots)
-      .where(ids ? inArray(s.snapshots.conditionId, ids) : undefined)
-      .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts)),
-    db.select({ c: s.marketLatest.conditionId, ts: s.marketLatest.ts }).from(s.marketLatest).where(ids ? inArray(s.marketLatest.conditionId, ids) : undefined),
+    db.snapshots.findEach("cond", conds.map((conditionId) => ({ conditionId })), { order: "desc", limit: 1 }),
+    db.marketLatest.getMany(conds),
   ]);
-  const at = new Map(seen.map((x) => [x.c, x.ts]));
-  return new Map(rows.map((r) => [r.conditionId, (at.get(r.conditionId)?.getTime() ?? 0) > r.ts.getTime() ? { ...r, ts: at.get(r.conditionId)! } : r] as [string, SnapRow]));
+  const at = new Map(seen.map((x) => [x.conditionId, x.ts]));
+  return new Map(rows.flatMap((list) => list.slice(0, 1)).map((r) => [r.conditionId, (at.get(r.conditionId)?.getTime() ?? 0) > r.ts.getTime() ? { ...r, ts: at.get(r.conditionId)! } : r] as [string, SnapRow]));
 };
 
 /** Neg-risk baskets, ladders, mirrors over every open market with a book. First detector to claim a market wins. `kinds`, when given, receives the core structural kinds (executable items only) each market is in. */
@@ -170,7 +170,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
   const t0 = Date.now(), o = { budgetMs: BUDGET_MS, maxLlm: MAX_LLM, ...opts };
   return withLock(d, "screen", 10 * 60_000, async () => {
     const now = d.now(), st = d.settings;
-    const mrows = await d.db.select().from(s.markets).where(inArray(s.markets.status, OPEN));
+    const mrows = await d.db.markets.find("status", OPEN.map((status) => ({ status })));
     const snaps = await latestSnaps(d.db, mrows.map((m) => m.conditionId));
     const rows = mrows.flatMap((r) => { const snap = snaps.get(r.conditionId); return snap?.book ? [{ r, m: toMarket(r), snap }] : []; });
     // buy-all needs every leg and the db only holds the filtered universe: confirm the true leg count with Gamma, one call per flagged group; a failed lookup rejects (-1 never matches)
@@ -195,7 +195,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       else filtered[p.reason] = (filtered[p.reason] ?? 0) + 1;
     }
     const todo = rows.filter(({ m }) => alive.has(m.conditionId) || structural.has(m.conditionId));
-    const cached = new Map((await d.db.select().from(s.rrCache)).map((c) => [`${c.conditionId}:${c.rulesHash}`, c]));
+    const cached = new Map((await d.db.rrCache.all()).map((c) => [`${c.conditionId}:${c.rulesHash}`, c]));
     const R = new Map<string, number>(), amb = new Map<string, number>(); // amb: rule_ambiguity, LLM-rated markets only
     const crowd = (snap: SnapRow) => ({ top10Share: snap.top10Share ?? 0, netFlow: snap.book?.netFlow ?? 0, skew: 0 }); // ponytail: comment skew not wired
     const score = ({ m, snap }: Pick<(typeof todo)[number], "m" | "snap">, r: number) =>
@@ -211,7 +211,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
         if (typeof det?.ambiguity === "number") amb.set(x.m.conditionId, det.ambiguity);
       } else need.push(x);
     }
-    const sp = d.rScore ? (await d.db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0] : undefined;
+    const sp = d.rScore ? await d.db.spend.get(today(now)) : undefined;
     const capped = (sp?.anthropicUsd ?? 0) >= st.budget.dailySpendCapUsd; // daily spend cap hit: heuristic only
     // LLM budget: best heuristic-priority first, capped per run and by wall clock (function limit 300s, reads included); the rest take the heuristic and are retried next run
     const first = d.rScore && !capped ? need.map((x) => [x, +alive.has(x.m.conditionId) * 10 + score(x, hR(x)).priority] as const).sort((a, b) => b[1] - a[1]).slice(0, o.maxLlm).map(([x]) => x) : d.rScore ? [] : need;
@@ -235,7 +235,7 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
         // ambiguity null = rated without one (a bare-R scorer): not re-rated for it; undefined only on rows older than the field
         fresh.push({ conditionId: m.conditionId, rulesHash: row.rulesHash ?? "", r, detail: fallback ? { fallback } : { fallback, ambiguity: a ?? null } });
       }));
-      await d.db.insert(s.rrCache).values(fresh).onConflictDoUpdate({ target: [s.rrCache.conditionId, s.rrCache.rulesHash], set: { r: sql`excluded.r`, detail: sql`excluded.detail` } });
+      await d.db.rrCache.upsertMany(fresh); // ON CONFLICT (conditionId, rulesHash) DO UPDATE: r, detail = the new values
       if (d.rScore) { llm += batch.length; await addSpend(d.db, now, batch.length * R_CALL_USD, 0); }
     }
     for (const x of need) if (!R.has(x.m.conditionId)) R.set(x.m.conditionId, hR(x));
@@ -251,9 +251,8 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
         tier: sc.tier, structuralFlag: sc.structural, structuralDetail: d1 ?? null,
       } satisfies typeof s.screens.$inferInsert];
     });
-    // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen.
-    const parts = chunks(out, 500);
-    await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
+    // all-or-nothing: latestScreens reads the screen_runs pointer, written only after every row of the run landed.
+    if (out.length) await writeRun(d.db, new Date(now), out);
 
     // market_latest carries the screen output for the DSL / screener: priority, structural kinds, opportunity (sized live theses). Derived data: a failure here must not lose the screens above.
     let latest = true;
@@ -278,15 +277,36 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
   });
 }
 
+/**
+ * One screen run: its rows (all with the identical `ts`), then the `screen_runs` pointer that makes it the latest run. A failure before the
+ * pointer leaves the previous run as the latest; the stray rows of this one are deleted (best effort; pruneScreens drops any left over).
+ */
+async function writeRun(db: Db, ts: Date, rows: (typeof s.screens.$inferInsert)[]) {
+  try {
+    await db.screens.insertMany(rows);
+    // same ts as a run already recorded (Postgres merged those into one max(ts) run): count them together
+    await db.screenRuns.upsert({ ts, rows: rows.length }, (cur) => ({ rows: cur.rows + rows.length }));
+  } catch (e) {
+    // no pointer at this ts = every row in the partition is this failed run's
+    await (async () => {
+      if (await db.screenRuns.get(ts.getTime())) return;
+      await db.screens.deleteMany((await db.screens.ids("run", { ts })).map(Number));
+    })().catch((x) => console.warn("screen: cleanup of a failed run failed:", String(x?.message ?? x).slice(0, 120)));
+    throw e;
+  }
+}
+
 type Opportunity = NonNullable<(typeof s.marketLatest.$inferInsert)["opportunity"]>;
 
 /** Sizing of every live thesis against the stored book (both sides, fees per level, exit depth, 24h flow, extremize). Only rows that would trade (stake > 0). */
 async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], now: number) {
-  const th = await d.db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt));
+  // live = no expiry, or expiresAt > now; newest first (ties by id)
+  const [expiring, open] = await Promise.all([d.db.theses.find("byExpiry", {}, { gt: new Date(now) }), d.db.theses.find("noExpiry", {})]);
+  const th = [...expiring, ...open].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   const latest = new Map<string, (typeof th)[number]>();
   for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
   if (!latest.size) return new Map<string, Opportunity>();
-  const flow = new Map((await d.db.select({ c: s.marketLatest.conditionId, f: s.marketLatest.flow24h }).from(s.marketLatest).where(inArray(s.marketLatest.conditionId, [...latest.keys()]))).map((r) => [r.c, r.f]));
+  const flow = new Map((await d.db.marketLatest.getMany([...latest.keys()])).map((r) => [r.conditionId, r.flow24h]));
   const out = new Map<string, Opportunity>();
   for (const { m, snap } of rows) {
     const t = latest.get(m.conditionId), pYes = (t?.detail as { pYes?: number } | null | undefined)?.pYes;
@@ -303,36 +323,46 @@ async function opportunities(d: Deps, rows: { m: ReturnType<typeof toMarket>; sn
 
 /** priority / structural / opportunity onto existing market_latest rows; rows that were set before and are not in this screen are cleared. */
 async function writeLatest(d: Deps, rows: { m: ReturnType<typeof toMarket>; snap: SnapRow }[], out: (typeof s.screens.$inferInsert)[], kinds: Map<string, StructuralKind[]>, now: number) {
-  const ml = s.marketLatest, opp = await opportunities(d, rows, now);
+  const opp = await opportunities(d, rows, now);
   const pr = new Map(out.map((x) => [x.conditionId, x.priority ?? null]));
-  const have = await d.db.select({ c: ml.conditionId, p: ml.priority, st: ml.structural, o: ml.opportunity }).from(ml);
-  const upd: (typeof ml.$inferInsert)[] = [], clear: string[] = [];
-  for (const h of have) {
-    const hit = pr.has(h.c) || opp.has(h.c);
-    if (hit) upd.push({ conditionId: h.c, priority: pr.get(h.c) ?? null, structural: kinds.get(h.c) ?? [], opportunity: opp.get(h.c) ?? null });
-    else if (h.p != null || h.st != null || h.o != null) clear.push(h.c);
+  type Own = Pick<typeof s.marketLatest.$inferSelect, "priority" | "structural" | "opportunity">;
+  const set = new Map<string, Own>();
+  for (const h of await d.db.marketLatest.all()) {
+    const c = h.conditionId, hit = pr.has(c) || opp.has(c);
+    if (hit) set.set(c, { priority: pr.get(c) ?? null, structural: kinds.get(c) ?? [], opportunity: opp.get(c) ?? null });
+    else if (h.priority != null || h.structural != null || h.opportunity != null) set.set(c, { priority: null, structural: null, opportunity: null });
   }
-  for (const c of chunks(upd, 500))
-    await d.db.insert(ml).values(c).onConflictDoUpdate({ target: ml.conditionId, set: { priority: sql`excluded."priority"`, structural: sql`excluded."structural"`, opportunity: sql`excluded."opportunity"` } });
-  for (const c of chunks(clear, 5000)) await d.db.update(ml).set({ priority: null, structural: null, opportunity: null }).where(inArray(ml.conditionId, c));
+  // only the three screen-owned columns, patched onto the current row (the snapshot job owns the rest); a row deleted meanwhile is skipped
+  const key = (x: Own) => JSON.stringify([x.priority, x.structural, x.opportunity]);
+  await d.db.marketLatest.updateMany([...set.keys()], (cur) => { const p = set.get(cur.conditionId)!; return key(cur) === key(p) ? null : p; });
 }
 
 /** Rows of the most recent screen run (~16k at full universe): narrow with `ids` / `structural` when only a few are needed. */
 export async function latestScreens(db: Db, o: { ids?: string[]; structural?: boolean } = {}) {
   if (o.ids && !o.ids.length) return [];
-  const [{ ts }] = await db.select({ ts: max(s.screens.ts) }).from(s.screens) as [{ ts: Date | null }];
-  return ts ? db.select().from(s.screens).where(and(eq(s.screens.ts, ts), o.ids ? inArray(s.screens.conditionId, o.ids) : undefined, o.structural ? eq(s.screens.structuralFlag, true) : undefined)) : [];
+  const run = await db.screenRuns.first("byTs", {}, { order: "desc" });
+  if (!run) return [];
+  const { ts } = run, at = { min: ts, max: ts };
+  const rows = o.ids
+    ? (await db.screens.findEach("cond", [...new Set(o.ids)].map((conditionId) => ({ conditionId })), at)).flat().filter((r) => !o.structural || r.structuralFlag)
+    : o.structural ? await db.screens.find("structural", {}, at) : await db.screens.find("run", { ts });
+  return rows.sort((a, b) => a.id - b.id); // insertion order, as the heap scan returned them
 }
 
 /** Top `per` by priority in each tier (so 20-40 total), muted excluded, pinned always in. */
 export async function shortlist(db: Db, per = 20): Promise<{ conditionId: string; tier: Tier; priority: number }[]> {
-  const flags = new Map((await db.select().from(s.marketFlags)).map((f) => [f.conditionId, f]));
-  const [{ ts }] = await db.select({ ts: max(s.screens.ts) }).from(s.screens) as [{ ts: Date | null }];
-  if (!ts) return [];
+  const [flagRows, run] = await Promise.all([db.marketFlags.all(), db.screenRuns.first("byTs", {}, { order: "desc" })]);
+  const flags = new Map(flagRows.map((f) => [f.conditionId, f]));
+  if (!run) return [];
+  const { ts } = run;
   const pinned = [...flags.values()].filter((f) => f.pinned).map((f) => f.conditionId);
-  // three narrow columns, priority > 0 or pinned: the full rows of a 16k-market run are too heavy to load per request
-  const rows = await db.select({ conditionId: s.screens.conditionId, tier: s.screens.tier, priority: s.screens.priority }).from(s.screens)
-    .where(and(eq(s.screens.ts, ts), or(gt(s.screens.priority, 0), pinned.length ? inArray(s.screens.conditionId, pinned) : undefined)));
+  // priority > 0 (a range on the run's priority index) or pinned: the full run is too heavy to load per request
+  const [pos, pin] = await Promise.all([
+    db.screens.find("run", { ts }, { gt: 0 }),
+    pinned.length ? db.screens.findEach("cond", pinned.map((conditionId) => ({ conditionId })), { min: ts, max: ts }) : [],
+  ]);
+  const ids = new Set<number>();
+  const rows = [...pos, ...pin.flat()].filter((r) => !ids.has(r.id) && !!ids.add(r.id)).sort((a, b) => a.id - b.id);
   const n: Record<string, number> = {};
   return rows
     .filter((r) => !flags.get(r.conditionId)?.muted && (flags.get(r.conditionId)?.pinned || (r.priority ?? 0) > 0))
@@ -343,8 +373,7 @@ export async function shortlist(db: Db, per = 20): Promise<{ conditionId: string
 
 /** Markets to poll every 5 min: latest screen run + live theses. undefined before the first screen (= poll all). */
 export async function watchlistIds(d: Pick<Deps, "db" | "now">): Promise<string[] | undefined> {
-  const run = await latestScreens(d.db);
+  const [run, th] = await Promise.all([latestScreens(d.db), d.db.theses.find("byExpiry", {}, { gt: new Date(d.now()) })]); // expiresAt > now: no-expiry theses left out, as before
   if (!run.length) return undefined;
-  const th = await d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(sql`${s.theses.expiresAt} > ${new Date(d.now())}`);
-  return [...new Set([...run.map((r) => r.conditionId), ...th.map((t) => t.c)])];
+  return [...new Set([...run.map((r) => r.conditionId), ...th.map((t) => t.conditionId)])];
 }

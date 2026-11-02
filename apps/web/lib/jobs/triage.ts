@@ -1,5 +1,4 @@
 import { schema as s } from "@pm/db";
-import { inArray } from "drizzle-orm";
 import type { TriageRule } from "../triageRules";
 import { DAY, addSpend, isOpenStatus, ruleText, type Deps } from "./deps";
 import { latestSnaps } from "./screen";
@@ -33,7 +32,7 @@ export function triageRules(m: MarketRow, snap: SnapRow | undefined, st: Deps["s
 
 /** Newest stored verdicts for `ids`. */
 export const triageOf = async (db: Deps["db"], ids: string[]) =>
-  ids.length ? new Map((await db.select().from(s.triage).where(inArray(s.triage.conditionId, ids))).map((r) => [r.conditionId, r])) : new Map<string, TriageRow>();
+  new Map<string, TriageRow>((await db.triage.getMany(ids)).map((r) => [r.conditionId, r]));
 
 /**
  * Triage up to TRIAGE_MAX markets: fresh books first, then the primitive rules; only markets that pass the rules reach the model.
@@ -46,9 +45,10 @@ export async function triageMarkets(d: Deps, ids: string[], o: { force?: boolean
   const todo = ids.filter((id) => o.force || !have.has(id) || now - have.get(id)!.createdAt.getTime() > TRIAGE_FRESH_MS);
   if (!todo.length) return ids.flatMap((id) => (have.has(id) ? [have.get(id)!] : []));
   await takeSnapshots(d, todo).catch((e) => console.error("triage: snapshot failed", e)); // rules read the book: a stale one would misjudge spread/depth
-  const [rows, snaps] = await Promise.all([db.select().from(s.markets).where(inArray(s.markets.conditionId, todo)), latestSnaps(db, todo)]);
+  const [rows, snaps] = await Promise.all([db.markets.getMany(todo), latestSnaps(db, todo)]);
   const queue = [...rows];
   let spend = 0;
+  const out: (typeof s.triage.$inferInsert)[] = [];
   const worker = async () => {
     for (let m = queue.shift(); m; m = queue.shift()) {
       const failed = triageRules(m, snaps.get(m.conditionId), st, now);
@@ -66,11 +66,12 @@ export async function triageMarkets(d: Deps, ids: string[], o: { force?: boolean
         }
       }
       row.createdAt = new Date(now);
-      await db.insert(s.triage).values(row).onConflictDoUpdate({ target: s.triage.conditionId, set: row });
-      have.set(m.conditionId, row as TriageRow);
+      out.push(row);
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  // ON CONFLICT (conditionId) DO UPDATE with the whole row: last writer wins per market; one round trip for the batch
+  for (const r of await db.triage.upsertMany(out)) have.set(r.conditionId, r);
   if (spend > 0) await addSpend(db, now, spend, 0);
   return ids.flatMap((id) => (have.has(id) ? [have.get(id)!] : []));
 }

@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY;
 
@@ -13,7 +12,7 @@ let NOW = 0; // PM_FIXTURES pins the app clock, so seed relative to it
 const H = 3_600_000;
 const ids = { a: "0xa", b: "0xb", c: "0xc", d: "0xd", closed: "0xz" };
 
-let h: Record<string, any>, db: any, S: any;
+let h: Record<string, any>, db: import("@pm/db").Db;
 const q = async (qs: string) => {
   const r = await h.markets.GET(get("/markets?" + qs));
   return { status: r.status, body: await r.json() };
@@ -21,12 +20,11 @@ const q = async (qs: string) => {
 const keys = async (qs: string) => (await q(qs)).body.rows?.map((r: any) => r.conditionId);
 
 beforeAll(async () => {
-  const a = await import("../../lib/api"), db_ = await import("@pm/db");
-  S = db_.schema;
+  const a = await import("../../lib/api");
   NOW = (await a.getRead()).now();
   db = (await a.getDeps()).db;
-  const m = (id: string, o: object) => ({ conditionId: id, question: `Will ${id} happen? Bitcoin`, rules: "rules text", category: "politics", tags: ["election"], endDate: new Date(NOW + 30 * 864e5), liquidity: 10_000, vol24h: 1000, resolutionSource: "official_data", ...o });
-  await db.insert(S.markets).values([
+  const m = (id: string, o: object) => ({ conditionId: id, question: `Will ${id} happen? Bitcoin`, category: "politics", tags: ["election"], endDate: new Date(NOW + 30 * 864e5), liquidity: 10_000, vol24h: 1000, resolutionSource: "official_data", ...o });
+  await db.markets.insertMany([
     m(ids.a, { liquidity: 3000, tags: ["Election", "us"] }),
     m(ids.b, { liquidity: 20_000, category: "sports", tags: ["nba"], resolutionSource: "subjective", question: "Lakers title?" }),
     m(ids.c, { liquidity: 60_000, tags: [], resolutionSource: null }),
@@ -34,15 +32,15 @@ beforeAll(async () => {
     m(ids.closed, { status: "closed" }),
   ]);
   const l = (id: string, o: object) => ({ conditionId: id, ts: new Date(NOW), mid: 0.4, spread: 0.02, depth2c: 500, priority: 0.5, lastTradeTs: new Date(NOW - 5 * H), ...o });
-  await db.insert(S.marketLatest).values([
+  await db.marketLatest.insertMany([
     l(ids.a, { priority: 0.9, opportunity: { side: "YES", edge: 0.05, stake: 10, o: 0.02, contrarian: false } }),
     l(ids.b, { priority: 0.7, structural: ["overround"], lastTradeTs: new Date(NOW - 100 * H) }),
     l(ids.c, { priority: null, depth2c: 5000 }),
     // d has no market_latest row at all
   ]);
-  await db.insert(S.marketFlags).values([{ conditionId: ids.b, pinned: true }, { conditionId: ids.c, muted: true }]);
+  await db.marketFlags.insertMany([{ conditionId: ids.b, pinned: true }, { conditionId: ids.c, muted: true }]);
   const th = (id: string, cid: string, createdAt: Date, o: object = {}) => ({ id, conditionId: cid, podId: "p", pHat: 0.6, c: 0.4, pPost: 0.5, side: "YES", edgeC: 3, sizeUsd: 10, createdAt, expiresAt: new Date(NOW + 5 * 864e5), ...o });
-  await db.insert(S.theses).values([
+  await db.theses.insertMany([
     th("t-a-old", ids.a, new Date(NOW - 3 * 864e5), { side: "NO", edgeC: 1 }),
     th("t-a-new", ids.a, new Date(NOW - 1 * 864e5), { edgeC: 4 }),
     th("t-d", ids.d, new Date(NOW - 864e5), { expiresAt: new Date(NOW - H) }), // expired
@@ -158,7 +156,7 @@ describe("/api/views", () => {
 
 describe("/api/alerts", () => {
   it("list, unacked filter, ack one (+event), ack-all", async () => {
-    await db.insert(S.alerts).values([
+    await db.alerts.insertMany([
       { conditionId: ids.a, kind: "mid_move", message: "moved", createdAt: new Date(NOW - 3 * H) },
       { conditionId: null, kind: "run_failed", message: "boom", createdAt: new Date(NOW - 2 * H) },
       { conditionId: ids.b, kind: "structural", message: "arb", createdAt: new Date(NOW - H) },
@@ -192,7 +190,7 @@ describe("/api/alerts", () => {
 describe("GET /api/journal", () => {
   it("summary, recent rows, reliability bins, suggested; filters", async () => {
     const jr = (id: string, cid: string, o: object) => ({ thesisId: id, conditionId: cid, category: "politics", model: "m1", pHat: 0.7, pPre: 0.6, midAt: 0.5, liquidityAt: 3000, r: 0.5, side: "YES", stake: 10, result: "YES", resolvedAt: new Date(NOW), brierModel: 0.09, brierMarket: 0.25, brierPre: 0.16, logLoss: 0.35, paperPnl: 5, ...o });
-    await db.insert(S.journal).values([
+    await db.journal.insertMany([
       jr("t-a-new", ids.a, {}),
       jr("t-a-old", ids.a, { category: "sports", model: "m2", result: null, resolvedAt: null, brierModel: null, brierMarket: null, paperPnl: null }),
       jr("t-d", ids.d, { result: "NO", paperPnl: -10, brierModel: 0.49, brierMarket: 0.25 }),
@@ -214,9 +212,9 @@ describe("GET /api/journal", () => {
 
 describe("GET /api/status", () => {
   it("cheap counters", async () => {
-    await db.insert(S.pods).values([{ id: "pod1", conditionId: ids.a, trigger: "manual", status: "running" }, { id: "pod2", conditionId: ids.b, trigger: "manual", status: "done" }]);
-    await db.insert(S.spend).values({ day: new Date(NOW).toISOString().slice(0, 10), anthropicUsd: 1.5 });
-    await db.insert(S.alerts).values({ kind: "mid_move", message: "x" });
+    await db.pods.insertMany([{ id: "pod1", conditionId: ids.a, trigger: "manual", status: "running" }, { id: "pod2", conditionId: ids.b, trigger: "manual", status: "done" }]);
+    await db.spend.insert({ day: new Date(NOW).toISOString().slice(0, 10), anthropicUsd: 1.5 });
+    await db.alerts.insert({ kind: "mid_move", message: "x" });
     const r = await (await h.status.GET()).json();
     expect(r).toEqual({ activeRuns: [{ id: "pod1", stage: null, question: expect.any(String) }], activeRunCount: 1, spendToday: { usd: 1.5, capUsd: 50 }, lastSnapshotAt: NOW, lastSweepAt: null, unackedAlerts: 1, mode: "L0" });
   });

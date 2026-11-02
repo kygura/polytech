@@ -1,11 +1,9 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Exchange } from "@pm/pm";
-import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { decide, deps, downgradeOn, expireProposals, exposureOf, kill, orderUi, paperBook, propose, read, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.NTFY_TOPIC = "pm-test";
 process.env.APP_URL = "https://app.test";
 
@@ -20,8 +18,13 @@ const pushed: any[] = [];
 let onPush: (() => Promise<unknown>) | undefined; // test hook: runs inside the next ntfy POST
 let groups: { c: string; g: string | null }[] = [];
 
-const pending = async () => d.db.select().from(s.proposals).where(eq(s.proposals.status, "pending")).orderBy(s.proposals.createdAt);
-const proposal = async (id: string) => (await d.db.select().from(s.proposals).where(eq(s.proposals.id, id)))[0]!;
+const pending = async () => d.db.proposals.find("status", { status: "pending" }); // by createdAt
+const proposal = async (id: string) => (await d.db.proposals.get(id))!;
+const order = async (id: string) => (await d.db.orders.get(id))!;
+const lastEvent = async () => (await d.db.autonomyEvents.first("byId", {}, { order: "desc" }))!;
+const allProposals = () => d.db.proposals.find("byCreated", {});
+/** update every market row (all-rows UPDATE) */
+const setMarkets = async (patch: Partial<typeof s.markets.$inferSelect>) => void (await d.db.markets.updateMany(await d.db.markets.pks(), patch));
 const withLimits = (l: Partial<Deps["settings"]["limits"]>) => ({ ...d, settings: { ...d.settings, limits: { ...d.settings.limits, ...l } } });
 
 beforeAll(async () => {
@@ -45,8 +48,8 @@ beforeAll(async () => {
   await setMode(d, "L1", "test");
   await paperBook(d);
   // structural (neg-risk) legs are skipped in L2; free them so the flow tests have enough proposals, restored in the last test
-  groups = (await d.db.select({ c: s.markets.conditionId, g: s.markets.negRiskGroup }).from(s.markets)).filter((x) => x.g);
-  await d.db.update(s.markets).set({ negRiskGroup: null });
+  groups = (await d.db.markets.all()).map((m) => ({ c: m.conditionId, g: m.negRiskGroup })).filter((x) => x.g);
+  await setMarkets({ negRiskGroup: null });
 }, 60_000);
 
 describe("live L2 (fake exchange)", () => {
@@ -55,7 +58,7 @@ describe("live L2 (fake exchange)", () => {
     expect((await read.autonomy({ db: d.db, now: d.now })).executionEnabled).toBe(false);
     expect(await propose(d)).toMatchObject({ mode: "L1", proposed: 0 });
     expect(await setMode(d, "L2", "go")).toMatchObject({ allowed: true, mode: "L2" });
-    expect((await d.db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(1))[0]!.reason).toBe("go (gate not met)"); // advisory gate (0/50 resolved) logged, not blocking
+    expect((await lastEvent()).reason).toBe("go (gate not met)"); // advisory gate (0/50 resolved) logged, not blocking
     expect(pushed.at(-1)).toMatchObject({ title: "Mode changed", message: expect.stringContaining("L1 -> L2") });
     expect(pushed.at(-1).actions).toBeUndefined();
     expect(await setMode({ ...d, exchange: null }, "L3", "go")).toMatchObject({ allowed: false, mode: "L2" }); // phase 7: L3+ needs the exchange only
@@ -93,7 +96,7 @@ describe("live L2 (fake exchange)", () => {
     expect(places).toBe(before + 1);
     const after = await proposal(p.id);
     expect(after).toMatchObject({ status: "sent", decidedVia: "web", approveTokenHash: "", rejectTokenHash: "" });
-    const o = (await d.db.select().from(s.orders).where(eq(s.orders.id, after.orderId!)))[0]!;
+    const o = await order(after.orderId!);
     expect(o).toMatchObject({ paper: false, status: "live", clobOrderId: "fake-1", idempotencyKey: `${p.thesisId}:0`, attempt: 0, size: p.shares, limitPrice: p.limitPrice, approval: "user", modeAtSend: "L2" });
     expect((await fx.openOrders())[0]).toMatchObject({ tokenId: p.tokenId, side: "BUY", price: p.limitPrice, shares: p.shares });
     expect(events.map((e) => e.payload?.state).filter(Boolean)).toEqual(expect.arrayContaining(["sending", "sent"]));
@@ -132,12 +135,12 @@ describe("live L2 (fake exchange)", () => {
   });
 
   it("recon mismatch halts approvals and proposing", async () => {
-    await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+    await d.db.reconciliations.insert({ ok: false, usdcLedger: 1, usdcExchange: 2 });
     const p = (await pending())[0]!;
     expect(await decide(d, p.id, "approve", "web")).toEqual({ ok: false, error: "orders halted" });
     expect((await proposal(p.id)).status).toBe("pending");
     expect(await propose(d)).toMatchObject({ proposed: 0, skipped: { RECON_HALTED: 1 } });
-    await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    await d.db.reconciliations.insert({ ok: true, usdcLedger: 1, usdcExchange: 1 });
   });
 
   it("place throws -> order 'unknown', proposal failed, never resent", async () => {
@@ -148,7 +151,7 @@ describe("live L2 (fake exchange)", () => {
     expect(r).toMatchObject({ ok: true, state: "failed" });
     expect((r as { error: string }).error).not.toContain("ab".repeat(32));
     const after = await proposal(p.id);
-    expect((await d.db.select().from(s.orders).where(eq(s.orders.id, after.orderId!)))[0]!.status).toBe("unknown");
+    expect((await order(after.orderId!)).status).toBe("unknown");
     expect(await decide(d, p.id, "approve", "web")).toEqual({ ok: false, error: "ALREADY_DECIDED" });
     expect(places).toBe(before + 1);
     expect((await propose(d) as { proposed: number }).proposed).toBe(0); // failed thesis / unknown-order market not re-proposed
@@ -165,9 +168,9 @@ describe("live L2 (fake exchange)", () => {
 
   it("expiry: PRICE_MOVED on a > 2c move, TIMEOUT after 15 min; expired theses re-proposed unless risk blocks", async () => {
     const p = (await pending())[0]!;
-    const snap = (await d.db.select().from(s.snapshots).where(eq(s.snapshots.conditionId, p.conditionId)).orderBy(desc(s.snapshots.ts)).limit(1))[0]!;
+    const snap = (await d.db.snapshots.first("cond", { conditionId: p.conditionId }, { order: "desc" }))!;
     const { id: _, ...copy } = snap;
-    await d.db.insert(s.snapshots).values({ ...copy, ts: new Date(d.now()), mid: snap.mid! + 0.03 });
+    await d.db.snapshots.insert({ ...copy, ts: new Date(d.now()), mid: snap.mid! + 0.03 });
     expect(await expireProposals(d)).toMatchObject({ expired: 1 });
     expect(await proposal(p.id)).toMatchObject({ status: "expired", error: "PRICE_MOVED" });
     const again = await propose(d); // fresh book: the expired thesis comes back as a new pending proposal
@@ -186,10 +189,10 @@ describe("live L2 (fake exchange)", () => {
 
 describe("live L2 hardening", () => {
   const reset = async () => {
-    await d.db.delete(s.proposals);
-    await d.db.delete(s.fills).where(eq(s.fills.paper, false));
-    await d.db.delete(s.orders).where(eq(s.orders.paper, false));
-    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    await d.db.proposals.deleteMany(await d.db.proposals.ids("byCreated", {}));
+    await d.db.fills.deleteMany(await d.db.fills.ids("book", { paper: false }));
+    await d.db.orders.deleteMany(await d.db.orders.ids("book", { paper: false }));
+    await d.db.positions.deleteMany(await d.db.positions.ids("book", { paper: false }));
     await fx.cancelAll();
   };
   /** clean live book, L2, fresh pending proposals */
@@ -222,7 +225,7 @@ describe("live L2 hardening", () => {
   it("send failure does not emit failed when sync already moved the proposal on", async () => {
     const p = (await fresh())[0]!;
     events.length = 0;
-    const dd = { ...d, exchange: { ...fx, place: async () => { await d.db.update(s.proposals).set({ status: "sent" }).where(eq(s.proposals.id, p.id)); throw new Error("boom"); } } } as Deps;
+    const dd = { ...d, exchange: { ...fx, place: async () => { await d.db.proposals.update(p.id, { status: "sent" }); throw new Error("boom"); } } } as Deps;
     await decide(dd, p.id, "approve", "web");
     expect((await proposal(p.id)).status).toBe("sent");
     expect(events.filter((e) => e.type === "proposal.updated" && e.payload.id === p.id && e.payload.state === "failed")).toHaveLength(0);
@@ -231,17 +234,17 @@ describe("live L2 hardening", () => {
   it("kill between CAS and place: nothing is sent, order cancelled, proposal failed KILLED", async () => {
     const p = (await fresh())[0]!;
     const before = places;
+    const pass = (t0: any, k: string | symbol) => { const v = t0[k]; return typeof v === "function" ? v.bind(t0) : v; };
     const dd = { ...d, db: new Proxy(d.db, { get: (t0: any, k) => { // kill lands right after the order row is written, before place
-      const v = t0[k];
-      if (k !== "insert") return typeof v === "function" ? v.bind(t0) : v;
-      return (tbl: unknown) => { const q = t0.insert(tbl); return tbl !== s.orders ? q : { values: async (x: unknown) => { const r = await q.values(x); await kill({ db: d.db, now: d.now }); return r; } }; };
+      if (k !== "orders") return pass(t0, k);
+      return new Proxy(t0.orders, { get: (h: any, m) => m !== "insert" ? pass(h, m) : async (x: unknown) => { const r = await h.insert(x); await kill({ db: d.db, now: d.now }); return r; } });
     } }) } as Deps;
     expect(await decide(dd, p.id, "approve", "web")).toMatchObject({ ok: true, state: "failed", error: "KILLED" });
     expect(places).toBe(before);
     expect(await openIds()).toEqual([]);
     const after = await proposal(p.id);
     expect(after.status).toBe("failed");
-    expect((await d.db.select().from(s.orders).where(eq(s.orders.id, after.orderId!)))[0]).toMatchObject({ status: "cancelled", clobOrderId: null });
+    expect(await order(after.orderId!)).toMatchObject({ status: "cancelled", clobOrderId: null });
     expect(pushed.at(-1)).toMatchObject({ title: "Mode changed", message: expect.stringContaining("KILL_SWITCH") });
   });
 
@@ -250,7 +253,7 @@ describe("live L2 hardening", () => {
     const dd = { ...d, exchange: { ...fx, place: async (o: Parameters<Exchange["place"]>[0]) => { const r = await fx.place(o); await kill({ db: d.db, now: d.now }); return r; } } } as Deps; // kill without exchange: cancelAll cannot catch this order
     expect(await decide(dd, p.id, "approve", "web")).toMatchObject({ ok: true, state: "failed", error: "KILLED" });
     expect(await openIds()).toEqual([]);
-    expect((await d.db.select().from(s.orders).where(eq(s.orders.id, (await proposal(p.id)).orderId!)))[0]!.status).toBe("cancelled");
+    expect((await order((await proposal(p.id)).orderId!)).status).toBe("cancelled");
   });
 
   it("approve is busy while the live-send lock is held; proposal stays pending", async () => {
@@ -279,7 +282,7 @@ describe("live L2 hardening", () => {
 
   it("approve-time price policy: limit worse than pPost - 0.02 expires PRICE_MOVED", async () => {
     const p = (await fresh())[0]!;
-    await d.db.update(s.proposals).set({ limitPrice: 0.99 }).where(eq(s.proposals.id, p.id));
+    await d.db.proposals.update(p.id, { limitPrice: 0.99 });
     const before = places;
     expect(await decide(d, p.id, "approve", "web")).toEqual({ ok: true, state: "expired", reason: "PRICE_MOVED" });
     expect(places).toBe(before);
@@ -287,8 +290,8 @@ describe("live L2 hardening", () => {
 
   it("expireProposals fails 'approved' without an order after 2 min (STUCK_APPROVED)", async () => {
     const [a, b] = await fresh();
-    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
-    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t) }).where(eq(s.proposals.id, b!.id)); // still within 2 min
+    await d.db.proposals.update(a!.id, { status: "approved", decidedAt: new Date(t - 3 * 60_000) });
+    await d.db.proposals.update(b!.id, { status: "approved", decidedAt: new Date(t) }); // still within 2 min
     expect(await expireProposals(d)).toMatchObject({ stuck: 1 });
     expect(await proposal(a!.id)).toMatchObject({ status: "failed", error: "STUCK_APPROVED" });
     expect((await proposal(b!.id)).status).toBe("approved");
@@ -296,16 +299,16 @@ describe("live L2 hardening", () => {
 
   it("stuck sweep matches by proposal id: another order on the same thesis does not hide it", async () => {
     const [a] = await fresh();
-    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
-    await d.db.insert(s.orders).values({ id: "ord_other", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:other`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 60_000), proposalId: null });
+    await d.db.proposals.update(a!.id, { status: "approved", decidedAt: new Date(t - 3 * 60_000) });
+    await d.db.orders.insert({ id: "ord_other", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:other`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 60_000), proposalId: null });
     expect(await expireProposals(d)).toMatchObject({ stuck: 1 });
     expect(await proposal(a!.id)).toMatchObject({ status: "failed", error: "STUCK_APPROVED" });
   });
 
   it("expireProposals does not fail an approved proposal that already has an order row", async () => {
     const [a] = await fresh();
-    await d.db.update(s.proposals).set({ status: "approved", decidedAt: new Date(t - 3 * 60_000) }).where(eq(s.proposals.id, a!.id));
-    await d.db.insert(s.orders).values({ id: "ord_hasrow", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:stuckrow`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 2 * 60_000), proposalId: a!.id });
+    await d.db.proposals.update(a!.id, { status: "approved", decidedAt: new Date(t - 3 * 60_000) });
+    await d.db.orders.insert({ id: "ord_hasrow", thesisId: a!.thesisId, idempotencyKey: `${a!.thesisId}:stuckrow`, paper: false, conditionId: a!.conditionId, tokenId: a!.tokenId, side: "BUY", limitPrice: 0.5, size: 1, modeAtSend: "L2", status: "sending", createdAt: new Date(t - 2 * 60_000), proposalId: a!.id });
     expect(await expireProposals(d)).toMatchObject({ stuck: 0 });
     expect((await proposal(a!.id)).status).toBe("approved");
   });
@@ -323,9 +326,9 @@ describe("live L2 hardening", () => {
   it("L2 auto-downgrades: daily loss on the live book, stale book falls to L0 not stay L2", async () => {
     await reset();
     await setMode(d, "L2", "test");
-    await d.db.insert(s.positions).values({ conditionId: "0xloss", tokenId: "tok", size: 1, avgCost: 0.5, realizedPnl: -10, openedAt: new Date(t), closedAt: new Date(t), paper: false });
+    await d.db.positions.insert({ conditionId: "0xloss", tokenId: "tok", size: 1, avgCost: 0.5, realizedPnl: -10, openedAt: new Date(t), closedAt: new Date(t), paper: false });
     expect(await propose(withLimits({ dailyLoss: 5 }))).toMatchObject({ mode: "L0" });
-    expect((await d.db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(1))[0]).toMatchObject({ toMode: "L0", reason: "DAILY_LOSS_LIMIT", actor: "auto-downgrade" });
+    expect(await lastEvent()).toMatchObject({ toMode: "L0", reason: "DAILY_LOSS_LIMIT", actor: "auto-downgrade" });
     expect(pushed.at(-1)).toMatchObject({ title: "Mode changed", message: expect.stringContaining("DAILY_LOSS_LIMIT") });
     await reset();
     await setMode(d, "L2", "test");
@@ -334,7 +337,7 @@ describe("live L2 hardening", () => {
   });
 
   it("single-leg directional theses on neg-risk markets are proposed, not skipped", async () => {
-    for (const x of groups) await d.db.update(s.markets).set({ negRiskGroup: x.g }).where(eq(s.markets.conditionId, x.c));
+    for (const x of groups) await d.db.markets.update(x.c, { negRiskGroup: x.g });
     await reset();
     await setMode(d, "L2", "test");
     const r = (await propose(d)) as { skipped: Record<string, number> };
@@ -345,20 +348,20 @@ describe("live L2 hardening", () => {
 
 describe("live L3/L4 auto (fake exchange)", () => {
   const reset = async () => {
-    await d.db.delete(s.proposals);
-    await d.db.delete(s.fills).where(eq(s.fills.paper, false));
-    await d.db.delete(s.orders).where(eq(s.orders.paper, false));
-    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
+    await d.db.proposals.deleteMany(await d.db.proposals.ids("byCreated", {}));
+    await d.db.fills.deleteMany(await d.db.fills.ids("book", { paper: false }));
+    await d.db.orders.deleteMany(await d.db.orders.ids("book", { paper: false }));
+    await d.db.positions.deleteMany(await d.db.positions.ids("book", { paper: false }));
     await fx.cancelAll();
   };
   const withL3 = (l3: Partial<Deps["settings"]["limits"]["l3"]>) => withLimits({ l3: { ...d.settings.limits.l3, ...l3 } });
   const open = { perTradeUsd: 1e6, dailyNotional: 1e6 };
-  const liveOrders = async () => d.db.select().from(s.orders).where(eq(s.orders.paper, false));
+  const liveOrders = async () => d.db.orders.find("book", { paper: false });
   let cats: string[];
   const dd = () => withL3({ ...open, categoryAllowlist: cats });
   beforeAll(async () => {
-    cats = (await d.db.selectDistinct({ c: s.markets.category }).from(s.markets)).flatMap((x) => (x.c ? [x.c] : []));
-    await d.db.update(s.markets).set({ negRiskGroup: null });
+    cats = [...new Set((await d.db.markets.all()).map((m) => m.category))].flatMap((c) => (c ? [c] : []));
+    await setMarkets({ negRiskGroup: null });
   });
 
   it("L3 inside limits auto-sends: order approval auto, modeAtSend L3, no approval push", async () => {
@@ -373,7 +376,7 @@ describe("live L3/L4 auto (fake exchange)", () => {
     const os = (await liveOrders()).filter((o) => o.side === "BUY");
     expect(os).toHaveLength(r.sent);
     expect(os.every((o) => o.approval === "auto" && o.modeAtSend === "L3" && o.proposalId)).toBe(true);
-    const ps = await d.db.select().from(s.proposals).where(eq(s.proposals.kind, "entry"));
+    const ps = (await allProposals()).filter((p) => p.kind === "entry");
     expect(ps.every((p) => p.status === "sent" && p.decidedVia === "auto" && p.approveTokenHash === "")).toBe(true);
   });
 
@@ -419,15 +422,15 @@ describe("live L3/L4 auto (fake exchange)", () => {
   it("recon halt blocks the auto path at propose and at decide", async () => {
     await reset();
     await setMode(d, "L3", "test");
-    await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+    await d.db.reconciliations.insert({ ok: false, usdcLedger: 1, usdcExchange: 2 });
     const before = places;
     expect(await propose(dd())).toMatchObject({ proposed: 0, sent: 0, skipped: { RECON_HALTED: 1 } });
-    await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    await d.db.reconciliations.insert({ ok: true, usdcLedger: 1, usdcExchange: 1 });
     await propose(withL3({ ...open, categoryAllowlist: [] })); // pending via fallback
     const p = (await pending())[0]!;
-    await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+    await d.db.reconciliations.insert({ ok: false, usdcLedger: 1, usdcExchange: 2 });
     expect(await decide(dd(), p.id, "approve", "auto")).toEqual({ ok: false, error: "orders halted" });
-    await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+    await d.db.reconciliations.insert({ ok: true, usdcLedger: 1, usdcExchange: 1 });
     expect(places).toBe(before);
     expect((await proposal(p.id)).status).toBe("pending");
   });
@@ -444,11 +447,11 @@ describe("live L3/L4 auto (fake exchange)", () => {
     expect(places).toBe(before);
     await reset();
     await setMode(d, "L3", "test");
-    await d.db.insert(s.positions).values({ conditionId: "0xloss", tokenId: "tok", size: 1, avgCost: 0.5, realizedPnl: -10, openedAt: new Date(t), closedAt: new Date(t), paper: false });
+    await d.db.positions.insert({ conditionId: "0xloss", tokenId: "tok", size: 1, avgCost: 0.5, realizedPnl: -10, openedAt: new Date(t), closedAt: new Date(t), paper: false });
     const r = await propose(withLimits({ dailyLoss: 5, l3: { ...d.settings.limits.l3, ...open, categoryAllowlist: cats } }));
     expect(r).toMatchObject({ mode: "L0" });
     expect(places).toBe(before);
-    await d.db.delete(s.positions).where(eq(s.positions.conditionId, "0xloss"));
+    await d.db.positions.deleteMany(await d.db.positions.ids("cond", { conditionId: "0xloss" }));
   });
 
   /** A held live position (matched entry order) whose thesis is killed. */
@@ -459,14 +462,14 @@ describe("live L3/L4 auto (fake exchange)", () => {
     const p = (await pending())[0]!;
     await decide(d, p.id, "approve", "web");
     const o = (await liveOrders())[0]!;
-    await d.db.update(s.orders).set({ status: "matched" }).where(eq(s.orders.id, o.id));
-    await d.db.insert(s.positions).values({ conditionId: p.conditionId, tokenId: p.tokenId, size: p.shares, avgCost: p.limitPrice, realizedPnl: 0, openedAt: new Date(t), paper: false });
-    const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0]!;
-    await d.db.update(s.theses).set({ detail: { ...(th.detail as object), status: "killed" } }).where(eq(s.theses.id, th.id));
-    await d.db.update(s.proposals).set({ status: "expired" }).where(eq(s.proposals.status, "pending")); // leave only the exit pending
+    await d.db.orders.update(o.id, { status: "matched" });
+    await d.db.positions.insert({ conditionId: p.conditionId, tokenId: p.tokenId, size: p.shares, avgCost: p.limitPrice, realizedPnl: 0, openedAt: new Date(t), paper: false });
+    const th = (await d.db.theses.get(p.thesisId))!;
+    await d.db.theses.update(th.id, { detail: { ...(th.detail as object), status: "killed" } });
+    await d.db.proposals.updateMany(await d.db.proposals.ids("status", { status: "pending" }), (r) => (r.status === "pending" ? { status: "expired" } : null)); // leave only the exit pending
     return p;
   };
-  const exits = async () => d.db.select().from(s.proposals).where(eq(s.proposals.kind, "exit"));
+  const exits = async () => (await allProposals()).filter((p) => p.kind === "exit");
 
   it("exit at L2: killed thesis => pending SELL exit proposal; approve sends a SELL", async () => {
     const held = await heldKilled();
@@ -506,7 +509,7 @@ describe("live L3/L4 auto (fake exchange)", () => {
     await decide(d, a!.id, "approve", "web");
     await setMode(d, "L3", "test");
     await decide(dd(), b!.id, "approve", "auto");
-    for (const o of await liveOrders()) await d.db.insert(s.fills).values({ orderId: o.id, price: o.limitPrice, size: o.size, paper: false, tradeId: `t-${o.id}` });
+    for (const o of await liveOrders()) await d.db.fills.insert({ orderId: o.id, price: o.limitPrice, size: o.size, paper: false, tradeId: `t-${o.id}` });
     const g = (await read.autonomy({ db: d.db, now: d.now })).gates;
     expect(g[1]).toMatchObject({ gate: "L2->L3", approvedTrades: 1, met: false });
     expect((g[1] as { avgSlippageC: number }).avgSlippageC).toEqual(expect.any(Number));
@@ -515,18 +518,18 @@ describe("live L3/L4 auto (fake exchange)", () => {
 
   describe("per-market tick", () => {
     const grid = (x: number, tick: number) => Math.abs(x / tick - Math.round(x / tick)) <= 1e-6;
-    const setTick = (tick: number | null) => d.db.update(s.markets).set({ tickSize: tick });
+    const setTick = (tick: number | null) => setMarkets({ tickSize: tick });
     afterAll(async () => void (await setTick(null)));
 
     it("sweep upsert keeps the stored tick_size when the new one is null, overwrites when set", async () => {
       await setTick(0.001);
-      const known = new Set((await d.db.select({ c: s.markets.conditionId }).from(s.markets)).map((r) => r.c));
+      const known = new Set(await d.db.markets.pks());
       const listed = (await d.pm.listMarkets()).filter((m) => known.has(m.condition_id));
       const sweep = (f: (i: number) => number | undefined) => sweepUniverse({ ...d, pm: { ...d.pm, walkMarkets: async (_o: unknown, on: (ms: typeof listed) => Promise<void>) => { await on(listed.map((m, i) => ({ ...m, tick_size: f(i) }))); return { pages: 1, complete: true }; } } as typeof d.pm });
       await sweep(() => undefined);
-      expect((await d.db.select({ x: s.markets.tickSize }).from(s.markets)).every((r) => r.x === 0.001)).toBe(true);
+      expect((await d.db.markets.all()).every((r) => r.tickSize === 0.001)).toBe(true);
       await sweep((i) => (i === 0 ? 0.05 : undefined));
-      const rows = await d.db.select({ c: s.markets.conditionId, x: s.markets.tickSize }).from(s.markets);
+      const rows = (await d.db.markets.all()).map((m) => ({ c: m.conditionId, x: m.tickSize }));
       expect(rows.find((r) => r.c === listed[0]!.condition_id)!.x).toBe(0.05);
       expect(rows.filter((r) => r.x === 0.001).length).toBe(rows.length - 1);
     });
@@ -535,9 +538,9 @@ describe("live L3/L4 auto (fake exchange)", () => {
       it(`propose and exit limits sit on a ${tick} tick`, async () => {
         await setTick(tick);
         const held = await heldKilled(); // proposes (entry) at this tick
-        await d.db.update(s.proposals).set({ status: "expired" }).where(eq(s.proposals.kind, "entry"));
+        await d.db.proposals.updateMany((await allProposals()).filter((p) => p.kind === "entry").map((p) => p.id), (r) => (r.kind === "entry" ? { status: "expired" } : null));
         await propose(d);
-        const entries = (await d.db.select().from(s.proposals).where(eq(s.proposals.kind, "entry"))).filter((x) => x.status === "pending");
+        const entries = (await allProposals()).filter((x) => x.kind === "entry" && x.status === "pending");
         expect(entries.length + (await exits()).length).toBeGreaterThan(0);
         for (const x of [...entries, ...(await exits())]) expect(grid(x.limitPrice, tick), `${x.kind} ${x.limitPrice}`).toBe(true);
         expect((await exits())[0]!.tokenId).toBe(held.tokenId);
@@ -550,7 +553,7 @@ describe("live L3/L4 auto (fake exchange)", () => {
         await propose(d);
         const [a, b] = await pending();
         const before = places;
-        await d.db.update(s.proposals).set({ limitPrice: a!.limitPrice - tick / 2 }).where(eq(s.proposals.id, a!.id));
+        await d.db.proposals.update(a!.id, { limitPrice: a!.limitPrice - tick / 2 });
         expect(await decide(d, a!.id, "approve", "web")).toEqual({ ok: true, state: "expired", reason: "PRICE_MOVED" });
         expect(places).toBe(before);
         expect(await decide(d, b!.id, "approve", "web")).toMatchObject({ ok: true, state: "sent" });

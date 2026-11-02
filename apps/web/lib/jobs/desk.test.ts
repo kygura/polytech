@@ -1,11 +1,8 @@
 import { fakeJudge, fakeRunner, type AgentRunner, type Triage } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { and, eq, isNull } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { cancelPaperOrder, deps, latestSnaps, listPaperOrders, placePaperOrder, read, researchMarket, restingBuy, restingSell, sellFill, snapshotBooks, stopHit, sweepUniverse, triageMarkets, triageRules, workPaperOrders, type Deps } from "./index";
-
-process.env.PGLITE_DIR = "memory://";
 
 let d: Deps, ok: string[];
 const calls: string[] = [];
@@ -15,7 +12,7 @@ beforeAll(async () => {
   let t = Date.parse("2026-10-15T12:00:00Z");
   d = await deps({ pm: createPm({ fixtures: true }), kv: memoryKv(), now: () => (t += 1), runner: fakeRunner, judge: fakeJudge, triage });
   await sweepUniverse(d); await snapshotBooks(d, "all");
-  const all = (await d.db.select({ c: s.markets.conditionId }).from(s.markets).where(eq(s.markets.status, "active"))).map((r) => r.c);
+  const all = (await d.db.markets.find("status", { status: "active" })).map((r) => r.conditionId);
   const snaps = await latestSnaps(d.db, all);
   ok = all.filter((c) => { const b = snaps.get(c); return b?.book?.asks.length && b.book.bids.length && b.mid != null && b.mid > 0.15 && b.mid < 0.85; }); // mid-range: the tests price limits 5-10c either side
 }, 60_000);
@@ -73,10 +70,10 @@ describe("paper orders", () => {
   const nextBook = async (id: string, book: { bids: { price: number; size: number }[]; asks: { price: number; size: number }[] }, mid?: number) => {
     const { id: _, ...snap } = (await latestSnaps(d.db, [id])).get(id)!;
     const ts = new Date(d.now() + 60_000);
-    await d.db.insert(s.snapshots).values({ ...snap, ts, book: { ...snap.book!, ...book }, ...(mid != null ? { mid } : {}) });
-    await d.db.update(s.marketLatest).set({ ts }).where(eq(s.marketLatest.conditionId, id));
+    await d.db.snapshots.insert({ ...snap, ts, book: { ...snap.book!, ...book }, ...(mid != null ? { mid } : {}) });
+    await d.db.marketLatest.update(id, { ts });
   };
-  const openPos = (tokenId: string) => d.db.select().from(s.positions).where(and(eq(s.positions.tokenId, tokenId), eq(s.positions.paper, true), isNull(s.positions.closedAt)));
+  const openPos = async (tokenId: string) => (await d.db.positions.find("bookToken", { paper: true, tokenId })).filter((p) => p.closedAt === null);
 
   it("sellFill walks bids best first", () => {
     expect(sellFill([{ price: 0.4, size: 10 }, { price: 0.5, size: 5 }], 10)).toMatchObject({ shares: 10, avgPrice: 0.45, complete: true });
@@ -85,7 +82,7 @@ describe("paper orders", () => {
 
   it("BUY fills against the asks into one position, SELL reduces then closes it with realized P&L", async () => {
     const id = ok[2]!;
-    const m = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, id)))[0]!;
+    const m = (await d.db.markets.get(id))!;
     const buy = await placePaperOrder(d, { conditionId: id, outcome: "YES", side: "BUY", usd: 5 });
     if (!buy.ok) throw new Error(buy.error);
     expect(buy.shares).toBeGreaterThan(0);
@@ -101,7 +98,7 @@ describe("paper orders", () => {
     if (!rest.ok) throw new Error(rest.error);
     expect(await openPos(m.yesTokenId!)).toHaveLength(0);
     expect(typeof rest.realizedPnl).toBe("number");
-    const orders = await d.db.select().from(s.orders).where(and(eq(s.orders.conditionId, id), eq(s.orders.thesisId, "manual")));
+    const orders = (await d.db.orders.find("cond", { conditionId: id })).filter((o) => o.thesisId === "manual");
     expect(orders).toHaveLength(4);
     expect(orders.every((o) => o.paper && o.status === "paper_filled")).toBe(true);
     const book = await read.paperBook(d);
@@ -144,7 +141,7 @@ describe("paper orders", () => {
     expect(list.working).toHaveLength(0);
     expect(list.closed[0]).toMatchObject({ status: "filled", usd: 0 });
     expect(list.closed[0]!.filledShares).toBeCloseTo(5 / below, 6);
-    const m = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, id)))[0]!;
+    const m = (await d.db.markets.get(id))!;
     expect((await openPos(m.yesTokenId!))[0]!.avgCost).toBeCloseTo(below, 9);
     // a sell limit far above the market rests until cancelled
     const sell = await placePaperOrder(d, { conditionId: id, outcome: "YES", side: "SELL", shares: 1, limit: 0.99 });
@@ -155,7 +152,7 @@ describe("paper orders", () => {
 
   it("a sell stop waits below the price, fires when the price falls to it and sells at market", async () => {
     const id = ok[5]!;
-    const m = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, id)))[0]!;
+    const m = (await d.db.markets.get(id))!;
     const buy = await placePaperOrder(d, { conditionId: id, outcome: "YES", side: "BUY", usd: 5 });
     if (!buy.ok) throw new Error(buy.error);
     const snap = (await latestSnaps(d.db, [id])).get(id)!;

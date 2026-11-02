@@ -1,7 +1,6 @@
 import { applyFill, reconcile } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, max, notExists, or, sql } from "drizzle-orm";
 import { downgradeOn } from "./autonomy";
 import { DAY, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -20,13 +19,19 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 
 /** Apply one live trade to the open live position of its token (opens it on a buy). A sell beyond the position is skipped; reconcile flags the drift. */
 async function applyToPosition(d: Pick<Deps, "db">, o: Order, t: Trade) {
-  const [pos] = await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), eq(s.positions.tokenId, t.tokenId), isNull(s.positions.closedAt))).limit(1);
+  const pos = (await d.db.positions.find("bookToken", { paper: false, tokenId: t.tokenId })).find((p) => p.closedAt === null) ?? null;
   const fill = { side: t.side === "BUY" ? ("buy" as const) : ("sell" as const), shares: t.shares, price: t.price, fee: t.fee };
   if (!pos && fill.side === "sell") return lateSell(d, t);
   try {
-    const next = applyFill(pos ? { shares: pos.size, avgCost: pos.avgCost, realizedPnl: pos.realizedPnl } : { shares: 0, avgCost: 0, realizedPnl: 0 }, fill);
-    if (!pos) await d.db.insert(s.positions).values({ conditionId: o.conditionId, tokenId: t.tokenId, size: next.shares, avgCost: next.avgCost, realizedPnl: 0, openedAt: t.at, paper: false });
-    else await d.db.update(s.positions).set({ size: next.shares, avgCost: next.avgCost, realizedPnl: next.realizedPnl, closedAt: next.shares <= EPS ? t.at : null }).where(eq(s.positions.id, pos.id));
+    if (!pos) {
+      const next = applyFill({ shares: 0, avgCost: 0, realizedPnl: 0 }, fill);
+      await d.db.positions.insert({ conditionId: o.conditionId, tokenId: t.tokenId, size: next.shares, avgCost: next.avgCost, realizedPnl: 0, openedAt: t.at, paper: false });
+    } else {
+      await d.db.positions.update(pos.id, (cur) => { // applied to the current row (read-modify-write as one compare-and-set)
+        const next = applyFill({ shares: cur.size, avgCost: cur.avgCost, realizedPnl: cur.realizedPnl }, fill);
+        return { size: next.shares, avgCost: next.avgCost, realizedPnl: next.realizedPnl, closedAt: next.shares <= EPS ? t.at : null };
+      });
+    }
   } catch {
     /* sell exceeds position */
   }
@@ -37,26 +42,25 @@ async function applyToPosition(d: Pick<Deps, "db">, o: Order, t: Trade) {
  * the venue paid the sale price instead, so realized PnL moves by (proceeds - fee - payout). No closed position at/after the fill time => nothing to correct (reconcile flags drift).
  */
 async function lateSell(d: Pick<Deps, "db">, t: Trade) {
-  const [pos] = await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), eq(s.positions.tokenId, t.tokenId), isNotNull(s.positions.closedAt), gte(s.positions.closedAt, t.at))).orderBy(desc(s.positions.id)).limit(1);
+  const pos = (await d.db.positions.find("bookToken", { paper: false, tokenId: t.tokenId }, { order: "desc" })).find((p) => p.closedAt !== null && p.closedAt.getTime() >= t.at.getTime());
   if (!pos) return;
-  const [m] = await d.db.select().from(s.markets).where(eq(s.markets.conditionId, pos.conditionId));
-  const [out] = await d.db.select().from(s.outcomes).where(eq(s.outcomes.conditionId, pos.conditionId));
+  const [m, out] = await Promise.all([d.db.markets.get(pos.conditionId), d.db.outcomes.get(pos.conditionId)]);
   if (!m || !out) return; // closed by something other than a resolution
   const payout = (out.result === "YES") === (t.tokenId === m.yesTokenId) ? t.shares : 0;
-  await d.db.update(s.positions).set({ realizedPnl: pos.realizedPnl + t.price * t.shares - t.fee - payout }).where(eq(s.positions.id, pos.id));
+  const delta = t.price * t.shares - t.fee - payout;
+  await d.db.positions.update(pos.id, (cur) => ({ realizedPnl: cur.realizedPnl + delta }));
 }
 
 /** 3 newest live orders (since the last mode change) all rejected / unknown / failed => SPEC auto-downgrade. A mode change resets the streak, so re-raising to L2 is not instantly undone by old failures. */
 async function orderErrors(d: Pick<Deps, "db">) {
-  const [ev] = await d.db.select({ ts: s.autonomyEvents.ts }).from(s.autonomyEvents).where(eq(s.autonomyEvents.scope, "global")).orderBy(desc(s.autonomyEvents.id)).limit(1);
-  const rows = await d.db.select({ st: s.orders.status }).from(s.orders)
-    .where(and(eq(s.orders.paper, false), ev ? gt(s.orders.createdAt, ev.ts) : undefined)).orderBy(desc(s.orders.createdAt)).limit(3);
-  return rows.length === 3 && rows.every((r) => FAILURES.includes(r.st)) ? 3 : 0;
+  const ev = await d.db.autonomyEvents.first("scope", { scope: "global" }, { order: "desc" });
+  const rows = await d.db.orders.find("book", { paper: false }, { order: "desc", limit: 3, ...(ev ? { gt: ev.ts } : {}) });
+  return rows.length === 3 && rows.every((r) => FAILURES.includes(r.status)) ? 3 : 0;
 }
 
 /**
  * Pull trades + open orders; book new live fills (unique trade id => idempotent), move orders out of the open statuses, upsert live positions.
- * Order of writes (Neon HTTP has no tx): fill row first, then position. A crash between them loses a position update, which reconcile flags (fail-safe); the reverse would double-apply on retry.
+ * Order of writes (separate commits, deliberately): fill row first, then position. A crash between them loses a position update, which reconcile flags (fail-safe); the reverse would double-apply on retry.
  */
 export async function syncFills(d: Deps) {
   const res = { fills: 0, updated: 0, failedUnknown: 0, error: undefined as string | undefined };
@@ -64,24 +68,24 @@ export async function syncFills(d: Deps) {
   if (!ex) return res;
   return withLock(d, "sync", 5 * MIN, async () => {
     const { db } = d, now = d.now();
-    const last = ((await db.select({ ts: max(s.fills.ts) }).from(s.fills).where(eq(s.fills.paper, false))) as [{ ts: Date | null }])[0].ts;
+    const last = (await db.fills.first("book", { paper: false }, { order: "desc" }))?.ts ?? null;
     let trades: Trade[], open: Awaited<ReturnType<typeof ex.openOrders>>;
     try {
       [trades, open] = await Promise.all([ex.trades(new Date(last ? last.getTime() - MIN : now - DAY)), ex.openOrders()]); // 1 min overlap; unique trade id absorbs repeats
     } catch (e) {
       return { ...res, error: scrub(e instanceof Error ? e.message : "exchange error").slice(0, 300) };
     }
-    const orders = await db.select().from(s.orders).where(eq(s.orders.paper, false));
-    const filled = await liveFilled(db);
+    const [orders, filled] = await Promise.all([db.orders.find("book", { paper: false }), liveFilled(db)]);
     const claimed = new Set(orders.flatMap((o) => (o.clobOrderId ? [o.clobOrderId] : [])));
     const openIds = new Set(open.map((x) => x.orderId));
     const touched = new Set<string>();
     const emit = (o: Order) => publish("order.updated", { id: o.id, orderId: o.clobOrderId ?? o.id, status: orderUi(o.status, filled.get(o.id) ?? 0, o.size), filledShares: filled.get(o.id) ?? 0 });
     const setStatus = async (o: Order, status: string, extra: Partial<Order> = {}) => {
       Object.assign(o, { status, ...extra });
-      await db.update(s.orders).set({ status, ...extra }).where(eq(s.orders.id, o.id));
+      await db.orders.update(o.id, { status, ...extra });
       if (status !== "failed_unknown") return;
-      for (const p of await db.update(s.proposals).set({ status: "failed", error: "ORDER_FAILED_UNKNOWN" }).where(eq(s.proposals.orderId, o.id)).returning({ id: s.proposals.id }))
+      const pids = await db.proposals.ids("order", { orderId: o.id });
+      for (const p of pids.length ? await db.proposals.updateMany(pids, { status: "failed", error: "ORDER_FAILED_UNKNOWN" }) : [])
         publish("proposal.updated", { id: p.id, state: "failed", error: "ORDER_FAILED_UNKNOWN", orderId: o.clobOrderId ?? o.id });
     };
 
@@ -109,8 +113,8 @@ export async function syncFills(d: Deps) {
     for (const t of trades) {
       const o = byClob.get(t.orderId);
       if (!o) continue;
-      const ins = await db.insert(s.fills).values({ orderId: o.id, ts: t.at, price: t.price, size: t.shares, fee: t.fee, paper: false, tradeId: t.tradeId }).onConflictDoNothing().returning({ id: s.fills.id });
-      if (!ins.length) continue;
+      const ins = await db.fills.insertIfAbsent({ orderId: o.id, ts: t.at, price: t.price, size: t.shares, fee: t.fee, paper: false, tradeId: t.tradeId }); // tradeId unique
+      if (!ins) continue;
       await applyToPosition(d, o, t);
       filled.set(o.id, (filled.get(o.id) ?? 0) + t.shares);
       touched.add(o.id);
@@ -138,11 +142,15 @@ export async function syncFills(d: Deps) {
     await settleResolved(d, false); // resolved live markets close like paper (realized PnL feeds the daily-loss downgrade)
 
     // approved proposal whose order reached a terminal status: no permanent "sending"
-    for (const { p, st } of await db.select({ p: s.proposals, st: s.orders.status }).from(s.proposals).innerJoin(s.orders, eq(s.orders.id, s.proposals.orderId)).where(eq(s.proposals.status, "approved"))) {
+    const approved = (await db.proposals.find("status", { status: "approved" })).filter((p) => p.orderId !== null);
+    const linked = new Map((await db.orders.getMany([...new Set(approved.map((p) => p.orderId!))])).map((o) => [o.id, o.status]));
+    for (const p of approved) {
+      const st = linked.get(p.orderId!);
+      if (st === undefined) continue; // inner join: no order row
       const ok = st === "filled";
       if (!ok && !["cancelled", "expired", "rejected", "failed_unknown"].includes(st)) continue;
       const set = ok ? { status: "sent" } : { status: "failed", error: `ORDER_${st.toUpperCase()}` };
-      if ((await db.update(s.proposals).set(set).where(and(eq(s.proposals.id, p.id), eq(s.proposals.status, "approved"))).returning({ id: s.proposals.id })).length)
+      if (await db.proposals.update(p.id, (r) => (r.status === "approved" ? set : null)))
         publish("proposal.updated", { id: p.id, state: set.status, ...(ok ? {} : { error: set.error }), orderId: p.orderId });
     }
 
@@ -165,7 +173,7 @@ const snapshot = async (ex: NonNullable<Deps["exchange"]>) => {
   return { usdc: bal.usdc, positions };
 };
 const insertBaseline = async (d: Deps, at: Date, x: { usdc: number; positions: Record<string, number> }, detail: string | null) => {
-  await d.db.insert(s.reconciliations).values({ at, ok: true, baseline: true, usdcLedger: x.usdc, usdcExchange: x.usdc, positions: x.positions });
+  await d.db.reconciliations.insert({ at, ok: true, baseline: true, usdcLedger: x.usdc, usdcExchange: x.usdc, positions: x.positions });
   publish("recon.done", { at: at.toISOString(), status: "ok", detail });
 };
 
@@ -176,18 +184,20 @@ export async function reconcileJob(d: Deps) {
     const { db } = d, at = new Date(d.now());
     const synced = async () => { const r = await syncFills(d); return !("skipped" in r) && !r.error; }; // book what the exchange already shows, or in-flight trades read as drift
     if (!(await synced())) return { status: null }; // stale ledger: judging it would be a false alarm
-    const [base] = await db.select().from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
+    const base = await db.reconciliations.first("baseline", {}, { order: "desc" });
     let x = await snapshot(ex);
     if (!base) {
-      if ((await db.select({ n: count() }).from(s.reconciliations))[0]!.n) { // rows but no baseline (post-migration): a human must rebaseline
-        await db.insert(s.reconciliations).values({ at, ok: false, usdcLedger: 0, usdcExchange: x.usdc, mismatches: [{ key: NEEDS, ledger: 0, exchange: 0 }] });
+      if (await db.reconciliations.count("byId", {})) { // rows but no baseline (post-migration): a human must rebaseline
+        await db.reconciliations.insert({ at, ok: false, usdcLedger: 0, usdcExchange: x.usdc, mismatches: [{ key: NEEDS, ledger: 0, exchange: 0 }] });
         publish("recon.done", { at: at.toISOString(), status: "mismatch", detail: reconDetail([{ key: NEEDS, ledger: 0, exchange: 0 }]) });
         return { status: "mismatch", mismatches: 1 };
       }
       return (await insertBaseline(d, at, x, null), { status: "ok", mismatches: 0 });
     }
     const check = async () => {
-      const rows = await db.select({ f: s.fills, side: s.orders.side, tok: s.orders.tokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(and(eq(s.fills.paper, false), gt(s.fills.ts, base.at)));
+      const fs = await db.fills.find("book", { paper: false }, { gt: base.at });
+      const os = new Map((await db.orders.getMany([...new Set(fs.map((f) => f.orderId))])).map((o) => [o.id, o]));
+      const rows = fs.flatMap((f) => { const o = os.get(f.orderId); return o ? [{ f, side: o.side, tok: o.tokenId }] : []; }); // inner join
       const positions = { ...base.positions };
       for (const { f, side, tok } of rows) positions[tok] = (positions[tok] ?? 0) + (side === "BUY" ? 1 : -1) * f.size;
       const ledger = base.usdcExchange + rows.reduce((t, { f, side }) => t + (side === "BUY" ? -1 : 1) * f.price * f.size - f.fee, 0);
@@ -200,7 +210,7 @@ export async function reconcileJob(d: Deps) {
       c = await check();
     }
     const { ledger, r } = c;
-    await db.insert(s.reconciliations).values({ at, ok: r.ok, usdcLedger: ledger, usdcExchange: x.usdc, mismatches: r.mismatches });
+    await db.reconciliations.insert({ at, ok: r.ok, usdcLedger: ledger, usdcExchange: x.usdc, mismatches: r.mismatches });
     const status = r.ok ? "ok" : "mismatch";
     publish("recon.done", { at: at.toISOString(), status, detail: reconDetail(r.mismatches) });
     if (!r.ok) await downgradeOn(d, { balanceMismatch: true });
@@ -213,23 +223,25 @@ export async function rebaseline(d: Deps, opts: { ack?: boolean } = {}): Promise
   const ex = d.exchange;
   if (!ex) return { ok: false, error: "exchange not configured" };
   const r = await withLock(d, "reconcile", 5 * MIN, async () => {
-    const [busy] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, ["sending", "unknown"]))).limit(1);
+    const inFlight = () => d.db.orders.first("bookStatus", [{ paper: false, status: "sending" }, { paper: false, status: "unknown" }]);
+    const busy = await inFlight();
     if (busy) return { ok: false as const, error: "live orders are still sending or unknown" };
     const sy = await syncFills(d);
     if ("skipped" in sy || sy.error) return { ok: false as const, error: "fill sync unavailable, retry" };
     // matched with no fill booked yet: the venue says it traded, the trade is not visible; a baseline now would swallow it
-    const [still] = await d.db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), or(inArray(s.orders.status, ["sending", "unknown"]),
-      and(eq(s.orders.status, "matched"), notExists(d.db.select({ x: sql`1` }).from(s.fills).where(eq(s.fills.orderId, s.orders.id))))))).limit(1);
+    const [sending, matched] = await Promise.all([inFlight(), d.db.orders.find("bookStatus", { paper: false, status: "matched" })]);
+    const fillIds = await d.db.fills.idsEach("order", matched.map((o) => ({ orderId: o.id })), { limit: 1 });
+    const still = sending ?? matched.find((_, i) => !fillIds[i]!.length);
     if (still) return { ok: false as const, error: "live orders are still sending or unknown, or matched without fills" };
     const at = new Date(d.now());
     const snap = await snapshot(ex);
     // exchange vs DB open live positions, per token: shows what the new baseline would swallow
     const mine: Record<string, number> = {};
-    for (const p of await d.db.select().from(s.positions).where(and(eq(s.positions.paper, false), isNull(s.positions.closedAt)))) mine[p.tokenId] = (mine[p.tokenId] ?? 0) + p.size;
+    for (const p of await d.db.positions.find("open", { paper: false })) mine[p.tokenId] = (mine[p.tokenId] ?? 0) + p.size;
     const diff = reconDetail(Object.keys({ ...mine, ...snap.positions }).flatMap((key) => (Math.abs((mine[key] ?? 0) - (snap.positions[key] ?? 0)) > 0.01 ? [{ key, ledger: mine[key] ?? 0, exchange: snap.positions[key] ?? 0 }] : []))) ?? "none";
-    const [base] = await d.db.select({ at: s.reconciliations.at }).from(s.reconciliations).where(eq(s.reconciliations.baseline, true)).orderBy(desc(s.reconciliations.id)).limit(1);
-    const [lost] = opts.ack ? [] : await d.db.select({ n: count() }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.status, "failed_unknown"), base ? gt(s.orders.createdAt, base.at) : undefined));
-    if (lost?.n) return { ok: false as const, error: `${lost.n} live order(s) in failed_unknown since the last baseline: inspect the venue before rebaselining (it would mask a lost order). Position diff exchange vs DB: ${diff}`, code: "FAILED_UNKNOWN" as const, diff };
+    const base = await d.db.reconciliations.first("baseline", {}, { order: "desc" });
+    const lost = opts.ack ? 0 : await d.db.orders.count("bookStatus", { paper: false, status: "failed_unknown" }, base ? { gt: base.at } : {});
+    if (lost) return { ok: false as const, error: `${lost} live order(s) in failed_unknown since the last baseline: inspect the venue before rebaselining (it would mask a lost order). Position diff exchange vs DB: ${diff}`, code: "FAILED_UNKNOWN" as const, diff };
     await insertBaseline(d, at, snap, "rebaseline");
     return { ok: true as const, at: at.toISOString(), diff };
   });
@@ -242,7 +254,7 @@ export const reconDetail = (mm: { key: string; ledger: number; exchange: number 
 
 /** Latest reconciliation for the UI: late = last run older than 10 min. */
 export async function reconStatus(d: Pick<Deps, "db" | "now">) {
-  const [r] = await d.db.select().from(s.reconciliations).orderBy(desc(s.reconciliations.id)).limit(1);
+  const r = await d.db.reconciliations.first("byId", {}, { order: "desc" });
   if (!r) return { at: null, status: null, detail: null } as { at: string | null; status: "ok" | "mismatch" | "late" | null; detail: string | null };
   const late = d.now() - r.at.getTime() > 10 * MIN;
   return { at: r.at.toISOString(), status: (!r.ok ? "mismatch" : late ? "late" : "ok") as "ok" | "mismatch" | "late", detail: reconDetail(r.mismatches) };

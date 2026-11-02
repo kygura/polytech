@@ -2,11 +2,10 @@ import { AnthropicOutageError, PodCancelledError, PodFailedError, PodTimeoutErro
 import { canStartPod, crowd, evidenceConfidence, shouldReResearch, sizeTrade, urlKey, type ResearchProfile, type Steering } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { outageDowngrade } from "./autonomy";
 import { DAY, addSpend, feeExpOf, feeOf, ruleText, toMarket, today, withLock, type Deps, type Skipped } from "./deps";
 import { publish } from "./events";
-import { matchMarkets, listProfiles, type Match } from "./profiles";
+import { latestTheses, matchMarkets, listProfiles, type Match } from "./profiles";
 import { latestSnaps, shortlist } from "./screen";
 
 export type Trigger = "initial" | "price-move" | "catalyst" | "stale" | "manual" | "profile";
@@ -20,9 +19,10 @@ const MAX_TOOL_CALLS = 200;
 
 /** Asks a running pod to stop; the pod's own poller notices within CANCEL_POLL_MS. */
 export async function requestCancel(d: Pick<Deps, "db" | "now">, podId: string): Promise<"ok" | "not_found" | "not_running"> {
-  const hit = await d.db.update(s.pods).set({ cancelRequestedAt: new Date(d.now()) }).where(and(eq(s.pods.id, podId), eq(s.pods.status, "running"))).returning({ id: s.pods.id });
-  if (hit.length) return "ok";
-  return (await d.db.select({ id: s.pods.id }).from(s.pods).where(eq(s.pods.id, podId))).length ? "not_running" : "not_found";
+  const at = new Date(d.now());
+  // compare-and-set: only a pod still running takes the request
+  if (await d.db.pods.update(podId, (p) => (p.status === "running" ? { cancelRequestedAt: at } : null))) return "ok";
+  return (await d.db.pods.get(podId)) ? "not_running" : "not_found";
 }
 
 const id = (p: string) => `${p}_${crypto.randomUUID().slice(0, 12)}`;
@@ -34,11 +34,19 @@ const patchOf = (a: AgentResult): RunPatch =>
     ? { status: "ok", outputJson: a.run.output, usage: a.run.usage, durationS: a.run.durationS, toolCalls: (a.run.toolCalls ?? []).slice(0, MAX_TOOL_CALLS) }
     : { status: a.skipped ? "skipped" : a.cancelled ? "cancelled" : "failed", outputJson: { error: a.error } };
 
+/** Patches every `running` agent row of the pods (optionally one role); per-row compare-and-set on status. Returns the rows it changed. */
+async function endRunning(db: Deps["db"], podIds: string[], patch: Partial<typeof s.agentRuns.$inferSelect>, role?: string) {
+  if (!podIds.length) return [];
+  const live = (r: typeof s.agentRuns.$inferSelect) => r.status === "running" && (role === undefined || r.role === role);
+  const ids = (await db.agentRuns.findEach("pod", podIds.map((podId) => ({ podId })))).flat().filter(live).map((r) => r.id);
+  return ids.length ? db.agentRuns.updateMany(ids, (r) => (live(r) ? patch : null)) : [];
+}
+
 /** Ends the agent's `running` row; inserts one when the agent never started (skipped). */
 async function endRun(d: Pick<Deps, "db" | "now">, podId: string, role: string, model: string, p: RunPatch) {
   const at = new Date(d.now());
-  const hit = await d.db.update(s.agentRuns).set({ ...p, finishedAt: at }).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.role, role), eq(s.agentRuns.status, "running"))).returning({ id: s.agentRuns.id });
-  if (!hit.length) await d.db.insert(s.agentRuns).values({ podId, role, model, startedAt: at, finishedAt: at, ...p });
+  const hit = await endRunning(d.db, [podId], { ...p, finishedAt: at } as Partial<typeof s.agentRuns.$inferSelect>, role);
+  if (!hit.length) await d.db.agentRuns.insert({ podId, role, model, startedAt: at, finishedAt: at, ...p });
 }
 /** Lifecycle writes are best effort: a failed progress write must not fail the pod. */
 const soft = async (f: () => Promise<unknown>) => { try { await f(); } catch (e) { console.error("pod progress write failed:", e instanceof Error ? e.message : e); } };
@@ -50,7 +58,7 @@ const FAILED_SKIP_MS = 24 * 3_600_000; // poison-market guard: no pick (initial,
 const WAVE_MARGIN_MS = 20_000;
 /** Markets with a pod that failed or was cancelled within FAILED_SKIP_MS. */
 const failedRecently = async (db: Deps["db"], now: number) =>
-  new Set((await db.select({ c: s.pods.conditionId }).from(s.pods).where(and(inArray(s.pods.status, ["failed", "cancelled"]), gte(s.pods.startedAt, new Date(now - FAILED_SKIP_MS))))).map((r) => r.c));
+  new Set((await db.pods.find("status", [{ status: "failed" }, { status: "cancelled" }], { min: now - FAILED_SKIP_MS })).map((r) => r.conditionId));
 // ponytail: a timed-out agent/judge reports no usage, so charge a flat guess per model (150k in/10k out agent, 20k in/2k out judge) so the daily cap cannot undercount; read real usage if the runner ever reports partials.
 const timeoutUsd = (model: string, judge = false) => (judge ? costUsd(model, 20_000, 2_000) : costUsd(model, 150_000, 10_000));
 
@@ -69,8 +77,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
     if (d.runner === disabledRunner) return { skipped: true, reason: "RESEARCH_DISABLED" }; // prod without ANTHROPIC_API_KEY: no fake results
     const { settings: st, db } = d, now = d.now();
     const steering = opts.steering, judgeModel = modelFor("judge", { ...st.models, ...steering?.models });
-    const mrow = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
-    const snap = (await latestSnaps(db, [conditionId])).get(conditionId);
+    const [mrow, snaps] = await Promise.all([db.markets.get(conditionId), latestSnaps(db, [conditionId])]);
+    const snap = snaps.get(conditionId);
     if (!mrow || !snap?.book || snap.mid == null) return { skipped: true, reason: "NO_BOOK" };
 
     const conc = Math.max(1, Math.min(5, st.budget.maxConcurrentSandboxes));
@@ -82,14 +90,16 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
     if (!rel) return { skipped: true, reason: "LOCKED" };
     try {
       // reap pods stuck `running` (host killed mid-run): nothing outlives the function window, so past it they are dead
-      const reaped = await db.update(s.pods).set({ status: "failed" })
-        .where(and(eq(s.pods.status, "running"), lt(s.pods.startedAt, new Date(now - POD_WINDOW_MS - 60_000)))).returning({ id: s.pods.id });
-      if (reaped.length)
-        await db.update(s.agentRuns).set({ status: "failed", finishedAt: new Date(now) })
-          .where(and(inArray(s.agentRuns.podId, reaped.map((p) => p.id)), eq(s.agentRuns.status, "running")));
-      const [{ n: podsToday }] = await db.select({ n: count() }).from(s.pods).where(gte(s.pods.startedAt, dayStart)) as [{ n: number }];
-      const [{ n: running }] = await db.select({ n: count() }).from(s.pods).where(eq(s.pods.status, "running")) as [{ n: number }];
-      const sp = (await db.select().from(s.spend).where(eq(s.spend.day, today(now))))[0];
+      const cutoff = now - POD_WINDOW_MS - 60_000;
+      const stale = await db.pods.find("status", { status: "running" }, { lt: cutoff });
+      // compare-and-set per pod: only rows still running (and still past the cutoff) become failed
+      const reaped = stale.length ? await db.pods.updateMany(stale.map((p) => p.id), (p) => (p.status === "running" && p.startedAt.getTime() < cutoff ? { status: "failed" } : null)) : [];
+      if (reaped.length) await endRunning(db, reaped.map((p) => p.id), { status: "failed", finishedAt: new Date(now) });
+      const [podsToday, running, sp] = await Promise.all([
+        db.pods.count("byStarted", {}, { min: dayStart }),
+        db.pods.count("status", { status: "running" }),
+        db.spend.get(today(now)),
+      ]);
       const ok = canStartPod(
         // sandboxes: each agent holds a microVM, so the cap counts agents. API runner: nothing to hold, the cap counts pods.
         { podsToday, activeSandboxes: d.runnerKind === "sandbox" ? running * conc : running, spendTodayUsd: sp?.anthropicUsd ?? 0 },
@@ -97,7 +107,7 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
         d.runnerKind === "sandbox" ? conc : 1,
       );
       if (!ok.ok) return { skipped: true, reason: ok.reason! };
-      await db.insert(s.pods).values({ id: podId, conditionId, startedAt: new Date(now), status: "running", trigger, profileId: opts.profileId ?? null, steering: steering ?? null, stage: "rules" });
+      await db.pods.insert({ id: podId, conditionId, startedAt: new Date(now), status: "running", trigger, profileId: opts.profileId ?? null, steering: steering ?? null, stage: "rules" });
     } finally {
       await rel();
     }
@@ -107,18 +117,17 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       const rules = await ruleText(d.pm, mrow); // not stored: the brief needs the full text
       if (rules == null) console.warn(`research: rules text unavailable for ${conditionId}, briefing on the question alone`);
       const market = toMarket(mrow, rules ?? "");
-      const sibRows = mrow.eventId ? await db.select().from(s.markets).where(eq(s.markets.eventId, mrow.eventId)) : [];
+      const sibRows = mrow.eventId ? await db.markets.find("event", { eventId: mrow.eventId }) : [];
       const book = { bids: snap.book.bids, asks: snap.book.asks, pMid: snap.mid };
       const setStage = (stage: PodStage) => soft(async () => {
-        await db.update(s.pods).set({ stage }).where(eq(s.pods.id, podId));
+        await db.pods.update(podId, { stage });
         publish("pod.stage", { podId, conditionId, stage });
       });
       // cancel: POST /api/pods/:id/cancel sets cancelRequestedAt (maybe on another instance); the pod notices on its next poll
       const ac = new AbortController();
       const poll = setInterval(() => void soft(async () => {
         if (ac.signal.aborted) return;
-        const [p] = await db.select({ c: s.pods.cancelRequestedAt }).from(s.pods).where(eq(s.pods.id, podId));
-        if (p?.c) ac.abort();
+        if ((await db.pods.get(podId))?.cancelRequestedAt) ac.abort();
       }), opts.cancelPollMs ?? CANCEL_POLL_MS);
       let pod;
       try {
@@ -128,8 +137,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
           onAgentDone: (a) => publish("pod.agent", { podId, role: a.role, ok: a.ok }),
           signal: ac.signal,
           hooks: {
-            onStage: (stage) => setStage(stage).then(() => stage === "judge" ? soft(() => db.insert(s.agentRuns).values({ podId, role: "judge", model: judgeModel, status: "running", startedAt: new Date(d.now()) })) : undefined),
-            onAgentStart: (role, model) => soft(() => db.insert(s.agentRuns).values({ podId, role, model, status: "running", startedAt: new Date(d.now()) })),
+            onStage: (stage) => setStage(stage).then(() => stage === "judge" ? soft(() => db.agentRuns.insert({ podId, role: "judge", model: judgeModel, status: "running", startedAt: new Date(d.now()) })) : undefined),
+            onAgentStart: (role, model) => soft(() => db.agentRuns.insert({ podId, role, model, status: "running", startedAt: new Date(d.now()) })),
             onAgentFinish: (role, a) => soft(() => endRun(d, podId, role, a.model, patchOf(a))),
           },
         });
@@ -141,8 +150,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
           await addSpend(db, now,
             ok.reduce((t, a) => t + a.run.usage.costUsd, 0) + cut.reduce((t, a) => t + timeoutUsd(a.model), 0) + (e.stage === "judge" ? timeoutUsd(judgeModel, true) : 0),
             ok.reduce((t, a) => t + a.run.sandboxS, 0));
-          await db.update(s.agentRuns).set({ status: "cancelled", finishedAt: new Date(d.now()) }).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.status, "running")));
-          await db.update(s.pods).set({ status: "cancelled" }).where(eq(s.pods.id, podId));
+          await endRunning(db, [podId], { status: "cancelled", finishedAt: new Date(d.now()) });
+          await db.pods.update(podId, { status: "cancelled" });
           publish("pod.cancelled", { podId, conditionId });
           return { podId, status: "cancelled" };
         }
@@ -156,12 +165,12 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
             ok.reduce((t, a) => t + a.run.usage.costUsd, 0) + lost.reduce((t, a) => t + timeoutUsd(a.model), 0) + (judgeLost ? timeoutUsd(judgeModel, true) : 0),
             ok.reduce((t, a) => t + a.run.sandboxS, 0) + lost.length * (POD_AGENTS_MS / 1000));
         }
-        await db.update(s.agentRuns).set({ status: "failed", finishedAt: new Date(d.now()) }).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.status, "running"))); // the judge row
+        await endRunning(db, [podId], { status: "failed", finishedAt: new Date(d.now()) }); // the judge row
         const lowered = outage ? await outageDowngrade(d) : null;
         const timedOut = e instanceof PodFailedError && (e.cause instanceof PodTimeoutError || e.agents.some((a) => !a.ok && a.error.startsWith("TIMEOUT")));
         const reason = outage ? "ANTHROPIC_OUTAGE" : timedOut ? "TIMEOUT" : "POD_FAILED";
         const error = scrub(podError(e));
-        await db.update(s.pods).set({ status: "failed", error: `${reason}: ${error}`.slice(0, 500) }).where(eq(s.pods.id, podId));
+        await db.pods.update(podId, { status: "failed", error: `${reason}: ${error}`.slice(0, 500) });
         publish("pod.failed", { podId, conditionId, reason, error, downgradedTo: lowered });
         return { podId, status: "failed", reason };
       } finally {
@@ -181,29 +190,30 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       // persist run, evidence, spend
       const ok5 = pod.agents.flatMap((a) => (a.ok ? [a.run.usage] : []));
       const sum = (f: "inputTokens" | "outputTokens" | "costUsd") => ok5.reduce((t, u) => t + u[f], 0);
-      const jr = (await db.select({ at: s.agentRuns.startedAt }).from(s.agentRuns).where(and(eq(s.agentRuns.podId, podId), eq(s.agentRuns.role, "judge"))))[0];
+      const jr = (await db.agentRuns.find("pod", { podId })).find((r) => r.role === "judge");
       await endRun(d, podId, "judge", judgeModel, {
-        status: "ok", outputJson: j, durationS: jr?.at ? (d.now() - jr.at.getTime()) / 1000 : null,
+        status: "ok", outputJson: j, durationS: jr?.startedAt ? (d.now() - jr.startedAt.getTime()) / 1000 : null,
         usage: { inputTokens: pod.costs.inputTokens - sum("inputTokens"), outputTokens: pod.costs.outputTokens - sum("outputTokens"), costUsd: pod.costs.costUsd - sum("costUsd") },
       });
       if (pod.evidence.length)
-        await db.insert(s.evidence).values(pod.evidence.map((e) => {
+        await db.evidence.insertMany(pod.evidence.map((e) => {
           const pub = new Date(e.date);
           return { podId, agentRole: e.agent_role, url: e.url, quote: e.quote, claim: e.claim, direction: e.direction === "+" ? 1 : -1, publishedAt: Number.isNaN(+pub) ? null : pub, retrievedAt: new Date(now) };
         }));
       await addSpend(db, now, pod.costs.costUsd, pod.costs.sandboxS);
       // a cancel that landed after the agents/judge (sizing) is still honoured: spend is recorded, no thesis
-      if ((await db.select({ c: s.pods.cancelRequestedAt }).from(s.pods).where(eq(s.pods.id, podId)))[0]?.c) {
-        await db.update(s.pods).set({ status: "cancelled", costSandboxS: pod.costs.sandboxS }).where(eq(s.pods.id, podId));
+      // one compare-and-set: the cancel check and the final status commit together, so a cancel cannot land in between
+      const costSandboxS = pod.costs.sandboxS;
+      const fin = await db.pods.update(podId, (p) => (p.cancelRequestedAt ? { status: "cancelled", costSandboxS } : { status: "done", stage: "done", costSandboxS }));
+      if (fin?.status === "cancelled") {
         publish("pod.cancelled", { podId, conditionId });
         return { podId, status: "cancelled" };
       }
-      await db.update(s.pods).set({ status: "done", stage: "done", costSandboxS: pod.costs.sandboxS }).where(eq(s.pods.id, podId));
 
       let thesisId: string | undefined;
       if (core) {
         thesisId = id("th");
-        await db.insert(s.theses).values({
+        await db.theses.insert({
           id: thesisId, conditionId, podId, pHat: core.pHat, c: core.c, pPost: core.pPost, side: core.side, edgeC: core.edgeC, sizeUsd: core.sizeUsd,
           rAnn: core.rAnn, rank: core.rank, catalysts: j.catalysts.map((x) => `${x.date} ${x.label}`), killCriteria: j.kill_criteria,
           createdAt: new Date(now), expiresAt: new Date(Math.min(market.endDate, now + 72 * 3_600_000)),
@@ -223,7 +233,8 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
       return { podId, status: "done", thesisId };
     } catch (e) {
       // never leave a pod `running`
-      await db.update(s.pods).set({ status: "failed", error: `ERROR: ${scrub(podError(e))}`.slice(0, 500) }).where(and(eq(s.pods.id, podId), eq(s.pods.status, "running")));
+      const error = `ERROR: ${scrub(podError(e))}`.slice(0, 500);
+      await db.pods.update(podId, (p) => (p.status === "running" ? { status: "failed", error } : null));
       throw e;
     }
   });
@@ -233,12 +244,10 @@ export async function researchMarket(d: Deps, conditionId: string, trigger: Trig
 export async function researchShortlist(d: Deps, opts: { limit?: number; deadline?: number } = {}) {
   return withLock(d, "research-shortlist", 60 * 60_000, async () => {
     const { db, settings: st } = d, now = d.now();
-    const th = await db.select().from(s.theses).orderBy(desc(s.theses.createdAt));
-    const latest = new Map<string, (typeof th)[number]>();
-    for (const t of th) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t);
+    const latest = await latestTheses(db); // newest thesis per market, markets by that thesis newest first
 
-    const snaps = await latestSnaps(db, [...latest.keys()]);
-    const mk = new Map((await db.select({ conditionId: s.markets.conditionId, status: s.markets.status, endDate: s.markets.endDate }).from(s.markets).where(inArray(s.markets.conditionId, [...latest.keys()]))).map((m) => [m.conditionId, m]));
+    const [snaps, mrows] = await Promise.all([latestSnaps(db, [...latest.keys()]), db.markets.getMany([...latest.keys()])]);
+    const mk = new Map(mrows.map((m) => [m.conditionId, m]));
     const todo: { id: string; trigger: Trigger }[] = [];
     for (const [cid, t] of latest) {
       const m = mk.get(cid), snap = snaps.get(cid), pm0 = (t.detail as { pMidYes?: number } | null)?.pMidYes;
@@ -246,8 +255,8 @@ export async function researchShortlist(d: Deps, opts: { limit?: number; deadlin
       const why = shouldReResearch({ mid: pm0, createdAt: t.createdAt.getTime(), resolvesAt: m.endDate?.getTime() ?? now }, now, snap.mid, catalystMs(t.catalysts), false)[0];
       if (why) todo.push({ id: cid, trigger: why === "PRICE_MOVE" ? "price-move" : why === "CATALYST_PASSED" ? "catalyst" : why === "STALE" ? "stale" : "manual" });
     }
-    const failed = await failedRecently(db, now);
-    for (const x of await shortlist(db, 20)) if (!latest.has(x.conditionId)) todo.push({ id: x.conditionId, trigger: "initial" });
+    const [failed, short] = await Promise.all([failedRecently(db, now), shortlist(db, 20)]);
+    for (const x of short) if (!latest.has(x.conditionId)) todo.push({ id: x.conditionId, trigger: "initial" });
     const picked = todo.filter((x) => !failed.has(x.id)).slice(0, opts.limit ?? todo.length);
 
     return runWaves(d, picked, opts.deadline);
@@ -279,7 +288,7 @@ export async function runProfile(d: Deps, p: ResearchProfile, matches: Pick<Matc
   return withLock(d, `research-profile:${p.id}`, 60 * 60_000, async () => {
     const failed = await failedRecently(d.db, d.now());
     const res = await runWaves(d, matches.filter((m) => !failed.has(m.conditionId)).map((m) => ({ id: m.conditionId, trigger: "profile", opts: { steering: p.steering, profileId: p.id } })), deadline);
-    if (!res.stopped) await d.db.update(s.researchProfiles).set({ lastRunAt: new Date(d.now()) }).where(eq(s.researchProfiles.id, p.id));
+    if (!res.stopped) await d.db.researchProfiles.update(p.id, { lastRunAt: new Date(d.now()) });
     return res;
   });
 }

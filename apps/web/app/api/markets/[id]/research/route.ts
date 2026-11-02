@@ -1,8 +1,7 @@
 import { after } from "next/server";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { DEFAULT_STEERING, SteeringSchema, SteeringShape } from "@pm/core";
-import { latestSnapshot, schema as s } from "@pm/db";
+import { latestSnapshot } from "@pm/db";
 import { getDeps, json, notFound, parse } from "../../../../../lib/api";
 import { getProfile, researchMarket, takeSnapshots } from "../../../../../lib/jobs";
 
@@ -17,7 +16,7 @@ const Body = z.strictObject({ profileId: z.string().optional(), steering: Steeri
 // Body optional: empty = old behavior. Else steering = (profile.steering | default) shallow-merged with the override, re-validated.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const id = (await params).id, d = await getDeps();
-  if (!(await d.db.select({ id: s.markets.conditionId }).from(s.markets).where(eq(s.markets.conditionId, id)))[0]) return notFound();
+  if (!(await d.db.markets.get(id))) return notFound();
   const text = await req.text();
   let opts: { steering?: z.infer<typeof SteeringSchema>; profileId?: string } = {};
   if (text.trim()) {

@@ -2,7 +2,6 @@ import { autoAllowed, checkOrder, effectiveMode, exitDecision, gtdExpiry, liveli
 import { schema as s } from "@pm/db";
 import { scrub } from "@pm/pm";
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, notInArray, notLike, sql } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode, downgradeOn } from "./autonomy";
 import { today, withLock, type Deps } from "./deps";
@@ -30,13 +29,29 @@ export const sha256 = (t: string) => createHash("sha256").update(t).digest("hex"
 export const newToken = () => randomBytes(32).toString("base64url");
 const sideMid = (yesMid: number, tokenId: string, m: Row) => (tokenId === m.yesTokenId ? yesMid : 1 - yesMid);
 
+let lastMs = 0, seq = 0;
+/**
+ * Time-ordered uuid (v7 layout, monotonic in this process). One propose run gives all its proposals the same createdAt and index reads
+ * break createdAt ties by pk, so a time-ordered pk keeps "first proposed" first (Postgres returned the tie in insertion order).
+ */
+function uuid7() {
+  let ms = Date.now();
+  if (ms > lastMs) { lastMs = ms; seq = 0; }
+  else if (++seq > 0xfff) { ms = ++lastMs; seq = 0; }
+  else ms = lastMs;
+  const r = randomBytes(8);
+  r[0] = (r[0]! & 0x3f) | 0x80; // RFC 4122 variant
+  const h = ms.toString(16).padStart(12, "0") + "7" + seq.toString(16).padStart(3, "0") + r.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
 function updated(p: Pick<Proposal, "id">, state: string, extra: { reason?: string; error?: string; orderId?: string } = {}) {
   publish("proposal.updated", { id: p.id, state: uiState(state), ...extra });
 }
 
-/** CAS on status: only a row still in `from` changes. Returns false when someone else got there first. Neon HTTP has no transactions. */
+/** CAS on status: only a row still in `from` changes. Returns false when someone else got there first. */
 async function cas(d: Pick<Deps, "db">, id: string, from: string, set: Partial<Proposal>) {
-  return (await d.db.update(s.proposals).set(set).where(and(eq(s.proposals.id, id), eq(s.proposals.status, from))).returning({ id: s.proposals.id })).length === 1;
+  return (await d.db.proposals.update(id, (r) => (r.status === from ? set : null))) !== null;
 }
 // Hashes are NOT NULL in the schema: "" never equals a sha256 hex, so a cleared hash is a burned token.
 export const BURNED = { approveTokenHash: "", rejectTokenHash: "" };
@@ -44,15 +59,16 @@ const decided = (d: Pick<Deps, "now">, via: Via) => ({ decidedAt: new Date(d.now
 
 /** Latest reconciliation says mismatch, or a neg-risk set is flagged and not yet acknowledged => no new live orders. No recon row yet => not halted. */
 export async function halted(d: Pick<Deps, "db">) {
-  const r = (await d.db.select().from(s.reconciliations).orderBy(desc(s.reconciliations.id)).limit(1))[0];
+  const [r, flagged] = await Promise.all([d.db.reconciliations.first("byId", {}, { order: "desc" }), d.db.proposalSets.count("status", { status: "flagged" })]);
   if (r && !r.ok) return true;
-  return (await d.db.select({ id: s.proposalSets.id }).from(s.proposalSets).where(eq(s.proposalSets.status, "flagged")).limit(1)).length > 0;
+  return flagged > 0;
 }
 
 /** orderId -> shares filled so far (live book). */
 export async function liveFilled(db: Deps["db"]) {
-  const rows = await db.select({ o: s.fills.orderId, n: sql<number>`sum(${s.fills.size})::float8` }).from(s.fills).where(eq(s.fills.paper, false)).groupBy(s.fills.orderId);
-  return new Map(rows.map((r) => [r.o, r.n]));
+  const m = new Map<string, number>();
+  for (const f of await db.fills.find("book", { paper: false })) m.set(f.orderId, (m.get(f.orderId) ?? 0) + f.size);
+  return m;
 }
 /**
  * DESIGN 8.7 order state: live -> open|partial; matched (matched, not yet settled) -> partial until all `shares` are filled, then filled;
@@ -72,9 +88,8 @@ export async function liveMode(d: Pick<Deps, "db" | "settings">, m: Row): Promis
 const FALLBACK: Record<string, string> = { STRUCTURAL_NOT_AUTO: "STRUCTURAL_AUTO_OFF", L3_PER_TRADE: "PER_TRADE", L3_DAILY_NOTIONAL: "DAILY_AUTO_NOTIONAL", CATEGORY_NOT_ALLOWED: "CATEGORY_NOT_ALLOWED" };
 /** Notional of auto-sent orders created today (rejected/cancelled excluded). Read under the live-send lock so two auto sends cannot both pass the daily cap. */
 async function autoToday(d: Pick<Deps, "db" | "now">) {
-  const [r] = await d.db.select({ n: sql<number>`coalesce(sum(${s.orders.limitPrice} * ${s.orders.size}), 0)::float8` }).from(s.orders)
-    .where(and(eq(s.orders.paper, false), eq(s.orders.approval, "auto"), eq(s.orders.side, "BUY"), gte(s.orders.createdAt, new Date(`${today(d.now())}T00:00:00Z`)), notInArray(s.orders.status, ["rejected", "cancelled"])));
-  return r!.n;
+  const rows = await d.db.orders.find("book", { paper: false }, { min: new Date(`${today(d.now())}T00:00:00Z`) });
+  return rows.filter((o) => o.approval === "auto" && o.side === "BUY" && !["rejected", "cancelled"].includes(o.status)).reduce((n, o) => n + o.limitPrice * o.size, 0);
 }
 /** null = may auto-send (L4 always; L3 inside limits.l3), else the DESIGN 9.3 fallback reason (needs approval). Callers only ask at L3/L4. */
 export async function autoGate(d: Pick<Deps, "db" | "now" | "settings">, mode: Mode, o: { sizeUsd: number; category: string; isSet?: boolean }): Promise<string | null> {
@@ -95,12 +110,15 @@ export async function propose(d: Deps) {
     if (await halted(d)) return (skip("RECON_HALTED"), res);
 
     // held: open live position or live order on the market; theses with any non-expired entry proposal are done (rejected/failed are not re-proposed)
-    const held = new Set((await openBook(db, false)).map((x) => x.p.conditionId));
-    for (const o of await db.select({ c: s.orders.conditionId }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)))) held.add(o.c);
-    const done = new Set((await db.select({ t: s.proposals.thesisId }).from(s.proposals).where(and(ne(s.proposals.status, "expired"), eq(s.proposals.kind, "entry")))).map((x) => x.t));
+    const [book, openOrders] = await Promise.all([openBook(db, false), db.orders.find("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status })))]);
+    const held = new Set([...book.map((x) => x.p.conditionId), ...openOrders.map((o) => o.conditionId)]);
     // a category override lowers the mode per market: one candidate pass per live level up to the global mode
     const lv = await Promise.all(LIVE_MODES.slice(0, LIVE_MODES.indexOf(mode) + 1).map(async (m) => ({ m, ...(await candidates(d, m, held, mode)) })));
     const mk = lv[0]!.mk;
+    // theses with any non-expired entry proposal (looked up for this run's candidates only, by the thesis index)
+    const tids = [...new Set(lv.flatMap((x) => x.cands.map((t) => t.id)))];
+    const props = await db.proposals.findEach("thesis", tids.map((thesisId) => ({ thesisId })));
+    const done = new Set(tids.filter((_, i) => props[i]!.some((p) => p.status !== "expired" && p.kind === "entry")));
     const cands = lv.flatMap((x) => x.cands.map((t) => ({ t, m: x.m }))).filter((x) => !done.has(x.t.id)).sort((a, b) => (b.t.rank ?? 0) - (a.t.rank ?? 0));
     res.candidates = cands.length;
     if (cands.length) await takeSnapshots(d, cands.map((x) => x.t.conditionId)); // fresh book (< 60 s)
@@ -147,7 +165,7 @@ async function insertProposal(d: Deps, v: NewProposal, row: Row, side: string, n
   const approve = newToken(), reject = newToken();
   let p: Proposal | undefined;
   try {
-    [p] = await d.db.insert(s.proposals).values({ ...v, createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject) }).returning();
+    p = await d.db.proposals.insert({ ...v, id: uuid7(), createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject) }); // UniqueViolation: onePendingPerThesis
   } catch {
     skip("DUPLICATE_PENDING");
     return undefined;
@@ -171,9 +189,9 @@ async function autoSent({ p, tk, question, side }: Exclude<Inserted, string>, d:
 
 /** Entry orders still resting for a killed thesis, or one superseded by a newer thesis (re-research): cancel the unfilled remainder. Failures stay live for the next run. */
 async function cancelStaleEntries(d: Deps) {
-  const open = await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), eq(s.orders.status, "live"), isNotNull(s.orders.clobOrderId), notLike(s.orders.thesisId, "set:%")));
+  const open = (await d.db.orders.find("bookStatus", { paper: false, status: "live" })).filter((o) => o.side === "BUY" && o.clobOrderId !== null && !o.thesisId.startsWith("set:"));
   if (!open.length) return;
-  const ths = await d.db.select().from(s.theses).where(inArray(s.theses.conditionId, [...new Set(open.map((o) => o.conditionId))])).orderBy(desc(s.theses.createdAt));
+  const ths = await d.db.theses.find("cond", [...new Set(open.map((o) => o.conditionId))].map((conditionId) => ({ conditionId })), { order: "desc" });
   const latest = new Map<string, string>();
   for (const t of ths) if (!latest.has(t.conditionId)) latest.set(t.conditionId, t.id);
   const filled = await liveFilled(d.db);
@@ -182,7 +200,7 @@ async function cancelStaleEntries(d: Deps) {
     if (!th || !(isKilled(th) || latest.get(o.conditionId) !== th.id)) continue;
     try {
       await d.exchange!.cancel([o.clobOrderId!]);
-      await d.db.update(s.orders).set({ status: "cancelled" }).where(and(eq(s.orders.id, o.id), eq(s.orders.status, "live")));
+      await d.db.orders.update(o.id, (r) => (r.status === "live" ? { status: "cancelled" } : null));
       publish("order.updated", { id: o.id, orderId: o.clobOrderId, status: orderUi("cancelled", 0), filledShares: filled.get(o.id) ?? 0 });
     } catch { /* still live: retried next run */ }
   }
@@ -199,12 +217,18 @@ async function proposeExits(d: Deps, top: Mode, skip: (r: string) => void) {
   const { db } = d, now = d.now();
   const book = await openBook(db, false);
   if (!book.length) return 0;
-  const toks = book.map((x) => x.p.tokenId), conds = [...new Set(book.map((x) => x.p.conditionId))];
-  const entries = await db.select().from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "BUY"), notLike(s.orders.thesisId, "set:%"), inArray(s.orders.tokenId, toks))).orderBy(desc(s.orders.createdAt));
-  const ths = await db.select().from(s.theses).where(inArray(s.theses.conditionId, conds)).orderBy(desc(s.theses.createdAt));
-  const exits = await db.select({ c: s.proposals.conditionId }).from(s.proposals).where(and(eq(s.proposals.kind, "exit"), inArray(s.proposals.status, ["pending", "approved", "rejected"]), inArray(s.proposals.conditionId, conds)));
-  const selling = await db.select({ t: s.orders.tokenId }).from(s.orders).where(and(eq(s.orders.paper, false), eq(s.orders.side, "SELL"), inArray(s.orders.status, LIVE_OPEN), inArray(s.orders.tokenId, toks)));
-  const busy = new Set([...exits.map((x) => x.c), ...selling.map((x) => x.t)]);
+  const toks = [...new Set(book.map((x) => x.p.tokenId))], conds = [...new Set(book.map((x) => x.p.conditionId))];
+  const tokSet = new Set(toks), condSet = new Set(conds);
+  const [byTok, ths, exitRows, openRows] = await Promise.all([
+    db.orders.find("bookToken", toks.map((tokenId) => ({ paper: false, tokenId })), { order: "desc" }),
+    db.theses.find("cond", conds.map((conditionId) => ({ conditionId })), { order: "desc" }),
+    db.proposals.find("kindStatus", ["pending", "approved", "rejected"].map((status) => ({ kind: "exit", status }))),
+    db.orders.find("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status }))),
+  ]);
+  const entries = byTok.filter((o) => o.side === "BUY" && !o.thesisId.startsWith("set:")); // newest first
+  const exits = exitRows.filter((x) => condSet.has(x.conditionId));
+  const selling = openRows.filter((o) => o.side === "SELL" && tokSet.has(o.tokenId));
+  const busy = new Set([...exits.map((x) => x.conditionId), ...selling.map((x) => x.tokenId)]);
 
   const todo = book.flatMap(({ p, m }) => {
     const th = ths.find((t) => t.id === entries.find((o) => o.tokenId === p.tokenId)?.thesisId);
@@ -282,7 +306,7 @@ export type Decision =
  * via 'push' needs the action's single-use token (both hashes are burned on any decision).
  */
 export async function decide(d: Deps, id: string, action: Action, via: Via, token?: string): Promise<Decision> {
-  const p = (await d.db.select().from(s.proposals).where(eq(s.proposals.id, id)).limit(1))[0];
+  const p = await d.db.proposals.get(id);
   if (via === "push") {
     const want = p ? (action === "approve" ? p.approveTokenHash : p.rejectTokenHash) : "";
     // compare against a dummy when the row is missing so timing does not reveal ids
@@ -297,7 +321,7 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
     return { ok: true, state: "rejected" };
   }
 
-  const row = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, p.conditionId)))[0]!;
+  const row = (await d.db.markets.get(p.conditionId))!;
   const mode = await liveMode(d, row);
   if (!d.exchange || !isLive(mode) || (via === "auto" && mode === "L2")) return { ok: false, error: "MODE" };
   if (await halted(d)) return { ok: false, error: "orders halted" };
@@ -311,7 +335,7 @@ export async function decide(d: Deps, id: string, action: Action, via: Via, toke
   // approve-time price policy: recompute pPost on the fresh mid exactly as propose does; fail closed if it cannot be recomputed
   const exit = p.kind === "exit"; // a SELL of a held position: the entry thesis is dead by definition, and selling reduces risk
   if (!exit) {
-    const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
+    const th = await d.db.theses.get(p.thesisId);
     const a = th ? assess(d, th, row, snap, now) : undefined;
     if (!a?.ok || livelimitPrice({ vwap: p.limitPrice, pPost: a.sz.pPost, tick: tickOf(row) }) == null) return expire(d, p, "PRICE_MOVED");
   }
@@ -353,44 +377,44 @@ async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decisio
     return { ok: true as const, state: "failed", error };
   };
   const now = d.now();
-  const row = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, p.conditionId)))[0]!;
-  const th = (await d.db.select().from(s.theses).where(eq(s.theses.id, p.thesisId)))[0];
+  const [mrow, th] = await Promise.all([d.db.markets.get(p.conditionId), d.db.theses.get(p.thesisId)]);
+  const row = mrow!;
   const expiresAt = gtdExpiry(p.kind === "exit" ? null : (th?.expiresAt ?? null), new Date(now)); // an exit does not depend on the (dead) thesis lifetime
   if (!th || !expiresAt) return fail("thesis expiring");
 
   // Double-send guard = the pending->approved CAS (one winner) + an order row written before place that is never re-sent while sending/unknown.
   // The (thesis, attempt) idempotency key below is an audit trail only, not the guard.
-  const attempt = (await d.db.select({ n: sql<number>`count(*)::int` }).from(s.orders).where(and(eq(s.orders.thesisId, p.thesisId), eq(s.orders.paper, false))))[0]!.n;
+  const attempt = (await d.db.orders.find("thesis", { thesisId: p.thesisId })).filter((o) => !o.paper).length;
   const orderId = `ord_${crypto.randomUUID().slice(0, 12)}`;
   try {
-    await d.db.insert(s.orders).values({
+    await d.db.orders.insert({
       id: orderId, thesisId: p.thesisId, idempotencyKey: `${p.thesisId}:${attempt}`, attempt, paper: false, conditionId: p.conditionId, tokenId: p.tokenId,
       side: p.side, limitPrice: p.limitPrice, size: p.shares, modeAtSend: mode, approval: via === "auto" ? "auto" : "user", status: "sending", expiresAt, createdAt: new Date(now), proposalId: p.id,
     });
   } catch {
-    return fail("duplicate order key: not sent"); // another send owns (thesis, attempt)
+    return fail("duplicate order key: not sent"); // another send owns (thesis, attempt): UniqueViolation on idempotencyKey
   }
-  await d.db.update(s.proposals).set({ orderId }).where(eq(s.proposals.id, p.id));
+  await d.db.proposals.update(p.id, { orderId });
 
   // kill/halt can land between the CAS and here: re-check right before the only exchange call
   const blocked = !isLive(await liveMode(d, row)) ? "KILLED" : (await halted(d)) ? "orders halted" : null;
   if (blocked) {
-    await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // never sent
+    await d.db.orders.update(orderId, { status: "cancelled" }); // never sent
     return fail(blocked, orderId);
   }
   let placed;
   try {
     placed = await d.exchange!.place({ tokenId: p.tokenId, side: p.side as "BUY" | "SELL", price: p.limitPrice, shares: p.shares, expiresAt });
   } catch (e) {
-    await d.db.update(s.orders).set({ status: "unknown" }).where(eq(s.orders.id, orderId));
+    await d.db.orders.update(orderId, { status: "unknown" });
     return fail(scrub(e instanceof Error ? e.message : "place failed").slice(0, 300), orderId);
   }
-  await d.db.update(s.orders).set({ status: placed.status, clobOrderId: placed.orderId || null }).where(eq(s.orders.id, orderId));
+  await d.db.orders.update(orderId, { status: placed.status, clobOrderId: placed.orderId || null });
   if (placed.status === "rejected") return fail(scrub(placed.error ?? "rejected").slice(0, 300), orderId);
   if (!isLive(await liveMode(d, row))) { // killed while place was in flight: pull the order back
     try {
       await d.exchange!.cancel([placed.orderId]);
-      if (placed.status === "live") await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, orderId)); // matched stays for fill sync (may already be filled)
+      if (placed.status === "live") await d.db.orders.update(orderId, { status: "cancelled" }); // matched stays for fill sync (may already be filled)
       return fail("KILLED", orderId);
     } catch (e) {
       return fail(`KILLED: cancel failed, order left for sync: ${scrub(e instanceof Error ? e.message : "cancel failed")}`.slice(0, 300), orderId);
@@ -403,16 +427,18 @@ async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decisio
 // ---------------------------------------------------------------- expire
 /** Pending proposals past 15 min, or whose side mid (latest snapshot) moved > 2c, become expired. 'approved' with no order for > 2 min (crash before the order row) fails as STUCK_APPROVED. */
 export async function expireProposals(d: Deps) {
-  const stuck = await d.db.update(s.proposals).set({ status: "failed", error: "STUCK_APPROVED" })
-    .where(and(eq(s.proposals.status, "approved"), isNull(s.proposals.orderId),
-      notExists(d.db.select({ x: sql`1` }).from(s.orders).where(and(eq(s.orders.proposalId, s.proposals.id)))), // an order row exists: sync owns it
-      lt(s.proposals.decidedAt, new Date(d.now() - 2 * MIN)))).returning({ id: s.proposals.id });
+  const cutoff = d.now() - 2 * MIN;
+  const isStuck = (r: Proposal) => r.status === "approved" && r.orderId === null && r.decidedAt !== null && r.decidedAt.getTime() < cutoff;
+  const approved = (await d.db.proposals.find("statusDecided", { status: "approved" }, { lt: cutoff })).filter(isStuck); // null decidedAt sorts first: filtered out
+  const hasOrder = await d.db.orders.idsEach("proposal", approved.map((p) => ({ proposalId: p.id })), { limit: 1 }); // an order row exists: sync owns it
+  const orphans = approved.filter((_, i) => !hasOrder[i]!.length);
+  const stuck = orphans.length ? await d.db.proposals.updateMany(orphans.map((p) => p.id), (r) => (isStuck(r) ? { status: "failed", error: "STUCK_APPROVED" } : null)) : [];
   for (const p of stuck) updated(p, "failed", { error: "STUCK_APPROVED" });
-  const pend = await d.db.select().from(s.proposals).where(eq(s.proposals.status, "pending"));
+  const pend = await d.db.proposals.find("status", { status: "pending" });
   const out = { checked: pend.length, expired: 0, stuck: stuck.length };
   if (!pend.length) return out;
   const ids = [...new Set(pend.map((p) => p.conditionId))];
-  const [snaps, mk] = await Promise.all([latestSnaps(d.db, ids), d.db.select().from(s.markets).where(inArray(s.markets.conditionId, ids))]);
+  const [snaps, mk] = await Promise.all([latestSnaps(d.db, ids), d.db.markets.getMany(ids)]);
   const M = new Map(mk.map((m) => [m.conditionId, m]));
   const now = new Date(d.now());
   for (const p of pend) {

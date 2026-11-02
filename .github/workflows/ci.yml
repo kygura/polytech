@@ -10,6 +10,12 @@ jobs:
     timeout-minutes: 20
     env:
       PM_FIXTURES: "1"
+      REDIS_TEST_URL: redis://localhost:6379 # store + kv conformance suites also run on real Redis (Lua scripts)
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

@@ -1,7 +1,6 @@
 import { shouldReResearch } from "@pm/core";
-import { schema as s } from "@pm/db";
-import { and, desc, eq, gt, gte, inArray, isNull, or, sql } from "drizzle-orm";
-import { withLock, type Deps } from "./deps";
+import { schema as s, type Db } from "@pm/db";
+import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { catalystMs } from "./research";
 
@@ -17,6 +16,24 @@ type Draft = { kind: Kind; conditionId: string | null; message: string; data: Re
 type State = { top: string[]; struct: string[]; pods?: string[] }; // pods: failed pod ids already alerted (a reaped pod keeps its old startedAt, so a time cursor would miss it)
 const FAILED_LOOKBACK = 7 * 24 * H, FIRST_LOOKBACK = 24 * H;
 
+type Thesis = typeof s.theses.$inferSelect;
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Live theses (expiresAt null or > now), newest createdAt first (ties by id). */
+async function liveTheses(db: Db, now: number): Promise<Thesis[]> {
+  const [dated, open] = await Promise.all([db.theses.find("byExpiry", {}, { gt: now }), db.theses.find("noExpiry", {})]);
+  return [...dated, ...open].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || cmp(a.id, b.id));
+}
+
+/** market_latest where priority > 0 ORDER BY priority DESC, condition_id ASC LIMIT n (index ties come back in pk order reversed: fix the boundary group). */
+async function rankedLatest(db: Db, n: number) {
+  const rows = await db.marketLatest.find("byPriority", {}, { gt: 0, order: "desc", limit: n });
+  const edge = rows.length >= n ? rows.at(-1)!.priority : null;
+  const ties = edge != null ? await db.marketLatest.find("byPriority", {}, { min: edge, max: edge }) : [];
+  const all = new Map([...rows, ...ties].map((r) => [r.conditionId, r]));
+  return [...all.values()].sort((a, b) => b.priority! - a.priority! || cmp(a.conditionId, b.conditionId)).slice(0, n);
+}
+
 const c1 = (x: number) => (x * 100).toFixed(1);
 const clip = (q: string) => (q.length > 70 ? `${q.slice(0, 67)}...` : q);
 
@@ -26,28 +43,30 @@ const clip = (q: string) => (q.length > 70 ? `${q.slice(0, 67)}...` : q);
  */
 export async function monitor(d: Deps) {
   return withLock(d, "monitor", 2 * 60_000, async () => {
-    const { db, kv, settings: st } = d, now = d.now(), ml = s.marketLatest;
+    const { db, kv, settings: st } = d, now = d.now();
     const { midMoveC, cooldownH } = st.alerts;
     const prev = (await kv.get<State>(STATE)) ?? { top: [], struct: [] };
 
     const [th, flags, recent, failed, ranked0, flagged0] = await Promise.all([
-      db.select().from(s.theses).where(or(isNull(s.theses.expiresAt), sql`${s.theses.expiresAt} > ${new Date(now)}`)).orderBy(desc(s.theses.createdAt)),
-      db.select().from(s.marketFlags),
-      db.select({ kind: s.alerts.kind, c: s.alerts.conditionId }).from(s.alerts).where(gte(s.alerts.createdAt, new Date(now - cooldownH * H))),
-      db.select({ id: s.pods.id, c: s.pods.conditionId, trigger: s.pods.trigger }).from(s.pods).where(and(eq(s.pods.status, "failed"), gte(s.pods.startedAt, new Date(now - (prev.pods ? FAILED_LOOKBACK : FIRST_LOOKBACK))))),
-      db.select({ c: ml.conditionId, mid: ml.mid, priority: ml.priority }).from(ml).where(gt(ml.priority, 0)).orderBy(desc(ml.priority), ml.conditionId).limit(RANK_READ),
-      db.select({ c: ml.conditionId, kinds: ml.structural }).from(ml).where(sql`jsonb_array_length(coalesce(${ml.structural}, '[]'::jsonb)) > 0`),
+      liveTheses(db, now),
+      db.marketFlags.find("muted", {}),
+      db.alerts.find("byCreated", {}, { min: now - cooldownH * H }).then((as) => as.map((a) => ({ kind: a.kind, c: a.conditionId }))),
+      db.pods.find("status", { status: "failed" }, { min: now - (prev.pods ? FAILED_LOOKBACK : FIRST_LOOKBACK) }).then((ps) => ps.map((p) => ({ id: p.id, c: p.conditionId, trigger: p.trigger }))),
+      rankedLatest(db, RANK_READ).then((rs) => rs.map((r) => ({ c: r.conditionId, mid: r.mid, priority: r.priority }))),
+      db.marketLatest.find("structural", {}).then((rs) => rs.filter((r) => (r.structural?.length ?? 0) > 0).map((r) => ({ c: r.conditionId, kinds: r.structural }))),
     ]);
     const liveTh = new Map<string, (typeof th)[number]>();
     for (const t of th) if (!liveTh.has(t.conditionId)) liveTh.set(t.conditionId, t);
-    const mids = new Map((liveTh.size ? await db.select({ c: ml.conditionId, mid: ml.mid }).from(ml).where(inArray(ml.conditionId, [...liveTh.keys()])) : []).map((r) => [r.c, r.mid]));
     const muted = new Set(flags.filter((f) => f.muted).map((f) => f.conditionId));
     const cold = new Set(recent.map((r) => `${r.kind}:${r.c}`)); // raised within the cooldown
 
     const ids = [...new Set([...liveTh.keys(), ...ranked0.map((r) => r.c), ...flagged0.map((r) => r.c), ...failed.map((f) => f.c)])];
-    const meta = new Map<string, { q: string; end: number | null }>();
-    for (let i = 0; i < ids.length; i += 5000)
-      for (const m of await db.select({ c: s.markets.conditionId, q: s.markets.question, e: s.markets.endDate }).from(s.markets).where(inArray(s.markets.conditionId, ids.slice(i, i + 5000)))) meta.set(m.c, { q: m.q, end: m.e?.getTime() ?? null });
+    const [latestRows, ms] = await Promise.all([
+      db.marketLatest.getMany([...liveTh.keys()]),
+      Promise.all(chunks(ids, 5000).map((c) => db.markets.getMany(c))).then((x) => x.flat()),
+    ]);
+    const mids = new Map(latestRows.map((r) => [r.conditionId, r.mid]));
+    const meta = new Map(ms.map((m) => [m.conditionId, { q: m.question, end: m.endDate?.getTime() ?? null }]));
     const q = (c: string) => clip(meta.get(c)?.q ?? c);
 
     const out: Draft[] = [];
@@ -90,7 +109,7 @@ export async function monitor(d: Deps) {
     const rows: (typeof s.alerts.$inferInsert)[] = picked.map((a) => ({ ...a, createdAt: new Date(now) }));
     const sumKind = dropped[0]?.kind;
     if (sumKind && !cold.has(`${sumKind}:null`)) rows.push({ kind: sumKind, conditionId: null, message: `${dropped.length} more alerts not shown`, data: { suppressed: dropped.length, kinds: [...new Set(dropped.map((x) => x.kind))] }, createdAt: new Date(now) });
-    const created = rows.length ? await db.insert(s.alerts).values(rows).returning() : [];
+    const created = rows.length ? await db.alerts.insertMany(rows) : [];
 
     // state: dropped ones are left out so the next pass sees them as new; everything else is remembered
     const left = new Set(dropped.map((x) => `${x.kind}:${x.conditionId}`));

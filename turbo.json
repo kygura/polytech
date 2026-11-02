@@ -25,13 +25,17 @@
     }
   },
   "globalPassThroughEnv": [
-    "DATABASE_URL",
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
     "PM_FIXTURES",
     "ANTHROPIC_API_KEY",
     "EXA_API_KEY",
     "CRON_SECRET",
-    "PGLITE_DIR"
+    "REDIS_URL",
+    "REDIS_PREFIX",
+    "STORE_FILE",
+    "KV_REST_API_URL",
+    "KV_REST_API_TOKEN",
+    "REDIS_TEST_URL"
   ]
 }

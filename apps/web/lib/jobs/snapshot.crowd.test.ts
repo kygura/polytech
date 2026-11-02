@@ -1,10 +1,7 @@
-import { memoryKv, schema as s } from "@pm/db";
+import { memoryKv } from "@pm/db";
 import { createPm, type Trade } from "@pm/pm";
-import { count, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deps, latestSnaps, takeSnapshots, type Deps } from "./index";
-
-process.env.PGLITE_DIR = "memory://";
 
 // 250 synthetic markets (> the 200-market crowd cap) behind a stub CLOB / Data API.
 const N = 250;
@@ -32,26 +29,26 @@ const pm = {
 } as unknown as typeof base;
 let d: Deps;
 const snap = async () => { T += 5 * 60_000; return takeSnapshots({ ...d, now: () => T, pm }, Array.from({ length: N }, (_, i) => cond(i))); };
-const ml = async (c: string) => (await d.db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, c)))[0]!;
+const ml = async (c: string) => (await d.db.marketLatest.get(c))!;
 
 beforeAll(async () => {
   d = await deps({ pm, kv: memoryKv(), now: () => T });
-  await d.db.insert(s.markets).values(Array.from({ length: N }, (_, i) => ({ conditionId: cond(i), question: `Q${i}?`, status: "active", yesTokenId: tok(i), noTokenId: `n${i}`, liquidity: 1000 + i, endDate: new Date(T + 30 * 864e5) })));
+  await d.db.markets.insertMany(Array.from({ length: N }, (_, i) => ({ conditionId: cond(i), question: `Q${i}?`, status: "active", yesTokenId: tok(i), noTokenId: `n${i}`, liquidity: 1000 + i, endDate: new Date(T + 30 * 864e5) })));
 }, 60_000);
 
 describe("crowd fetch beyond the cap", () => {
   it("a market outside the run's set is flow-unknown only until it has been fetched once; rotation reaches every market; later it keeps its last trade without the unknown flag", async () => {
     await snap();
-    const unfetched = (await d.db.select().from(s.marketLatest)).filter((r) => r.flow24h == null).map((r) => r.conditionId);
+    const unfetched = (await d.db.marketLatest.all()).filter((r) => r.flow24h == null).map((r) => r.conditionId);
     expect(unfetched.length).toBe(N - 200);
     const h = (await latestSnaps(d.db, unfetched)).get(unfetched[0]!)!;
     expect(h.book?.flowUnknown).toBe(true);
     await snap(); // the rotation picks the never-fetched ones first
-    expect((await d.db.select().from(s.marketLatest)).filter((r) => r.flow24h == null && r.conditionId !== "c000")).toHaveLength(0); // c000 is the deliberately busy one
+    expect((await d.db.marketLatest.all()).filter((r) => r.flow24h == null && r.conditionId !== "c000")).toHaveLength(0); // c000 is the deliberately busy one
     await snap();
     // pick a market this run did not fetch: its history row (forced by a changed signature) must not be flagged unknown, and its last trade survives
     const fetchedNow = new Set(tradeCalls.slice(-50).flatMap((c) => c.market));
-    const quiet = (await d.db.select().from(s.marketLatest)).find((r) => !fetchedNow.has(r.conditionId) && r.conditionId !== "c000")!;
+    const quiet = (await d.db.marketLatest.all()).find((r) => !fetchedNow.has(r.conditionId) && r.conditionId !== "c000")!;
     expect(quiet.lastTradeTs).not.toBeNull();
     oiScale = 3; // changes every history row's signature
     await snap();
@@ -82,13 +79,13 @@ describe("crowd fetch beyond the cap", () => {
 describe("history row change test", () => {
   it("includes oi / flow / volume signals, not only the book", async () => {
     await snap();
-    const n0 = (await d.db.select({ n: count() }).from(s.snapshots))[0]!.n;
+    const n0 = (await d.db.snapshots.count("byTs", {}));
     const same = await snap();
     expect(same.snapshots).toBeLessThan(5); // nothing but the busy-market noise changed
     oiScale = 2;
     const moved = await snap();
     expect(moved.snapshots).toBeGreaterThan(N - 5); // same books, new oi: every history row is re-recorded
-    expect((await d.db.select({ n: count() }).from(s.snapshots))[0]!.n).toBeGreaterThan(n0);
+    expect((await d.db.snapshots.count("byTs", {}))).toBeGreaterThan(n0);
     oiScale = 1;
   });
 });

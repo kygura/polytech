@@ -1,8 +1,6 @@
-import { schema as s } from "@pm/db";
 import { ProfileFilterSchema, DEFAULT_STEERING } from "@pm/core";
 import { beforeAll, describe, expect, it } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 
 const NOW = Date.parse("2026-10-15T12:00:00Z"), DAY = 86_400_000;
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -17,7 +15,7 @@ beforeAll(async () => {
   j = await import("../../../lib/jobs");
   db = await j.dbReady();
   const m = (c: string, o: object) => ({ conditionId: c, question: `Question ${c}`, status: "active", ...o });
-  await db.insert(s.markets).values([
+  await db.markets.insertMany([
     m("a", { category: "Politics", tags: ["us", "election"], vol24h: 1000, endDate: new Date(NOW + 5 * DAY), question: "Will Alpha win?" }),
     m("b", { category: "crypto", tags: ["btc"], vol24h: 5000, endDate: new Date(NOW + 20 * DAY) }),
     m("c", { category: "politics", tags: [], vol24h: 300, endDate: new Date(NOW + 60 * DAY) }),
@@ -25,13 +23,14 @@ beforeAll(async () => {
     m("e", { category: "politics", tags: ["us"], vol24h: 7000, endDate: new Date(NOW + 1 * DAY), status: "closed" }),
   ]);
   const snap = (c: string, bid: number, ask: number, depth: number) => ({ conditionId: c, ts: new Date(NOW), bestBid: bid, bestAsk: ask, depth5cUsd: depth });
-  await db.insert(s.snapshots).values([
+  await db.snapshots.insertMany([
     { conditionId: "a", ts: new Date(NOW - DAY), bestBid: 0.1, bestAsk: 0.9, depth5cUsd: 1 }, // stale, ignored
     snap("a", 0.48, 0.5, 800), snap("b", 0.4, 0.46, 200), snap("c", 0.5, 0.51, 5000),
   ]); // d has no snapshot
-  await db.insert(s.screens).values([{ conditionId: "a", ts: new Date(NOW), priority: 1 }, { conditionId: "b", ts: new Date(NOW), priority: 3 }, { conditionId: "c", ts: new Date(NOW), priority: 2 }]);
+  await db.screens.insertMany([{ conditionId: "a", ts: new Date(NOW), priority: 1 }, { conditionId: "b", ts: new Date(NOW), priority: 3 }, { conditionId: "c", ts: new Date(NOW), priority: 2 }]);
+  await db.screenRuns.insert({ ts: new Date(NOW), rows: 3 }); // the run pointer the screen job writes after a run's rows (latestScreens reads it)
   const th = (id: string, c: string, edgeC: number, at: number) => ({ id, conditionId: c, podId: "p", pHat: 0.5, c: 0.5, pPost: 0.5, side: "YES", edgeC, sizeUsd: 10, createdAt: new Date(at) });
-  await db.insert(s.theses).values([th("t0", "a", 0.9, NOW - 3 * DAY), th("t1", "a", 0.05, NOW - DAY), th("t2", "b", -0.2, NOW - DAY)]); // a's latest edge is 0.05
+  await db.theses.insertMany([th("t0", "a", 0.9, NOW - 3 * DAY), th("t1", "a", 0.05, NOW - DAY), th("t2", "b", -0.2, NOW - DAY)]); // a's latest edge is 0.05
 }, 60_000);
 
 describe("matchMarkets", () => {
@@ -65,7 +64,7 @@ describe("matchMarkets", () => {
   });
   it("limit", async () => expect(await ids({ sort: "vol24h", limit: 2 })).toEqual(["d", "b"]));
   it("skipIfResearchedWithinHours: recent non-failed pods skip; failed or old do not; 0 disables", async () => {
-    await db.insert(s.pods).values([
+    await db.pods.insertMany([
       { id: "p1", conditionId: "b", startedAt: new Date(NOW - 2 * 3_600_000), status: "done", trigger: "t" },
       { id: "p2", conditionId: "c", startedAt: new Date(NOW - 2 * 3_600_000), status: "failed", trigger: "t" },
       { id: "p3", conditionId: "a", startedAt: new Date(NOW - 30 * 3_600_000), status: "done", trigger: "t" },

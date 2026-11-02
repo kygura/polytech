@@ -1,7 +1,6 @@
 import { aggregate, autoDowngrade, gateProgress, kill as coreKill, requestModeChange, type Actor, type AutonomyEvent, type DowngradeSignals, type Mode } from "@pm/core";
-import { schema as s, type Db } from "@pm/db";
+import type { Db } from "@pm/db";
 import { scrub } from "@pm/pm";
-import { and, desc, eq, inArray } from "drizzle-orm";
 import { forecastRows } from "./calib";
 import type { Deps } from "./deps";
 import { publish } from "./events";
@@ -10,7 +9,7 @@ import { LIVE_OPEN } from "./paper";
 
 /** Global mode = to_mode of the newest global event (refused requests are logged with to == from). Default L0. */
 export async function currentMode(db: Db): Promise<Mode> {
-  const r = (await db.select().from(s.autonomyEvents).where(eq(s.autonomyEvents.scope, "global")).orderBy(desc(s.autonomyEvents.id)).limit(1))[0];
+  const r = await db.autonomyEvents.first("scope", { scope: "global" }, { order: "desc" }); // newest by id
   return (r?.toMode as Mode | undefined) ?? "L0";
 }
 
@@ -18,7 +17,7 @@ export async function currentMode(db: Db): Promise<Mode> {
 async function record(d: Pick<Deps, "db" | "now">, ev: AutonomyEvent) {
   const reason = ev.skippedGate && !ev.refused ? `${ev.reason} (gate not met)` : ev.reason;
   const to = ev.refused ? ev.fromMode : ev.toMode;
-  await d.db.insert(s.autonomyEvents).values({ ts: new Date(d.now()), fromMode: ev.fromMode, toMode: to, scope: "global", reason, actor: ev.actor });
+  await d.db.autonomyEvents.insert({ ts: new Date(d.now()), fromMode: ev.fromMode, toMode: to, scope: "global", reason, actor: ev.actor });
   publish("mode.changed", { from: ev.fromMode, to, reason, actor: ev.actor, refused: ev.refused, requested: ev.toMode });
   return { sent: to !== ev.fromMode || ev.actor === "kill" ? notifyMode(`${ev.fromMode} -> ${to}: ${reason} (${ev.actor})`) : Promise.resolve(false) };
 }
@@ -42,26 +41,28 @@ export async function setMode(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "
 export async function kill(d: Pick<Deps, "db" | "now"> & Partial<Pick<Deps, "exchange">>) {
   const ch = coreKill(await currentMode(d.db));
   const { sent } = await record(d, ch.event);
-  const dead = await d.db.update(s.proposals).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED })
-    .where(eq(s.proposals.status, "pending")).returning({ id: s.proposals.id });
+  // per-row CAS pending -> expired: a concurrent approve (live.ts cas) and this each win a row at most once
+  const killed = { status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED };
+  const [pIds, sIds] = await Promise.all([d.db.proposals.ids("status", { status: "pending" }), d.db.proposalSets.ids("status", { status: "pending" })]);
+  const dead = await d.db.proposals.updateMany(pIds, (r) => (r.status === "pending" ? killed : null));
   for (const p of dead) publish("proposal.updated", { id: p.id, state: "expired", reason: "KILLED" });
-  for (const p of await d.db.update(s.proposalSets).set({ status: "expired", error: "KILLED", decidedAt: new Date(d.now()), ...BURNED }).where(eq(s.proposalSets.status, "pending")).returning({ id: s.proposalSets.id }))
+  for (const p of await d.db.proposalSets.updateMany(sIds, (r) => (r.status === "pending" ? killed : null)))
     publish("proposal.updated", { id: p.id, kind: "set", state: "expired", reason: "KILLED" }); // a set mid-send stops itself: sendSet re-checks the mode before every leg
 
   let cancelled = 0;
   const failed: { orderId: string; error: string }[] = [];
   if (d.exchange) {
-    const live = and(eq(s.orders.paper, false), eq(s.orders.status, "live"));
     try {
       await d.exchange.cancelAll();
-      const filled = await liveFilled(d.db);
-      for (const o of await d.db.update(s.orders).set({ status: "cancelled" }).where(live).returning()) {
+      const [filled, liveIds] = await Promise.all([liveFilled(d.db), d.db.orders.ids("bookStatus", { paper: false, status: "live" })]);
+      // CAS: only rows still live flip (fill sync may have moved one to matched/filled meanwhile)
+      for (const o of await d.db.orders.updateMany(liveIds, (r) => (!r.paper && r.status === "live" ? { status: "cancelled" } : null))) {
         cancelled++;
         publish("order.updated", { id: o.id, orderId: o.clobOrderId ?? o.id, status: orderUi("cancelled", 0), filledShares: filled.get(o.id) ?? 0 });
       }
     } catch (e) {
       const error = scrub(e instanceof Error ? e.message : "cancelAll failed").slice(0, 300);
-      for (const o of await d.db.select().from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)))) failed.push({ orderId: o.clobOrderId ?? o.id, error });
+      for (const o of await d.db.orders.find("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status })))) failed.push({ orderId: o.clobOrderId ?? o.id, error });
     }
   }
   await sent;

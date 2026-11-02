@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
 
@@ -69,8 +68,8 @@ describe("public api", () => {
 describe("public feed", () => {
   it("book, mid, last, tape, tick; short CDN cache; unknown id 404; per-IP limit", async () => {
     const { MarketFeedSchema } = await import("../../../lib/feed");
-    const db = (await (await import("../../../lib/api")).getDeps()).db, { schema: s } = await import("@pm/db");
-    const rows = await db.select({ id: s.markets.conditionId, tick: s.markets.tickSize }).from(s.markets);
+    const db = (await (await import("../../../lib/api")).getDeps()).db;
+    const rows = (await db.markets.all()).map((m) => ({ id: m.conditionId, tick: m.tickSize }));
     for (const tick of [0.01, 0.001]) {
       const row = rows.find((x) => x.tick === tick);
       expect(row, `fixture market with tick ${tick}`).toBeDefined();

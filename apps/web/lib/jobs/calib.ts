@@ -1,24 +1,28 @@
 import { aggregate, brier, confidenceForCategory, drift, fitExtremize, logLoss, paperPnl, type Forecast } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
-import { and, asc, eq, getTableColumns, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { DAY, chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
 import { putSettings } from "./settings";
 
 export type ForecastRow = Forecast & { conditionId: string; resolvedAt: number };
+type Thesis = typeof s.theses.$inferSelect;
+
+/** Newest thesis (by createdAt) per market: one batched index read. */
+async function latestThesis(db: Db, conds: string[]): Promise<Map<string, Thesis>> {
+  const got = await db.theses.findEach("cond", conds.map((conditionId) => ({ conditionId })), { order: "desc", limit: 1 });
+  return new Map(got.flatMap((ts) => (ts[0] ? [[ts[0].conditionId, ts[0]] as const] : [])));
+}
 
 /** One row per resolved market: judge p_hat (YES) and market mid at thesis time from the latest thesis. */
 export async function forecastRows(db: Db): Promise<ForecastRow[]> {
-  const outs = await db.select().from(s.outcomes);
+  const outs = await db.outcomes.all();
   if (!outs.length) return [];
   const ids = outs.map((o) => o.conditionId);
-  const [ths, ms] = await Promise.all([
-    db.select().from(s.theses).where(inArray(s.theses.conditionId, ids)),
-    db.select({ id: s.markets.conditionId, category: s.markets.category }).from(s.markets).where(inArray(s.markets.conditionId, ids)),
+  const [latest, ms] = await Promise.all([
+    latestThesis(db, ids),
+    Promise.all(chunks(ids, 1000).map((c) => db.markets.getMany(c))).then((x) => x.flat()),
   ]);
-  const cat = new Map(ms.map((m) => [m.id, m.category ?? "other"]));
-  const latest = new Map<string, (typeof ths)[number]>();
-  for (const t of ths) if (!latest.has(t.conditionId) || t.createdAt > latest.get(t.conditionId)!.createdAt) latest.set(t.conditionId, t);
+  const cat = new Map(ms.map((m) => [m.conditionId, m.category ?? "other"]));
   return outs.flatMap((o) => {
     const t = latest.get(o.conditionId), dt = t?.detail as { pYes?: number; pMidYes?: number; model?: string; roleMix?: string } | undefined;
     if (!t || dt?.pYes == null || dt.pMidYes == null) return [];
@@ -39,11 +43,11 @@ export async function categoryConfidence(db: Db, category: string | null): Promi
 /** Resolved markets (had a thesis or position, no outcome yet) -> `outcomes`. Everything else is computed on read. */
 export async function calibrateNightly(d: Deps) {
   return withLock(d, "calibrate", 30 * 60_000, async () => {
-    const m = s.markets;
-    const withThesis = d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses);
-    const done = await d.db.select({ c: s.outcomes.conditionId }).from(s.outcomes);
-    const cands = (await d.db.select().from(m).where(and(inArray(m.status, ["closed", "resolved"]), isNotNull(m.pmId), inArray(m.conditionId, withThesis))))
-      .filter((r) => !done.some((x) => x.c === r.conditionId));
+    const [withThesis, done] = await Promise.all([d.db.theses.distinct("cond"), d.db.outcomes.pks().then((x) => new Set(x))]);
+    const open = withThesis.filter((c): c is string => c !== null && !done.has(c)); // had a thesis, no outcome yet
+    const cands = (await Promise.all(chunks(open, 1000).map((c) => d.db.markets.getMany(c)))).flat()
+      .filter((r) => (r.status === "closed" || r.status === "resolved") && r.pmId !== null);
+    const judge = await latestThesis(d.db, cands.map((r) => r.conditionId));
     let resolved = 0;
     for (const batch of chunks(cands, 10))
       await Promise.all(batch.map(async (r) => {
@@ -52,12 +56,12 @@ export async function calibrateNightly(d: Deps) {
         if (p === undefined || (p > 0.01 && p < 0.99)) return; // not settled (or void/split): revisit next night
         const result = p >= 0.99 ? "YES" : "NO";
         const out = result === "YES" ? 1 : 0;
-        const th = await judgeP(d.db, r.conditionId);
-        await d.db.insert(s.outcomes).values({
+        const th = judgeP(judge.get(r.conditionId));
+        await d.db.outcomes.insertIfAbsent({ // first writer wins: a re-run never overwrites an outcome
           conditionId: r.conditionId, resolvedAt: new Date(d.now()), result,
           brier: th ? brier(th, out) : null, logLoss: th ? logLoss(th, out) : null,
-        }).onConflictDoNothing();
-        await d.db.update(m).set({ status: "resolved" }).where(eq(m.conditionId, r.conditionId));
+        });
+        await d.db.markets.update(r.conditionId, { status: "resolved" });
         resolved++;
       }));
     // the journal is derived from theses + outcomes + snapshots and rebuilt every night: a failure here must not hide the resolutions above
@@ -71,9 +75,7 @@ export async function calibrateNightly(d: Deps) {
 }
 
 /** judge p_hat (YES) of the latest thesis, for the outcome row's own brier/log_loss. */
-async function judgeP(db: Db, conditionId: string): Promise<number | null> {
-  const ts = await db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId));
-  const t = ts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+function judgeP(t: Thesis | undefined): number | null {
   const p = (t?.detail as { pYes?: number } | undefined)?.pYes;
   return p ?? null;
 }
@@ -84,14 +86,25 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 const DRIFT = [{ key: "drift24h", ms: DAY, tol: 12 * 3_600_000 }, { key: "drift7d", ms: 7 * DAY, tol: 36 * 3_600_000 }] as const;
 const SUGGEST_MIN_DELTA = 0.05;
 
-/** Mid of the market closest to `at` (snapshot history, else market_latest), within `tol`; null when nothing that close exists. */
-async function midNear(db: Db, conditionId: string, at: number, tol: number): Promise<number | null> {
-  const near = await db.select({ ts: s.snapshots.ts, mid: s.snapshots.mid }).from(s.snapshots)
-    .where(and(eq(s.snapshots.conditionId, conditionId), gte(s.snapshots.ts, new Date(at - tol)), lte(s.snapshots.ts, new Date(at + tol)), isNotNull(s.snapshots.mid)))
-    .orderBy(asc(s.snapshots.ts));
-  const best = near.reduce<(typeof near)[number] | undefined>((b, r) => (!b || Math.abs(r.ts.getTime() - at) < Math.abs(b.ts.getTime() - at) ? r : b), undefined);
+const MID_PAGE = 16;
+type Latest = Pick<typeof s.marketLatest.$inferSelect, "ts" | "mid">;
+
+/**
+ * Mid of the market closest to `at` (snapshot history, else market_latest `l`), within `tol`; null when nothing that close exists.
+ * Walks out from `at` both ways for the nearest snapshot with a mid; an equal distance goes to the earlier one (ts ascending, first wins).
+ */
+async function midNear(db: Db, conditionId: string, at: number, tol: number, l: Latest | undefined): Promise<number | null> {
+  const side = async (o: { min: number; max: number; order: "asc" | "desc" }) => {
+    for (let offset = 0; ; offset += MID_PAGE) {
+      const rs = await db.snapshots.find("cond", { conditionId }, { ...o, offset, limit: MID_PAGE });
+      const hit = rs.find((r) => r.mid !== null);
+      if (hit || rs.length < MID_PAGE) return hit;
+    }
+  };
+  const [before, after] = await Promise.all([side({ min: at - tol, max: at, order: "desc" }), side({ min: at, max: at + tol, order: "asc" })]);
+  const dist = (r: { ts: Date }) => Math.abs(r.ts.getTime() - at);
+  const best = before && (!after || dist(before) <= dist(after)) ? before : after;
   if (best) return best.mid;
-  const [l] = await db.select({ ts: s.marketLatest.ts, mid: s.marketLatest.mid }).from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId));
   return l?.mid != null && Math.abs(l.ts.getTime() - at) <= tol ? l.mid : null;
 }
 
@@ -102,26 +115,26 @@ async function midNear(db: Db, conditionId: string, at: number, tol: number): Pr
  */
 export async function journalNightly(d: Deps) {
   const { db } = d, now = d.now();
-  const [ths, outs, have] = await Promise.all([
-    db.select().from(s.theses),
-    db.select().from(s.outcomes),
-    db.select().from(s.journal),
-  ]);
+  const [ths, outs, have] = await Promise.all([db.theses.all(), db.outcomes.all(), db.journal.all()]);
   const old = new Map(have.map((j) => [j.thesisId, j]));
   const out = new Map(outs.map((o) => [o.conditionId, o]));
   // finalized rows are left alone: resolved, and either drift 7d is in or its window (plus tolerance) is over (a market that resolved earlier never gets one)
   const todo = ths.filter((t) => { const j = old.get(t.id); return !(j?.result && (j.drift7d != null || now > t.createdAt.getTime() + DRIFT[1].ms + DRIFT[1].tol)); });
   const ids = [...new Set(todo.map((t) => t.conditionId))];
-  const mk = new Map((await Promise.all(chunks(ids, 5000).map((c) => db.select({ id: s.markets.conditionId, category: s.markets.category, liquidity: s.markets.liquidity }).from(s.markets).where(inArray(s.markets.conditionId, c))))).flat().map((m) => [m.id, m]));
   const pods = [...new Set(todo.map((t) => t.podId))];
-  const runs = (await Promise.all(chunks(pods, 5000).map((c) => db.select({ podId: s.agentRuns.podId, role: s.agentRuns.role, status: s.agentRuns.status, o: s.agentRuns.outputJson }).from(s.agentRuns).where(inArray(s.agentRuns.podId, c))))).flat();
+  const [ms, runs] = await Promise.all([
+    Promise.all(chunks(ids, 5000).map((c) => db.markets.getMany(c))).then((x) => x.flat()),
+    db.agentRuns.findEach("pod", pods.map((podId) => ({ podId }))).then((x) => x.flat()),
+  ]);
+  const mk = new Map(ms.map((m) => [m.conditionId, m]));
   const pre = new Map<string, number[]>(); // blind agent estimates per pod (the judge's own row and the rules reader excluded)
   for (const r of runs) {
-    const p = (r.o as { probability?: unknown } | null)?.probability;
+    const p = (r.outputJson as { probability?: unknown } | null)?.probability;
     if (r.role !== "judge" && r.status === "ok" && fin(p)) pre.set(r.podId, [...(pre.get(r.podId) ?? []), p]);
   }
 
   const rows: (typeof s.journal.$inferInsert)[] = [];
+  const due: { row: (typeof rows)[number]; key: (typeof DRIFT)[number]["key"]; c: string; at: number; tol: number; midAt: number; pHat: number }[] = [];
   for (const t of todo) {
     const det = (t.detail ?? {}) as { pYes?: number; pMidYes?: number; e?: number; k?: number; model?: string };
     const pHat = fin(det.pYes) ? det.pYes : t.side === "NO" ? 1 - t.pHat : t.pHat;
@@ -144,20 +157,24 @@ export async function journalNightly(d: Deps) {
       for (const { key, ms, tol } of DRIFT) {
         const at = t.createdAt.getTime() + ms;
         if (row[key] != null || now < at) continue;
-        const later = await midNear(db, t.conditionId, at, tol);
-        if (later != null) row[key] = drift(midAt, later, pHat);
+        due.push({ row, key, c: t.conditionId, at, tol, midAt, pHat });
       }
     rows.push(row);
   }
-  const cols = getTableColumns(s.journal);
-  for (const c of chunks(rows, 200))
-    await db.insert(s.journal).values(c).onConflictDoUpdate({
-      target: s.journal.thesisId,
-      set: Object.fromEntries(Object.keys(c[0]!).filter((k) => k !== "thesisId").map((k) => [k, sql.raw(`excluded."${cols[k as keyof typeof cols]!.name}"`)])),
-    });
+  // drift windows whose time has come: market_latest fallback in one read, snapshot lookups in parallel batches
+  if (due.length) {
+    const latest = new Map((await db.marketLatest.getMany([...new Set(due.map((x) => x.c))])).map((l) => [l.conditionId, l]));
+    for (const batch of chunks(due, 25))
+      await Promise.all(batch.map(async (x) => {
+        const later = await midNear(db, x.c, x.at, x.tol, latest.get(x.c));
+        if (later != null) x.row[x.key] = drift(x.midAt, later, x.pHat);
+      }));
+  }
+  // ON CONFLICT (thesis_id) DO UPDATE SET every column = excluded (full row overwrite)
+  await db.journal.upsertMany(rows);
 
   // extremize refit over every resolved row (finalized ones included)
-  const all = await db.select({ pHat: s.journal.pHat, result: s.journal.result }).from(s.journal).where(isNotNull(s.journal.result));
+  const all = await db.journal.find("withResult", {});
   const fit = all.flatMap((j) => (j.pHat != null && (j.result === "YES" || j.result === "NO") ? [{ pHat: j.pHat, result: j.result as "YES" | "NO" }] : []));
   const k = fitExtremize(fit), cur = d.settings.extremize, sug = d.settings.suggested;
   let suggested: number | null = null;

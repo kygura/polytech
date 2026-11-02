@@ -1,5 +1,3 @@
-import { schema as s } from "@pm/db";
-import { desc } from "drizzle-orm";
 import { read } from "../../../lib/jobs";
 import { WatchlistView, type Tab } from "./WatchlistView";
 
@@ -15,7 +13,7 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
     read.watchlist(r, "small-cap", "rank", o),
     read.watchlist(r, "size", "rank", o),
     read.watchlist(r, "structural", "rank", o),
-    r.db.select({ ts: s.snapshots.ts }).from(s.snapshots).orderBy(desc(s.snapshots.ts)).limit(1).then((x) => x[0]?.ts.getTime() ?? null),
+    r.db.snapshots.first("byTs", {}, { order: "desc" }).then((x) => x?.ts.getTime() ?? null),
   ]);
   return <WatchlistView tab={tab} small={small} size={size} structural={structural} showMuted={showMuted} lastSnapshotAt={snap} now={r.now()} />;
 }

@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY;
 
@@ -10,21 +9,21 @@ vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/ser
 // Fresh database: markets + market_latest filled by the sweep/snapshot, no screens or theses yet.
 let NOW = 0, wl: typeof import("./watchlist/route"), read: typeof import("../../../lib/jobs").read, r: any;
 beforeAll(async () => {
-  const a = await import("../../../lib/api"), { schema: S } = await import("@pm/db");
+  const a = await import("../../../lib/api");
   r = await a.getRead();
   NOW = r.now();
   const db = r.db, day = 864e5;
   const m = (id: string, o: object = {}) => ({ conditionId: id, question: `Q ${id}?`, category: "politics", endDate: new Date(NOW + 30 * day), liquidity: 10_000, vol24h: 1000, ...o });
-  await db.insert(S.markets).values([
+  await db.markets.insertMany([
     m("0xa"), m("0xpin"), m("0xb", { vol24h: 5000 }), m("0xc", { liquidity: 50_000 }), m("0xc2", { liquidity: 60_000 }),
     m("0xnomid"), m("0xpast", { endDate: new Date(NOW - day) }), m("0xnoend", { endDate: null }), m("0xclosed", { status: "closed" }), m("0xmuted"), m("0xnolatest"),
   ]);
   const l = (id: string, o: object = {}) => ({ conditionId: id, ts: new Date(NOW), mid: 0.4, priority: null, ...o });
-  await db.insert(S.marketLatest).values([
+  await db.marketLatest.insertMany([
     l("0xa", { priority: 0.9, mid: 0.3 }), l("0xpin", { priority: 0.5 }), l("0xb"), l("0xc"), l("0xc2"),
     l("0xnomid", { mid: null, priority: 1 }), l("0xpast", { priority: 1 }), l("0xnoend", { priority: 1 }), l("0xclosed", { priority: 1 }), l("0xmuted", { priority: 1 }),
   ]);
-  await db.insert(S.marketFlags).values([{ conditionId: "0xpin", pinned: true }, { conditionId: "0xmuted", muted: true }]);
+  await db.marketFlags.insertMany([{ conditionId: "0xpin", pinned: true }, { conditionId: "0xmuted", muted: true }]);
   read = (await import("../../../lib/jobs")).read;
   wl = await import("./watchlist/route");
 }, 60_000);

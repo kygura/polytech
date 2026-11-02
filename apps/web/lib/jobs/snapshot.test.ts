@@ -1,11 +1,8 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
-import { memoryKv, schema as s } from "@pm/db";
+import { memoryKv } from "@pm/db";
 import { createPm, type Book } from "@pm/pm";
-import { count, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deps, latestSnaps, snapshotBooks, sweepUniverse, takeSnapshots, type Deps } from "./index";
-
-process.env.PGLITE_DIR = "memory://";
 
 const fx = createPm({ fixtures: true });
 let T = Date.parse("2026-10-15T12:00:00Z");
@@ -16,13 +13,13 @@ const pm = { ...fx, books: async (tokens: string[]) => (await fx.books(tokens)).
 let d: Deps, yes: Map<string, string>;
 // scoped to explicit ids: a full run also prunes history of unwatched markets, which would hide the row counts under test
 const snap = async () => (await takeSnapshots({ ...d, now: () => T }, [...yes.keys()])) as { markets: number; snapshots: number; latest: number; unchanged: number; noBook: number };
-const hist = async () => (await d.db.select({ n: count() }).from(s.snapshots))[0]!.n;
-const ml = async (c: string) => (await d.db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, c)))[0]!;
+const hist = () => d.db.snapshots.count("byTs", {});
+const ml = async (c: string) => (await d.db.marketLatest.get(c))!;
 
 beforeAll(async () => {
   d = await deps({ pm, kv: memoryKv(), now: () => T, runner: fakeRunner, judge: fakeJudge });
   await sweepUniverse(d);
-  yes = new Map((await d.db.select().from(s.markets)).map((m) => [m.conditionId, m.yesTokenId!]));
+  yes = new Map((await d.db.markets.all()).map((m) => [m.conditionId, m.yesTokenId!]));
 }, 60_000);
 
 describe("snapshot: market_latest in place, history only on change", () => {
@@ -31,7 +28,7 @@ describe("snapshot: market_latest in place, history only on change", () => {
     expect(out.latest).toBeGreaterThan(20);
     expect(out.snapshots).toBe(out.latest);
     expect(await hist()).toBe(out.latest);
-    const rows = await d.db.select().from(s.marketLatest);
+    const rows = await d.db.marketLatest.all();
     expect(rows).toHaveLength(out.latest);
     expect(rows.every((r) => r.mid != null && r.bestBid != null && r.spread != null && r.depth2c != null && r.exitDepth != null && r.bookHash && r.midChangedAt)).toBe(true);
     expect(rows.filter((r) => r.holderCount != null && r.top1Share != null && r.holderHhi != null).length).toBeGreaterThan(0); // fixtures hold holders for some markets
@@ -68,7 +65,7 @@ describe("snapshot: market_latest in place, history only on change", () => {
 
   it("a changed book gets a history row; mid_changed_at bumps only when the mid moves >= 1c", async () => {
     // b needs a spread > 2c: a +2c best bid must not cross the ask, or the mid moves less than 1c
-    const b = (await d.db.select().from(s.marketLatest)).find((r) => r.bestBid != null && r.bestAsk != null && r.bestAsk - r.bestBid > 0.025)?.conditionId;
+    const b = (await d.db.marketLatest.all()).find((r) => r.bestBid != null && r.bestAsk != null && r.bestAsk - r.bestBid > 0.025)?.conditionId;
     const a = [...yes.keys()].find((c) => c !== b);
     const [ta, tb] = [yes.get(a!)!, yes.get(b!)!];
     const [ma0, mb0] = [await ml(a!), await ml(b!)];
@@ -96,7 +93,7 @@ describe("snapshot: market_latest in place, history only on change", () => {
   });
 
   it("crowd endpoints failing keeps the previous crowd fields and marks the history row flowUnknown", async () => {
-    const c = (await d.db.select().from(s.marketLatest)).find((r) => r.holderCount != null)!;
+    const c = (await d.db.marketLatest.all()).find((r) => r.holderCount != null)!;
     const boom = async () => { throw new Error("GET /v2/holders -> 403 <html>"); };
     T += 61 * 60_000;
     const dd = { ...d, now: () => T, pm: { ...pm, holders: boom, trades: boom } as typeof pm };

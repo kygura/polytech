@@ -1,8 +1,7 @@
 import { anthropicJudge, anthropicTriage, modelFor, classifyR, disabledJudge, fakeJudge, heuristicTriage, isProd, pickRunner, type AgentRunner, type RunnerKind, type Judge, type Triage } from "@pm/agents";
 import { feeExponentOf, feeRateFor, type Market, type Snapshot } from "@pm/core";
-import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
+import { getDb, getKv, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
-import { sql } from "drizzle-orm";
 import { getSettings, type AppSettings } from "./settings";
 
 export type Deps = {
@@ -43,11 +42,8 @@ export function envExchange(): Exchange | null {
   }
 }
 
-// globalThis: dev RSC and route-handler bundles are separate module instances; one migrate promise per process (see packages/db/src/client.ts)
-const slot = ((globalThis as { __pmReady?: { p?: Promise<Db> } }).__pmReady ??= {});
-/** getDb(), migrated once per process when running on local PGlite (a hosted DATABASE_URL is migrated with `db:migrate`). Cache cleared on reject. */
-export const dbReady = () =>
-  (slot.p ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((slot.p = undefined), Promise.reject(e))));
+/** The store (Redis, or in-process for local runs; packages/db/README.md). Async for the callers that awaited the old migrate-on-start. */
+export const dbReady = async (): Promise<Db> => getDb();
 
 /** Production wiring. Tests/seed override pieces via `over`. */
 export async function deps(over: Partial<Deps> = {}): Promise<Deps> {
@@ -139,6 +135,6 @@ export const toSnap = (r: SnapRow): Snapshot => ({
 
 export const today = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/** Add to today's spend row (atomic increment: concurrent pods each land). */
 export const addSpend = (db: Deps["db"], now: number, usd: number, sandboxS: number) =>
-  db.insert(s.spend).values({ day: today(now), anthropicUsd: usd, sandboxS })
-    .onConflictDoUpdate({ target: s.spend.day, set: { anthropicUsd: sql`${s.spend.anthropicUsd} + ${usd}`, sandboxS: sql`${s.spend.sandboxS} + ${sandboxS}` } });
+  db.spend.upsert({ day: today(now), anthropicUsd: usd, sandboxS }, (cur) => ({ anthropicUsd: cur.anthropicUsd + usd, sandboxS: cur.sandboxS + sandboxS }));

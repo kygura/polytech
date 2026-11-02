@@ -1,7 +1,6 @@
 import { pickRunner } from "@pm/agents";
 import { feeExponentOf, feeRateFor } from "@pm/core";
-import { getKv, schema as s, type Db, type Kv } from "@pm/db";
-import { max } from "drizzle-orm";
+import { getKv, type Db, type Kv } from "@pm/db";
 import { clientIp } from "./auth";
 import type { StructDetail } from "./jobs/screen";
 import type { marketDetail, WatchlistRow } from "./jobs/read";
@@ -38,8 +37,10 @@ export type Freshness = { sweptAt: number | null; snapshotAt: number | null; sta
 export const STALE_MS = 6 * 3_600_000;
 export const KICK_AT = "kick:sweepAt"; // written by the sweep on success (public sweptAt); kickIfStale keeps its own key
 export async function freshness(db: Db, kv: Kv, now: number): Promise<Freshness> {
-  const [sweptAt, snap, latest] = await Promise.all([kv.get<number>(KICK_AT), db.select({ ts: max(s.snapshots.ts) }).from(s.snapshots), db.select({ ts: max(s.marketLatest.ts) }).from(s.marketLatest)]);
-  const snapshotAt = Math.max(snap[0]?.ts?.getTime() ?? 0, latest[0]?.ts?.getTime() ?? 0) || null; // history rows skip unchanged books; market_latest moves every run
+  const [sweptAt, snap, latest] = await Promise.all([
+    kv.get<number>(KICK_AT), db.snapshots.first("byTs", {}, { order: "desc" }), db.marketLatest.first("byTs", {}, { order: "desc" }),
+  ]); // newest row by ts = max(ts)
+  const snapshotAt = Math.max(snap?.ts?.getTime() ?? 0, latest?.ts?.getTime() ?? 0) || null; // history rows skip unchanged books; market_latest moves every run
   return { sweptAt, snapshotAt, stale: snapshotAt == null || now - snapshotAt > STALE_MS };
 }
 export type PublicWatchlist = Freshness & { research: "on" | "disabled"; rows: PublicWatchRow[] };

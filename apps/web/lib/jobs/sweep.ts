@@ -2,7 +2,6 @@ import { rulesHash } from "@pm/agents";
 import { bookHash, bookMetrics, classifyResolutionSource, holderMetrics, tradeMetrics, type TradeInput } from "@pm/core";
 import { insertSnapshots, pruneMarkets, pruneSnapshots, referencedMarkets, schema as s } from "@pm/db";
 import type { Market as PmMarket, Trade } from "@pm/pm";
-import { and, eq, gte, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { KICK_AT } from "../public";
 import { chunks, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -14,7 +13,6 @@ const MAX_FEE_FETCHES = 200;
 const WALK_BUDGET_MS = 150_000; // the cron route allows 300 s: walk <= 150 s (+ one page), fees <= FEE_DEADLINE_MS, then closing
 const FEE_DEADLINE_MS = 240_000; // from sweep start; remaining fee fetches are skipped (next sweep)
 const OPEN = ["active", "disputed", "not_accepting"];
-const ex = (c: { name: string }) => sql.raw(`excluded."${c.name}"`);
 
 const statusOf = (m: PmMarket) => (!m.open ? "closed" : m.in_dispute ? "disputed" : !m.accepting_orders ? "not_accepting" : "active");
 
@@ -49,33 +47,47 @@ export const toMarketRow = (m: PmMarket, prev?: { rulesHash: string | null; reso
   };
 };
 
-const t = s.markets;
-/** liquidity / volume churn every minute: rewrite only when the value moved > 5% (or appeared). */
-const moved = (c: { name: string }) =>
-  sql`(excluded."${sql.raw(c.name)}" is not null and (${sql.raw(`"markets"."${c.name}"`)} is null or abs(excluded."${sql.raw(c.name)}" - ${sql.raw(`"markets"."${c.name}"`)}) > 0.05 * greatest(abs(${sql.raw(`"markets"."${c.name}"`)}), 1)))`;
-const stored = (c: { name: string }) => sql.raw(`"markets"."${c.name}"`);
+type MarketRow = typeof s.markets.$inferSelect;
+type MarketIns = typeof s.markets.$inferInsert;
 // the columns whose change justifies a write. rules is covered by rules_hash. fee_rate / fee_exponent compare the coalesced value, tick_size too.
-const SAME = [t.eventId, t.question, t.category, t.tags, t.endDate, t.negRiskGroup, t.status, t.pmId, t.yesTokenId, t.noTokenId, t.rulesHash, t.heuristicR, t.resolutionSource, t.negRiskAugmented];
-const changed = sql`((${sql.join(SAME.map(stored), sql`, `)}, ${stored(t.tickSize)}, ${stored(t.feeRate)}, ${stored(t.feeExponent)}) is distinct from (${sql.join(SAME.map(ex), sql`, `)}, coalesce(excluded."tick_size", ${stored(t.tickSize)}), coalesce(excluded."fee_rate", ${stored(t.feeRate)}), coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})) or ${moved(t.liquidity)} or ${moved(t.vol24h)})`;
+const SAME = ["eventId", "question", "category", "tags", "endDate", "negRiskGroup", "status", "pmId", "yesTokenId", "noTokenId", "rulesHash", "heuristicR", "resolutionSource", "negRiskAugmented"] as const;
+const KEEP_IF_NULL = ["tickSize", "feeRate", "feeExponent"] as const; // coalesce(excluded, stored): an unknown value keeps the stored one
+/** The inserted value as Postgres saw it in `excluded`: column defaults for omitted fields, else null. */
+const DEFAULTS: Partial<MarketRow> = { tags: [], status: "active", negRiskAugmented: false };
+const excl = <K extends keyof MarketRow>(r: MarketIns, k: K): MarketRow[K] => (r[k as keyof MarketIns] ?? DEFAULTS[k] ?? null) as MarketRow[K];
+/** IS NOT DISTINCT FROM: nulls equal, dates by instant, jsonb by value, NaN = NaN (as in Postgres floats). */
+const cmp = (v: unknown) => (v instanceof Date ? v.getTime() : v !== null && typeof v === "object" ? JSON.stringify(v) : v);
+const same = (a: unknown, b: unknown) => { const x = cmp(a), y = cmp(b); return x === y || (x !== x && y !== y); };
+/** liquidity / volume churn every minute: rewrite only when the value moved > 5% (or appeared). */
+const moved = (cur: MarketRow, r: MarketIns, k: "liquidity" | "vol24h") => {
+  const e = r[k] ?? null, st = cur[k];
+  return e !== null && (st === null || Math.abs(e - st) > 0.05 * Math.max(Math.abs(st), 1));
+};
+const changed = (cur: MarketRow, r: MarketIns) =>
+  SAME.some((k) => !same(cur[k], excl(r, k))) || KEEP_IF_NULL.some((k) => !same(cur[k], r[k] ?? cur[k])) || moved(cur, r, "liquidity") || moved(cur, r, "vol24h");
+/** The DO UPDATE SET of the old upsert: new values, liquidity / volume only when moved, fee / tick coalesced with the stored value. */
+const update = (cur: MarketRow, r: MarketIns): Partial<MarketRow> => ({
+  ...Object.fromEntries(SAME.map((k) => [k, excl(r, k)])),
+  vol24h: moved(cur, r, "vol24h") ? r.vol24h! : cur.vol24h,
+  liquidity: moved(cur, r, "liquidity") ? r.liquidity! : cur.liquidity,
+  tickSize: r.tickSize ?? cur.tickSize, feeRate: r.feeRate ?? cur.feeRate, feeExponent: r.feeExponent ?? cur.feeExponent,
+});
 
 /** Insert-or-update a page of markets; rows whose meaningful columns are unchanged are not written (not returned either). Returns the written condition ids. */
-export async function upsertMarkets(db: Deps["db"], rows: (typeof s.markets.$inferInsert)[]): Promise<string[]> {
+export async function upsertMarkets(db: Deps["db"], rows: MarketIns[]): Promise<string[]> {
   if (!rows.length) return [];
-  const out = await db.insert(t).values(rows).onConflictDoUpdate({
-    target: t.conditionId,
-    set: {
-      eventId: ex(t.eventId), question: ex(t.question), category: ex(t.category), tags: ex(t.tags),
-      endDate: ex(t.endDate), negRiskGroup: ex(t.negRiskGroup), status: ex(t.status), pmId: ex(t.pmId),
-      yesTokenId: ex(t.yesTokenId), noTokenId: ex(t.noTokenId), rulesHash: ex(t.rulesHash), heuristicR: ex(t.heuristicR), resolutionSource: ex(t.resolutionSource), negRiskAugmented: ex(t.negRiskAugmented),
-      vol24h: sql`case when ${moved(t.vol24h)} then excluded."vol_24h" else ${stored(t.vol24h)} end`,
-      liquidity: sql`case when ${moved(t.liquidity)} then excluded."liquidity" else ${stored(t.liquidity)} end`,
-      tickSize: sql`coalesce(excluded."tick_size", ${stored(t.tickSize)})`,
-      feeRate: sql`coalesce(excluded."fee_rate", ${stored(t.feeRate)})`,
-      feeExponent: sql`coalesce(excluded."fee_exponent", ${stored(t.feeExponent)})`,
-    },
-    setWhere: changed,
-  }).returning({ id: t.conditionId });
-  return out.map((r) => r.id);
+  const inc = new Map(rows.map((r) => [r.conditionId, r]));
+  // read once and write only the changed rows; the write re-checks against the row it patches (compare-and-set), so its decision is the one kept
+  const cur = new Map((await db.markets.getMany([...inc.keys()])).map((r) => [r.conditionId, r]));
+  const todo = [...inc.values()].filter((r) => { const c = cur.get(r.conditionId); return !c || changed(c, r); });
+  if (!todo.length) return [];
+  const wrote = new Map<string, boolean>(); // absent = inserted
+  await db.markets.upsertMany(todo, (c) => {
+    const r = inc.get(c.conditionId)!, w = changed(c, r);
+    wrote.set(c.conditionId, w);
+    return w ? update(c, r) : null;
+  });
+  return todo.map((r) => r.conditionId).filter((id) => wrote.get(id) ?? true);
 }
 
 /**
@@ -89,7 +101,7 @@ export async function sweepUniverse(d: Deps) {
     // and only the screenable slice: ~250k markets are open, ~26k have liquidity >= minLiquidityUsd and resolve within minDays..maxDays (server-side filters)
     const { minDays, maxDays } = d.settings.filters, liquidityMin = d.settings.universe.minLiquidityUsd, now = d.now();
     const endMin = now + minDays * 864e5, endMax = now + maxDays * 864e5;
-    const known = new Map((await d.db.select({ id: t.conditionId, fee: t.feeRate, status: t.status, end: t.endDate, pmId: t.pmId, rulesHash: t.rulesHash, resolutionSource: t.resolutionSource }).from(t)).map((r) => [r.id, r]));
+    const known = new Map((await d.db.markets.all()).map((r) => [r.conditionId, { id: r.conditionId, fee: r.feeRate, status: r.status, end: r.endDate, pmId: r.pmId, rulesHash: r.rulesHash, resolutionSource: r.resolutionSource }]));
     const t0 = Date.now();
     // stream: keep each page's slim row (no rules text) and Gamma touch, never the ~26k full markets (OOM on Vercel)
     const listed = new Map<string, Listed>();
@@ -100,8 +112,8 @@ export async function sweepUniverse(d: Deps) {
     if (!complete) console.warn(`sweep: listing incomplete after ${pages} pages (429/5xx/time budget), ${seen.size} markets listed, closing and pruning skipped`);
     if (!seen.size) return { markets: 0, kept: 0, newMarkets: 0, written: 0, feesFetched: 0, closed: 0, complete };
 
-    const cachedR = new Map((await d.db.select({ c: s.rrCache.conditionId, h: s.rrCache.rulesHash, r: s.rrCache.r }).from(s.rrCache)).map((x) => [`${x.c}:${x.h}`, x.r]));
-    const referenced = await referencedMarkets(d.db);
+    const [rr, referenced] = await Promise.all([d.db.rrCache.all(), referencedMarkets(d.db)]);
+    const cachedR = new Map(rr.map((x) => [`${x.conditionId}:${x.rulesHash}`, x.r]));
     const kept = preRank([...listed.values()], d.settings, now, cachedR);
     for (const id of referenced) if (listed.has(id)) kept.add(id); // refresh what the user holds or researched while it is listed
     const rows = [...kept].map((id) => listed.get(id)!.row);
@@ -116,12 +128,14 @@ export async function sweepUniverse(d: Deps) {
     let feesFetched = 0;
     for (const batch of chunks(need, 20)) {
       if (Date.now() - t0 > FEE_DEADLINE_MS) break;
+      const fee = new Map<string, { feeRate: number; feeExponent: number | null }>();
       await Promise.all(batch.map(async (c) => {
         const info = await d.pm.clobMarket(c).catch(() => undefined);
         if (!info) return; // 404 / outage: stays unknown, retried next sweep
         feesFetched++;
-        await d.db.update(t).set({ feeRate: info.fee_schedule?.rate ?? 0, feeExponent: info.fee_schedule?.exponent ?? null }).where(eq(t.conditionId, c));
+        fee.set(c, { feeRate: info.fee_schedule?.rate ?? 0, feeExponent: info.fee_schedule?.exponent ?? null });
       }));
+      if (fee.size) await d.db.markets.updateMany([...fee.keys()], (r) => fee.get(r.conditionId) ?? null); // one write per batch
     }
 
     // open in db but gone from the open universe => closed (calibrateNightly decides if it resolved)
@@ -145,16 +159,20 @@ export async function sweepUniverse(d: Deps) {
     if (!truncated) await d.kv.set(listingKey, seen.size);
     // a market we hold, or one in a pending proposal / unsettled set, closes only when Gamma says it is closed (resolution still needs the flip);
     // merely falling out of the filter, or a failed lookup, keeps it open so snapshots and exits keep running
+    const [heldPos, heldProps, heldPods, heldSets] = await Promise.all([
+      d.db.positions.find("open", [{ paper: true }, { paper: false }]),
+      d.db.proposals.find("status", [{ status: "pending" }, { status: "approved" }]),
+      d.db.pods.find("byStarted", {}, { min: new Date(now - 30 * 864e5) }), // researched (e.g. searched-and-ingested) markets stay open too
+      d.db.proposalSets.find("status", ["pending", "sending", "unwinding", "flagged"].map((status) => ({ status }))),
+    ]);
     const held = new Set([
-      ...(await d.db.select({ c: s.positions.conditionId }).from(s.positions).where(isNull(s.positions.closedAt))).map((r) => r.c),
-      ...(await d.db.select({ c: s.proposals.conditionId }).from(s.proposals).where(inArray(s.proposals.status, ["pending", "approved"]))).map((r) => r.c),
-      ...(await d.db.select({ c: s.pods.conditionId }).from(s.pods).where(gte(s.pods.startedAt, new Date(now - 30 * 864e5)))).map((r) => r.c), // researched (e.g. searched-and-ingested) markets stay open too
-      ...(await d.db.select({ l: s.proposalSets.legs }).from(s.proposalSets).where(inArray(s.proposalSets.status, ["pending", "sending", "unwinding", "flagged"]))).flatMap((r) => r.l.map((l) => l.conditionId)),
+      ...heldPos.map((r) => r.conditionId), ...heldProps.map((r) => r.conditionId), ...heldPods.map((r) => r.conditionId),
+      ...heldSets.flatMap((r) => r.legs.map((l) => l.conditionId)),
     ]);
     const missing = truncated ? [] : knownOpen.filter(([id]) => !seen.has(id));
     const stillOpen = new Set((await Promise.all(missing.filter(([id]) => held.has(id)).map(async ([id, r]) => ((await d.pm.market(r.pmId ?? id).catch(() => undefined))?.open !== false ? id : null)))).flatMap((id) => id ?? []));
     const gone = missing.map(([id]) => id).filter((id) => !stillOpen.has(id));
-    for (const c of chunks(gone, 500)) await d.db.update(t).set({ status: "closed" }).where(inArray(t.conditionId, c));
+    if (gone.length) await d.db.markets.updateMany(gone, { status: "closed" });
     // a truncated listing would drop live markets that simply were not walked: prune only after a full one
     if (!truncated) await pruneMarkets(d.db, [...new Set([...kept, ...referenced, ...held])]);
 
@@ -179,10 +197,10 @@ const CROWD_WAVE = 4; // concurrent data-API chunks
 const OI_CHUNK = 20; // Data API v2 /oi: "condition accepts at most 20 distinct values" (50 got a 400 on every chunk)
 
 const ml = s.marketLatest;
-const keep = (c: { name: string }) => sql`coalesce(excluded."${sql.raw(c.name)}", ${sql.raw(`"market_latest"."${c.name}"`)})`;
-
-/** Rows of `select ... where id in (ids)` for long id lists: undefined ids = no filter (one query). */
-const byIds = async <R>(ids: string[] | undefined, q: (ids?: string[]) => Promise<R[]>) => (ids ? (await Promise.all(chunks(ids, 5000).map((c) => q(c)))).flat() : q());
+type LatestRow = typeof ml.$inferSelect;
+/** market_latest columns the snapshot job owns: book columns take the new value; crowd columns keep the stored one when the new is null. */
+const BOOK_COLS = ["ts", "mid", "bestBid", "bestAsk", "spread", "depth1c", "depth2c", "depth5c", "exitDepth", "capacity", "bookHash", "midChangedAt"] as const;
+const CROWD_COLS = ["holderCount", "holderHhi", "top1Share", "top5Share", "flow24h", "tradeMedian", "largeTrade24h", "lastTradeTs"] as const;
 
 /**
  * Snapshot `ids` (default: every open market). market_latest is upserted in place every run; a history row (`snapshots`) is appended
@@ -190,8 +208,8 @@ const byIds = async <R>(ids: string[] | undefined, q: (ids?: string[]) => Promis
  */
 export async function takeSnapshots(d: Deps, ids?: string[]) {
   const t0 = Date.now();
-  const mkts = await d.db.select({ conditionId: s.markets.conditionId, yesTokenId: s.markets.yesTokenId, noTokenId: s.markets.noTokenId, vol24h: s.markets.vol24h, liquidity: s.markets.liquidity })
-    .from(s.markets).where(and(inArray(s.markets.status, OPEN), isNotNull(s.markets.yesTokenId), ids ? inArray(s.markets.conditionId, ids) : undefined));
+  const mkts = (ids ? await d.db.markets.getMany([...new Set(ids)]) : await d.db.markets.find("status", OPEN.map((status) => ({ status }))))
+    .filter((m) => OPEN.includes(m.status) && m.yesTokenId !== null);
   if (!mkts.length) return { markets: 0, snapshots: 0, latest: 0, unchanged: 0, noBook: 0 };
   const conds = mkts.map((m) => m.conditionId);
   const now = d.now();
@@ -211,22 +229,22 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
     if (failed.length) console.warn(`snapshot: ${what} failed for ${failed.length}/${xs.length} chunks (${skipped} past the deadline)${bad ? `: ${String(bad.reason).slice(0, 120)}` : ""}`);
     return { ok, failed };
   };
-  const [books, oiParts, prevRows, histRows, researched] = await Promise.all([
+  const [books, oiParts, prevRows, recentRows, researched] = await Promise.all([
     d.pm.books(mkts.map((m) => m.yesTokenId!)),
     soft("oi", chunks(conds, OI_CHUNK), (c) => d.pm.oi(c)),
-    byIds(conds, (c) => d.db.select({ conditionId: ml.conditionId, mid: ml.mid, bookHash: ml.bookHash, midChangedAt: ml.midChangedAt, lastTradeTs: ml.lastTradeTs, flow24h: ml.flow24h, priority: ml.priority })
-      .from(ml).where(c ? inArray(ml.conditionId, c) : undefined)),
-    byIds(conds, (c) => d.db.select({ c: s.snapshots.conditionId, ts: max(s.snapshots.ts) }).from(s.snapshots).where(c ? inArray(s.snapshots.conditionId, c) : undefined).groupBy(s.snapshots.conditionId)),
-    d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses),
+    d.db.marketLatest.getMany(conds),
+    // "now - max(ts) >= HISTORY_EVERY_MS" is "no history row newer than now - HISTORY_EVERY_MS": ids only, at most one per market
+    d.db.snapshots.idsEach("cond", conds.map((conditionId) => ({ conditionId })), { gt: now - HISTORY_EVERY_MS, limit: 1 }),
+    d.db.theses.distinct("cond"),
   ]);
   const book = new Map(books.map((b) => [b.token_id, b]));
   const oi: Record<string, number> = Object.assign({}, ...oiParts.ok);
-  const prev = new Map(prevRows.map((r) => [r.conditionId, r])), lastHist = new Map(histRows.map((r) => [r.c, r.ts?.getTime() ?? 0]));
+  const prev = new Map(prevRows.map((r) => [r.conditionId, r])), recentHist = new Set(conds.filter((_, i) => recentRows[i]!.length > 0));
 
   // Crowd candidates (<= CROWD_MAX per run): researched markets and the top screen priorities first, the rest of the slots rotate through the
   // markets never fetched (then any), pseudo-randomly per 5-minute epoch, so every market is reached over time without a per-market fetch clock.
   // A market outside this run's set keeps its previous crowd fields and last trade; it is only "unknown" if it has never been fetched.
-  const thesis = new Set(researched.map((r) => r.c));
+  const thesis = new Set(researched);
   const rank = (m: (typeof mkts)[number]) => (thesis.has(m.conditionId) ? 1e9 : (prev.get(m.conditionId)?.priority ?? -1));
   const ordered = mkts.filter((m) => book.has(m.yesTokenId!)).sort((a, b) => rank(b) - rank(a) || (b.liquidity ?? 0) - (a.liquidity ?? 0));
   const epoch = Math.floor(now / 300_000), fresh = (m: (typeof mkts)[number]) => prev.get(m.conditionId)?.flow24h != null;
@@ -287,7 +305,7 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
     // the history row carries more than the book (oi, top-10 share, flow, volume, last trade): a change in any of them (coarsely bucketed) is a change
     const sig = [o != null ? Math.round(Math.log1p(o) / 0.05) : "-", share != null ? Math.round(share * 100) : "-", Math.round(netFlow * 10), +unknown, m.vol24h != null ? Math.round(Math.log1p(m.vol24h) / 0.05) : "-", last ? Math.floor(last / 3_600_000) : "-"].join(",");
     const hash = `${bookHash(b)}.${fnv(sig).toString(16)}`;
-    if (!p?.bookHash || hash !== p.bookHash || now - (lastHist.get(c) ?? 0) >= HISTORY_EVERY_MS)
+    if (!p?.bookHash || hash !== p.bookHash || !recentHist.has(c))
       hist.push({
         conditionId: c, ts: new Date(now), mid: bm.mid, bestBid: bm.bestBid, bestAsk: bm.bestAsk, depth5cUsd: bm.depth5c, vol24h: m.vol24h, oi: o ?? null,
         top10Share: share, lastTradeTs: last ? new Date(last) : null,
@@ -306,25 +324,21 @@ export async function takeSnapshots(d: Deps, ids?: string[]) {
   }
   // history first: market_latest.book_hash only advances once the row for that book exists (a failed insert is retried next run)
   for (const c of chunks(hist, 200)) await insertSnapshots(d.db, c);
-  for (const c of chunks(latest, 200))
-    await d.db.insert(ml).values(c).onConflictDoUpdate({
-      target: ml.conditionId,
-      set: {
-        ts: ex(ml.ts), mid: ex(ml.mid), bestBid: ex(ml.bestBid), bestAsk: ex(ml.bestAsk), spread: ex(ml.spread), depth1c: ex(ml.depth1c), depth2c: ex(ml.depth2c), depth5c: ex(ml.depth5c),
-        exitDepth: ex(ml.exitDepth), capacity: ex(ml.capacity), bookHash: ex(ml.bookHash), midChangedAt: ex(ml.midChangedAt),
-        holderCount: keep(ml.holderCount), holderHhi: keep(ml.holderHhi), top1Share: keep(ml.top1Share), top5Share: keep(ml.top5Share),
-        flow24h: keep(ml.flow24h), tradeMedian: keep(ml.tradeMedian), largeTrade24h: keep(ml.largeTrade24h), lastTradeTs: keep(ml.lastTradeTs),
-      },
-    });
+  // patched onto the current row (never priority / structural / opportunity: the screen owns those), atomic per ~200-row chunk
+  const byCond = new Map(latest.map((r) => [r.conditionId, r]));
+  await d.db.marketLatest.upsertMany(latest, (cur) => {
+    const r = byCond.get(cur.conditionId)! as Partial<LatestRow>;
+    return Object.fromEntries([...BOOK_COLS.map((k) => [k, r[k] ?? null]), ...CROWD_COLS.map((k) => [k, r[k] ?? cur[k]])]) as Partial<LatestRow>;
+  });
   // retention rides full sweeps only (ids undefined); a prune failure must not lose the published snapshot result
   if (!ids) try {
     // watched = shortlist (priority>0 or pinned) + live theses + open positions; unwatched markets keep only their latest row
     const [sl, th, pos] = await Promise.all([
       shortlist(d.db, 20),
-      d.db.selectDistinct({ c: s.theses.conditionId }).from(s.theses).where(sql`${s.theses.expiresAt} > ${new Date(now)}`),
-      d.db.selectDistinct({ c: s.positions.conditionId }).from(s.positions).where(isNull(s.positions.closedAt)),
+      d.db.theses.find("byExpiry", {}, { gt: new Date(now) }), // expiresAt > now (no-expiry theses excluded, as before)
+      d.db.positions.find("open", [{ paper: true }, { paper: false }]),
     ]);
-    await pruneSnapshots(d.db, [...new Set([...sl.map((x) => x.conditionId), ...th.map((x) => x.c), ...pos.map((x) => x.c)])], now);
+    await pruneSnapshots(d.db, [...new Set([...sl.map((x) => x.conditionId), ...th.map((x) => x.conditionId), ...pos.map((x) => x.conditionId)])], now);
   } catch (e) {
     console.warn("snapshot: prune failed:", String(e).slice(0, 120));
   }

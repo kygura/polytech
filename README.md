@@ -12,7 +12,7 @@ apps/tui       Ink terminal client (`pm`)
 packages/core  book, calibration, autonomy, risk-limit checks
 packages/pm    Polymarket clients, exchange, fixtures
 packages/agents  research pods, judge, sizing
-packages/db    Drizzle schema (Postgres via DATABASE_URL, e.g. Supabase; PGlite when unset)
+packages/db    Redis row store + kv (Upstash in production; any Redis via REDIS_URL; in-process when unset). See packages/db/README.md
 ```
 
 ## Run
@@ -26,7 +26,7 @@ bun run typecheck
 cd apps/tui && bun run start    # TUI
 ```
 
-Copy `.env.example` for keys. Research agents need only `ANTHROPIC_API_KEY`: they run on the Messages API with Anthropic's hosted web search and fetch. Without a key, local runs fall back to a deterministic fake research runner; production refuses it. Fixtures stand in for Polymarket when it is unreachable (`PM_FIXTURES=1`).
+Copy `.env.example` for keys. Without Redis settings the app keeps its data in-process, saved to `.data/store.json`; set `REDIS_URL=redis://localhost:6379` to share one store between `next dev`, the TUI's server and scripts. Research agents need only `ANTHROPIC_API_KEY`: they run on the Messages API with Anthropic's hosted web search and fetch. Without a key, local runs fall back to a deterministic fake research runner; production refuses it. Fixtures stand in for Polymarket when it is unreachable (`PM_FIXTURES=1`).
 
 ## Docs
 
@@ -46,10 +46,23 @@ Live trading has shipped. In `git log`:
 
 `TASKS.md` describes the original phase 1-5 build and is outdated where it says execution is refused server-side and no wallet key handling exists. Rev 6 of `SPEC.md` is current.
 
+## Datastore move: Supabase -> Redis
+
+The app no longer uses Postgres. Its data lives in Redis (Upstash on Vercel) through `packages/db` (see `packages/db/README.md`).
+The old Supabase project (`polytech`, `yocphnzilmbnfsueqemn`) is paused and untouched; it holds the data from before the move.
+
+Cutover, once:
+
+1. Vercel: add an Upstash Redis database to the `polytech` project (Storage -> Upstash for Redis, region close to `arn1`), or set
+   `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` yourself. Remove `DATABASE_URL`; nothing reads it now.
+2. Copy the old data (optional; skip to start empty). Restore the Supabase project, then with its connection string and the
+   Upstash credentials in the env: `cd packages/db && PG_URL=... bun run db:import-pg --dry-run`, then without `--dry-run`.
+   It prints per-table counts and refuses to write into a store that already has data. Pause Supabase again afterwards, or delete it.
+3. Unpause the Vercel project and resume the schedules (below).
+
 ## Paused
 
-The project is paused in three places. Resume in this order, so nothing runs against a dead database:
+The project is paused in two places. Resume in this order:
 
-1. Supabase: restore the `polytech` project (`yocphnzilmbnfsueqemn`) from its dashboard.
-2. Vercel: unpause the `polytech` project from its dashboard. This brings back the site and the daily crons in `apps/web/vercel.json`.
-3. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.
+1. Vercel: unpause the `polytech` project from its dashboard (with the Upstash credentials set: production refuses to start without a shared store). This brings back the site and the daily crons in `apps/web/vercel.json`.
+2. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.

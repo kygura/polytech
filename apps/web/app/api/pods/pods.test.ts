@@ -1,8 +1,5 @@
-import { schema as s } from "@pm/db";
-import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY; // fake runner + judge
 
@@ -14,7 +11,7 @@ beforeAll(async () => {
   const j = await import("../../../lib/jobs");
   d = await (await import("../../../lib/api")).getDeps();
   await j.sweepUniverse(d); await j.snapshotBooks(d, "all");
-  const all = (await d.db.select({ c: s.markets.conditionId }).from(s.markets).where(eq(s.markets.status, "active"))).map((r) => r.c);
+  const all = (await d.db.markets.find("status", { status: "active" })).map((r) => r.conditionId);
   const snaps = await j.latestSnaps(d.db, all);
   const res = await j.researchMarket(d, all.find((c) => snaps.get(c)?.book && snaps.get(c)?.mid != null)!, "manual");
   if ("skipped" in res) throw new Error(res.reason);
@@ -43,9 +40,9 @@ describe("/api/pods/:id", () => {
     const post = (id: string) => cancel.POST(new Request("http://x/", { method: "POST" }), ctx(id));
     expect((await post("pod_nope")).status).toBe(404);
     expect((await post(done)).status).toBe(409);
-    await d.db.insert(s.pods).values({ id: "pod_running", conditionId: "0xabc", status: "running", trigger: "manual", stage: "agents" });
+    await d.db.pods.insert({ id: "pod_running", conditionId: "0xabc", status: "running", trigger: "manual", stage: "agents" });
     expect((await post("pod_running")).status).toBe(202);
-    const p = (await d.db.select().from(s.pods).where(eq(s.pods.id, "pod_running")))[0]!;
+    const p = (await d.db.pods.get("pod_running"))!;
     expect(p.cancelRequestedAt).toBeTruthy();
     expect(p.status).toBe("running"); // the pod's own poller flips it
   });

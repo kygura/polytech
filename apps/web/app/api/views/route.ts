@@ -1,6 +1,4 @@
 import { parseQuery } from "@pm/core";
-import { schema as s } from "@pm/db";
-import { asc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { getRead, json, notFound, parse, parseBody } from "../../../lib/api";
@@ -15,7 +13,8 @@ const Body = z.object({
 }).strict();
 
 export async function GET() {
-  return json(await (await getRead()).db.select().from(s.views).orderBy(asc(s.views.name)));
+  // small table: full scan, ORDER BY name (codepoint order, like the C collation)
+  return json((await (await getRead()).db.views.all()).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 }
 
 /** Upsert by name. */
@@ -24,14 +23,14 @@ export async function POST(req: Request) {
   if (b.res) return b.res;
   const { errors } = parseQuery(b.data.query);
   if (errors.length) return json({ error: "invalid query", errors }, 400);
-  const [row] = await (await getRead()).db.insert(s.views).values({ id: randomUUID(), ...b.data })
-    .onConflictDoUpdate({ target: s.views.name, set: { query: b.data.query, columns: b.data.columns } }).returning();
+  // ON CONFLICT (name) DO UPDATE: the unique name keeps one row per name; id and createdAt stay from the existing row
+  const row = await (await getRead()).db.views.upsertBy("name", { id: randomUUID(), ...b.data }, { query: b.data.query, columns: b.data.columns });
   return json(row);
 }
 
 export async function DELETE(req: Request) {
   const id = parse(z.string().min(1).max(100), new URL(req.url).searchParams.get("id"));
   if (id.res) return id.res;
-  const rows = await (await getRead()).db.delete(s.views).where(eq(s.views.id, id.data)).returning({ id: s.views.id });
-  return rows.length ? json({ ok: true }) : notFound();
+  const row = await (await getRead()).db.views.delete(id.data);
+  return row ? json({ ok: true }) : notFound();
 }

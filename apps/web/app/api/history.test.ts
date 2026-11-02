@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.PM_FIXTURES = "1";
 delete process.env.ANTHROPIC_API_KEY;
 
@@ -8,12 +7,12 @@ let GET: typeof import("./markets/[id]/history/route").GET, NOW = 0;
 const call = (id: string, qs = "") => GET(new Request(`http://x/api/markets/${id}/history${qs}`), { params: Promise.resolve({ id }) });
 
 beforeAll(async () => {
-  const a = await import("../../lib/api"), { schema: S } = await import("@pm/db");
+  const a = await import("../../lib/api");
   const d = await a.getDeps();
   NOW = d.now();
-  await d.db.insert(S.markets).values({ conditionId: "0xh", question: "q?", yesTokenId: "no-such-token" });
+  await d.db.markets.insert({ conditionId: "0xh", question: "q?", yesTokenId: "no-such-token" });
   // 700 own snapshots over the last 3 days (fixtures have no history for this token, so the fallback serves them)
-  await d.db.insert(S.snapshots).values(Array.from({ length: 700 }, (_, i) => ({ conditionId: "0xh", ts: new Date(NOW - 3 * 864e5 + i * 370_000), mid: 0.4 + (i % 10) / 100 })));
+  await d.db.snapshots.insertMany(Array.from({ length: 700 }, (_, i) => ({ conditionId: "0xh", ts: new Date(NOW - 3 * 864e5 + i * 370_000), mid: 0.4 + (i % 10) / 100 })));
   ({ GET } = await import("./markets/[id]/history/route"));
 });
 

@@ -1,9 +1,10 @@
-// Local demo: fixtures -> sweep -> snapshots -> screen -> 8 fake-runner pods -> L1 -> paper fills. Uses .data/pglite unless DATABASE_URL.
+// Local demo: fixtures -> sweep -> snapshots -> screen -> 8 fake-runner pods -> L1 -> paper fills. Uses the store from the environment (packages/db/README.md: Upstash, REDIS_URL, else in-process .data/store.json).
 process.env.PM_FIXTURES ??= "1";
 
 async function main() {
   const { fakeJudge, fakeRunner } = await import("@pm/agents");
   const { createPm } = await import("@pm/pm");
+  const { closeDb } = await import("@pm/db");
   const { deps, sweepUniverse, snapshotBooks, screenAll, researchShortlist, setMode, paperBook, read } = await import("../lib/jobs");
   const d = await deps({ pm: createPm({ fixtures: true }), runner: fakeRunner, judge: fakeJudge }); // never the real runner
 
@@ -22,6 +23,7 @@ async function main() {
   const researched = [...small, ...size].filter((w) => w.thesisId);
   console.log(`watchlist small-cap=${small.length} size=${size.length} structural=${structural.length}`);
   console.log(`theses=${researched.length} paper fills=${book.fills.length} open positions=${book.summary.open}`);
-  process.exit(0); // PGlite keeps the event loop alive
+  await closeDb(); // flushes the in-process store to its file; releases an ioredis connection
+  process.exit(0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

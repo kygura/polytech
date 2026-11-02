@@ -1,7 +1,6 @@
 import { checkSet, setLegPlan, unwindPlan, type Mode, type SetInputLeg } from "@pm/core";
 import { schema as s } from "@pm/db";
 import { scrub, type ImmediateResult } from "@pm/pm";
-import { and, desc, eq, gt, gte, inArray, lt, or } from "drizzle-orm";
 import { safeEqual } from "../auth";
 import { currentMode } from "./autonomy";
 import { feeExpOf, feeOf, toMarket, withLock, type Deps } from "./deps";
@@ -28,13 +27,14 @@ export type SetDecision =
   | { ok: true; state: string; reason?: string; error?: string }
   | { ok: false; error: "NOT_FOUND" | "INVALID_TOKEN" | "ALREADY_DECIDED" | "MODE" | "orders halted" | "busy" };
 
+/** Compare-and-set on the status state machine: moves the set only if it is still in `from` (one concurrent caller wins). */
 const casSet = async (d: Pick<Deps, "db">, id: string, from: string, set: Partial<SetRow>) =>
-  (await d.db.update(s.proposalSets).set(set).where(and(eq(s.proposalSets.id, id), eq(s.proposalSets.status, from))).returning({ id: s.proposalSets.id })).length === 1;
+  (await d.db.proposalSets.update(id, (r) => (r.status === from ? set : null))) !== null;
 const setEvent = (p: Pick<SetRow, "id" | "legs">, state: string, x: { legsFilled?: number; failedLeg?: number | null; error?: string | null } = {}) =>
   publish("set.updated", { id: p.id, state, legsFilled: x.legsFilled ?? 0, legsTotal: p.legs.length, failedLeg: x.failedLeg ?? null, error: x.error ?? null });
 const propEvent = (p: Pick<SetRow, "id">, state: string, extra: Record<string, unknown> = {}) => publish("proposal.updated", { id: p.id, kind: "set", state, ...extra });
 
-const markets = async (d: Pick<Deps, "db">, ids: string[]) => new Map((await d.db.select().from(s.markets).where(inArray(s.markets.conditionId, ids))).map((m) => [m.conditionId, m]));
+const markets = async (d: Pick<Deps, "db">, ids: string[]) => new Map((await d.db.markets.getMany([...new Set(ids)])).map((m) => [m.conditionId, m]));
 
 /** Best ask/bid of the YES book in a snapshot row. */
 function touch(sn: Snap | undefined) {
@@ -66,12 +66,17 @@ const feeExp = (rows: Row[]) => Math.min(1, ...rows.map((r) => feeExpOf(toMarket
 // ---------------------------------------------------------------- housekeeping
 /** Pending past expiry => expired; sending/unwinding older than 10 min (crash mid-loop) => flagged, leg orders left to fill sync. Runs at any mode. */
 async function sweepSets(d: Deps) {
-  const now = new Date(d.now());
-  const exp = await d.db.update(s.proposalSets).set({ status: "expired", error: "TIMEOUT", decidedAt: now, ...BURNED })
-    .where(and(eq(s.proposalSets.status, "pending"), lt(s.proposalSets.expiresAt, now))).returning();
+  const now = new Date(d.now()), cutoff = now.getTime() - STUCK;
+  // candidates from the indexes, then a per-row CAS that re-checks status and time: the returned rows are the ones that moved
+  const [expIds, stuckIds] = await Promise.all([
+    d.db.proposalSets.ids("statusExpires", { status: "pending" }, { lt: now }),
+    d.db.proposalSets.idsEach("statusDecided", [{ status: "sending" }, { status: "unwinding" }], { lt: cutoff }).then((x) => x.flat()), // null decidedAt sorts as -inf: re-checked below
+  ]);
+  const exp = await d.db.proposalSets.updateMany(expIds, (r) =>
+    r.status === "pending" && r.expiresAt.getTime() < now.getTime() ? { status: "expired", error: "TIMEOUT", decidedAt: now, ...BURNED } : null);
   for (const p of exp) propEvent(p, "expired", { reason: "TIMEOUT" });
-  const stuck = await d.db.update(s.proposalSets).set({ status: "flagged", error: "STUCK_SENDING" })
-    .where(and(inArray(s.proposalSets.status, ["sending", "unwinding"]), lt(s.proposalSets.decidedAt, new Date(now.getTime() - STUCK)))).returning();
+  const stuck = await d.db.proposalSets.updateMany(stuckIds, (r) =>
+    (r.status === "sending" || r.status === "unwinding") && r.decidedAt !== null && r.decidedAt.getTime() < cutoff ? { status: "flagged", error: "STUCK_SENDING" } : null);
   for (const p of stuck) await flagged(d, p, "STUCK_SENDING");
   return { expired: exp.length, stuck: stuck.length };
 }
@@ -90,8 +95,10 @@ export async function proposeSets(d: Deps) {
     if (!LIVE.includes(mode) || !d.exchange) return res;
     if (await halted(d)) return (skip("HALTED"), res);
 
-    const scr = await db.selectDistinctOn([s.screens.conditionId]).from(s.screens).where(and(eq(s.screens.structuralFlag, true), gte(s.screens.ts, new Date(now - 60 * MIN))))
-      .orderBy(s.screens.conditionId, desc(s.screens.ts));
+    // DISTINCT ON (conditionId) ... ORDER BY conditionId, ts DESC: newest structural screen per market in the last hour, in conditionId order
+    const newest = new Map<string, typeof s.screens.$inferSelect>();
+    for (const r of await db.screens.find("structural", {}, { min: now - 60 * MIN, order: "desc" })) if (!newest.has(r.conditionId)) newest.set(r.conditionId, r);
+    const scr = [...newest.values()].sort((a, b) => (a.conditionId < b.conditionId ? -1 : a.conditionId > b.conditionId ? 1 : 0));
     const det = new Map<string, { kind: "buy-all" | "sell-all"; legs: string[] }>();
     for (const r of scr) {
       const x = r.structuralDetail as StructDetail | null;
@@ -100,8 +107,11 @@ export async function proposeSets(d: Deps) {
     res.detected = det.size;
     if (!det.size) return res;
     const mk = await markets(d, [...det.values()].flatMap((x) => x.legs));
-    const busy = new Set((await db.select({ e: s.proposalSets.eventId }).from(s.proposalSets)
-      .where(or(inArray(s.proposalSets.status, OPEN), and(eq(s.proposalSets.status, "rejected"), gt(s.proposalSets.createdAt, new Date(now - 60 * MIN)))))).map((x) => x.e));
+    const [open, rejected] = await Promise.all([
+      db.proposalSets.find("status", OPEN.map((status) => ({ status }))),
+      db.proposalSets.find("status", { status: "rejected" }, { gt: now - 60 * MIN }), // status index sorts by createdAt
+    ]);
+    const busy = new Set([...open, ...rejected].map((x) => x.eventId));
     const cands = [...det.values()].flatMap((x) => {
       const g = mk.get(x.legs[0]!)?.negRiskGroup;
       if (!g || x.legs.some((c) => mk.get(c)?.negRiskGroup !== g)) return (skip("NOT_ONE_GROUP"), []);
@@ -134,13 +144,13 @@ export async function proposeSets(d: Deps) {
       const approve = newToken(), reject = newToken();
       let p: SetRow | undefined;
       try {
-        [p] = await db.insert(s.proposalSets).values({
+        p = await db.proposalSets.insert({
           eventId: c.event, kind: c.kind, shares, totalCost: plan.totalCost, edge: plan.edge,
           legs: plan.legs.map((l) => ({ ...l, price: legPrice(c.kind, by.get(l.conditionId)!) })),
           fallbackReason, createdAt: new Date(now), expiresAt: new Date(now + TTL), approveTokenHash: sha256(approve), rejectTokenHash: sha256(reject),
-        }).returning();
+        });
       } catch {
-        skip("DUPLICATE_PENDING"); // partial unique index: one pending set per event
+        skip("DUPLICATE_PENDING"); // unique onePendingPerEvent (UniqueViolation): one pending set per event
         continue;
       }
       for (const l of plan.legs) addExposure(xp, mk.get(l.conditionId)!, l.shares * l.limit);
@@ -171,7 +181,7 @@ export function notifySet(p: SetRow, question: string, tokens: Record<Action, st
 // ---------------------------------------------------------------- decide
 /** Approve/reject one pending set. Same guards as live.decide: push token, mode, halt, expiry (15 min, or > 2c leg move that no longer re-plans), risk, CAS under live-send. */
 export async function decideSet(d: Deps, id: string, action: Action, via: Via, token?: string): Promise<SetDecision> {
-  const p = (await d.db.select().from(s.proposalSets).where(eq(s.proposalSets.id, id)).limit(1))[0];
+  const p = await d.db.proposalSets.get(id);
   if (via === "push") {
     const want = p ? (action === "approve" ? p.approveTokenHash : p.rejectTokenHash) : "";
     if (!token || !safeEqual(sha256(token), want || "0".repeat(64)) || !p || want.length !== 64) return { ok: false, error: "INVALID_TOKEN" };
@@ -237,14 +247,14 @@ async function sendSet(d: Deps, p: SetRow, mode: Mode, row0: Row, via: Via): Pro
   const filled: { conditionId: string; token: string; shares: number; fillPrice: number; leg: number }[] = [];
   const order = async (leg: number, key: string, o: { conditionId: string; token: string; side: "BUY" | "SELL"; price: number; shares: number }) => {
     const id = `ord_${crypto.randomUUID().slice(0, 12)}`;
-    await d.db.insert(s.orders).values({
+    await d.db.orders.insert({ // unique idempotencyKey: a duplicate leg throws UniqueViolation before placeImmediate
       id, thesisId: `set:${p.id}`, idempotencyKey: key, attempt: leg, paper: false, conditionId: o.conditionId, tokenId: o.token, side: o.side,
       limitPrice: o.price, size: o.shares, modeAtSend: mode, approval: via === "auto" ? "auto" : "user", status: "sending", createdAt: new Date(d.now()), setId: p.id,
     });
     return id;
   };
   const record = async (id: string, r: ImmediateResult) => {
-    await d.db.update(s.orders).set({ status: ordStatus(r), clobOrderId: r.clobOrderId ?? null }).where(eq(s.orders.id, id));
+    await d.db.orders.update(id, { status: ordStatus(r), clobOrderId: r.clobOrderId ?? null });
     publish("order.updated", { id, orderId: r.clobOrderId ?? id, status: ordStatus(r), filledShares: r.filledShares, setId: p.id });
   };
   const done = async (from: string, state: string, extra: Partial<SetRow> = {}) => {
@@ -265,7 +275,7 @@ async function sendSet(d: Deps, p: SetRow, mode: Mode, row0: Row, via: Via): Pro
     try {
       r = await ex.placeImmediate({ tokenId: l.token, side: "BUY", shares: l.shares, capPrice: l.limit, type: "FOK" });
     } catch (e) {
-      await d.db.update(s.orders).set({ status: "unknown" }).where(eq(s.orders.id, oid));
+      await d.db.orders.update(oid, { status: "unknown" });
       const error = `leg ${i + 1} unknown: ${errOf(e)}`.slice(0, 300);
       const res = await done("sending", "flagged", { failedLeg: i, error });
       await alert(d, p, error);
@@ -291,7 +301,7 @@ async function sendSet(d: Deps, p: SetRow, mode: Mode, row0: Row, via: Via): Pro
       await record(oid, r);
       if (u.shares - r.filledShares > EPS) left.push(`leg ${leg + 1}: ${+(u.shares - r.filledShares).toFixed(4)} held`);
     } catch (e) {
-      await d.db.update(s.orders).set({ status: "unknown" }).where(eq(s.orders.id, oid));
+      await d.db.orders.update(oid, { status: "unknown" });
       left.push(`leg ${leg + 1}: unwind unknown (${errOf(e)})`);
     }
   }
@@ -307,7 +317,7 @@ const alert = (_d: Deps, p: SetRow, error: string) =>
   ntfy({ title: "Set flagged: manual action", priority: 5, message: `${p.kind} ${p.legs.length} legs x ${p.shares} (set ${p.id.slice(0, 8)})\n${error}\nThe engine will not retry. New live orders are halted until acknowledged.` });
 
 async function flagged(d: Deps, p: SetRow, error: string) {
-  await d.db.update(s.proposalSets).set({ error }).where(eq(s.proposalSets.id, p.id));
+  await d.db.proposalSets.update(p.id, { error });
   setEvent(p, "flagged", { error });
   propEvent(p, "flagged", { error });
   await alert(d, p, error);
@@ -316,11 +326,11 @@ async function flagged(d: Deps, p: SetRow, error: string) {
 // ---------------------------------------------------------------- ack
 /** flagged -> acknowledged. Closes nothing; logs an autonomy_events row (scope set:<id>, never read as the global mode). */
 export async function ackSet(d: Pick<Deps, "db" | "now">, id: string): Promise<{ ok: true; state: "acknowledged" } | { ok: false; error: "NOT_FOUND" | "NOT_FLAGGED" }> {
-  const p = (await d.db.select().from(s.proposalSets).where(eq(s.proposalSets.id, id)).limit(1))[0];
+  const p = await d.db.proposalSets.get(id);
   if (!p) return { ok: false, error: "NOT_FOUND" };
   if (!(await casSet(d, id, "flagged", { status: "acknowledged" }))) return { ok: false, error: "NOT_FLAGGED" };
   const mode = await currentMode(d.db);
-  await d.db.insert(s.autonomyEvents).values({ ts: new Date(d.now()), fromMode: mode, toMode: mode, scope: `set:${id}`, reason: `flagged set acknowledged: ${p.error ?? ""}`.slice(0, 300), actor: "user" });
+  await d.db.autonomyEvents.insert({ ts: new Date(d.now()), fromMode: mode, toMode: mode, scope: `set:${id}`, reason: `flagged set acknowledged: ${p.error ?? ""}`.slice(0, 300), actor: "user" });
   setEvent(p, "acknowledged", { failedLeg: p.failedLeg, error: p.error });
   return { ok: true, state: "acknowledged" };
 }

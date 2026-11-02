@@ -1,20 +1,17 @@
 import { costUsd, fakeJudge, fakeRunner, modelFor, type AgentRunner, type Judge } from "@pm/agents";
 import { DEFAULT_STEERING, type ResearchProfile } from "@pm/core";
-import { memoryKv, schema as s } from "@pm/db";
+import { memoryKv } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { asc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { POD_WINDOW_MS, deps, latestSnaps, read, requestCancel, researchMarket, runProfile, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
-
 let d: Deps, markets: string[];
 const events: string[] = [];
-const rows = (podId: string) => d.db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId)).orderBy(asc(s.agentRuns.id));
-const pod = async (id: string) => (await d.db.select().from(s.pods).where(eq(s.pods.id, id)))[0]!;
+const rows = (podId: string) => d.db.agentRuns.find("pod", { podId }); // by id
+const pod = async (id: string) => (await d.db.pods.get(id))!;
 const withRunner = (runner: AgentRunner) => { d = { ...d, runner }; };
 const withJudge = (judge: Judge) => { d = { ...d, judge }; };
-const spend = async () => (await d.db.select().from(s.spend)).reduce((t, r) => t + r.anthropicUsd, 0);
+const spend = async () => (await d.db.spend.all()).reduce((t, r) => t + r.anthropicUsd, 0);
 const COST = 0.5; // every completed fake agent reports this, so spend assertions are exact
 const paid: AgentRunner = async (role, brief, o) => { const r = await fakeRunner(role, brief, o); return { ...r, usage: { inputTokens: 1000, outputTokens: 100, costUsd: COST } }; };
 const blocked = (o: { signal?: AbortSignal }) => new Promise<never>((_, rej) => o.signal?.addEventListener("abort", () => rej(new Error("cancelled")), { once: true }));
@@ -24,21 +21,21 @@ const waitFor = async (what: () => Promise<string | undefined>) => {
   for (let i = 0; i < 300; i++) { const v = await what(); if (v) return v; await new Promise((r) => setTimeout(r, 10)); }
   throw new Error("timeout waiting");
 };
-const runningRow = (role: string) => async () => (await d.db.select().from(s.agentRuns).where(eq(s.agentRuns.role, role))).find((r) => r.status === "running")?.podId;
+const runningRow = (role: string) => async () => (await d.db.agentRuns.find("status", { status: "running" })).find((r) => r.role === role)?.podId;
 
 beforeAll(async () => {
   let t = Date.parse("2026-10-15T12:00:00Z");
   d = await deps({ pm: createPm({ fixtures: true }), kv: memoryKv(), now: () => (t += 1), runner: fakeRunner, judge: fakeJudge });
   subscribe((e) => events.push(e.type));
   await sweepUniverse(d); await snapshotBooks(d, "all");
-  const all = (await d.db.select({ c: s.markets.conditionId }).from(s.markets).where(eq(s.markets.status, "active"))).map((r) => r.c);
+  const all = (await d.db.markets.find("status", { status: "active" })).map((r) => r.conditionId);
   const snaps = await latestSnaps(d.db, all);
   markets = all.filter((c) => snaps.get(c)?.book && snaps.get(c)?.mid != null).slice(0, 4); // decoupled from screening
 }, 60_000);
 
 describe("research lifecycle", () => {
   it("the brief carries the rules text fetched from Gamma (the db stores only its hash)", async () => {
-    const mrow = (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, markets[3]!)))[0]!;
+    const mrow = (await d.db.markets.get(markets[3]!))!;
     const rules = (await d.pm.market(mrow.pmId!))?.rules ?? "";
     expect(rules.length).toBeGreaterThan(20);
     const briefs: string[] = [];
@@ -53,9 +50,10 @@ describe("research lifecycle", () => {
   it("agent rows go running -> ok with tool calls, stage walks rules -> agents -> judge -> sizing -> done", async () => {
     const seen: Record<string, string> = {}, stages: (string | null)[] = [];
     withRunner(async (role, brief, o) => {
-      const r = (await d.db.select().from(s.agentRuns).where(eq(s.agentRuns.role, role))).at(-1);
+      const live = (await d.db.pods.find("status", { status: "running" }))[0];
+      const r = live ? (await d.db.agentRuns.find("pod", { podId: live.id })).filter((x) => x.role === role).at(-1) : undefined; // newest row of the role (by id)
       seen[role] = r?.status ?? "none"; // our own row exists and is running while we run
-      stages.push((await d.db.select().from(s.pods).where(eq(s.pods.status, "running")))[0]?.stage ?? null);
+      stages.push(live?.stage ?? null);
       return fakeRunner(role, brief, o);
     });
     const stageEvents: string[] = [];
@@ -104,7 +102,7 @@ describe("research lifecycle", () => {
     expect(runs.find((r) => r.role === "news")!.status).toBe("cancelled");
     expect(runs.some((r) => r.status === "running")).toBe(false);
     expect(runs.some((r) => r.role === "judge")).toBe(false);
-    expect(await d.db.select().from(s.theses).where(eq(s.theses.podId, podId))).toHaveLength(0);
+    expect(await d.db.theses.find("pod", { podId })).toHaveLength(0);
     expect(events).toContain("pod.cancelled");
     expect((await spend()) - before).toBeCloseTo(4 * COST + costUsd(model("news"), 150_000, 10_000), 9);
 
@@ -133,7 +131,7 @@ describe("research lifecycle", () => {
     withRunner(paid);
     let podId = "";
     withJudge(async (i) => { // the poller is effectively off (60 s), so only the pre-thesis re-check can see this
-      podId = (await d.db.select().from(s.pods).where(eq(s.pods.status, "running")))[0]!.id;
+      podId = (await d.db.pods.find("status", { status: "running" }))[0]!.id;
       expect(await requestCancel(d, podId)).toBe("ok");
       return fakeJudge(i);
     });
@@ -141,21 +139,21 @@ describe("research lifecycle", () => {
     const res = await researchMarket(d, markets[3]!, "manual", { cancelPollMs: 60_000 });
     expect(res).toMatchObject({ podId, status: "cancelled" });
     expect((await pod(podId)).status).toBe("cancelled");
-    expect(await d.db.select().from(s.theses).where(eq(s.theses.podId, podId))).toHaveLength(0);
+    expect(await d.db.theses.find("pod", { podId })).toHaveLength(0);
     expect((await spend()) - before).toBeCloseTo(5 * COST, 9);
     withJudge(fakeJudge);
   });
 
   it("a cancelled market is not relaunched by the next wave (24 h poison guard)", async () => {
-    const [cancelledPod] = (await d.db.select().from(s.pods).where(eq(s.pods.status, "cancelled")));
+    const [cancelledPod] = await d.db.pods.find("status", { status: "cancelled" });
     const p = { id: "prof_x", steering: DEFAULT_STEERING } as unknown as ResearchProfile;
     expect(await runProfile(d, p, [{ conditionId: cancelledPod!.conditionId }])).toMatchObject({ candidates: 0 });
   });
 
   it("the reaper also ends the dead pod's running agent rows", async () => {
     withRunner(fakeRunner);
-    await d.db.insert(s.pods).values({ id: "pod_dead", conditionId: "0xdead", startedAt: new Date(d.now() - POD_WINDOW_MS - 120_000), status: "running", trigger: "manual", stage: "agents" });
-    await d.db.insert(s.agentRuns).values({ podId: "pod_dead", role: "news", model: "m", status: "running", startedAt: new Date(d.now() - POD_WINDOW_MS - 120_000) });
+    await d.db.pods.insert({ id: "pod_dead", conditionId: "0xdead", startedAt: new Date(d.now() - POD_WINDOW_MS - 120_000), status: "running", trigger: "manual", stage: "agents" });
+    await d.db.agentRuns.insert({ podId: "pod_dead", role: "news", model: "m", status: "running", startedAt: new Date(d.now() - POD_WINDOW_MS - 120_000) });
     const res = await researchMarket(d, markets[0]!, "manual");
     if ("skipped" in res) throw new Error(res.reason);
     expect((await pod("pod_dead")).status).toBe("failed");

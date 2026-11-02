@@ -1,12 +1,9 @@
 import { fakeJudge, fakeRunner, rulesHash } from "@pm/agents";
-import { memoryKv, schema as s } from "@pm/db";
+import { memoryKv } from "@pm/db";
 import { createPm, type Market } from "@pm/pm";
-import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, sweepUniverse, type Deps } from "./index";
 import { heuristicR } from "./screen";
-
-process.env.PGLITE_DIR = "memory://";
 
 const fx = createPm({ fixtures: true });
 /** The fixture pm with every walked market overlaid with `patch` (what Gamma "says" now; patches persist across tests like the real world does). */
@@ -16,7 +13,7 @@ const clobMarket = vi.fn(fx.clobMarket);
 const pm = { ...fx, clobMarket, walkMarkets: (o: Parameters<typeof fx.walkMarkets>[0], on: (ms: Market[]) => Promise<void> | void) => fx.walkMarkets(o, (page) => on(page.map(edit))) } as typeof fx;
 let d: Deps, ids: string[];
 const sweep = async () => (await sweepUniverse(d)) as { markets: number; written: number; newMarkets: number; feesFetched: number };
-const row = async (c: string) => (await d.db.select().from(s.markets).where(eq(s.markets.conditionId, c)))[0]!;
+const row = async (c: string) => (await d.db.markets.get(c))!;
 
 beforeAll(async () => {
   d = await deps({ pm, kv: memoryKv(), now: () => Date.parse("2026-10-15T12:00:00Z"), runner: fakeRunner, judge: fakeJudge });
@@ -32,7 +29,7 @@ describe("incremental sweep", () => {
     const out = await sweep();
     expect(out.written).toBe(out.markets);
     expect(out.newMarkets).toBe(out.markets);
-    const rows = await d.db.select().from(s.markets);
+    const rows = await d.db.markets.all();
     expect(rows.every((r) => r.rulesHash?.length === 64 && r.resolutionSource && r.liquidity != null)).toBe(true);
     expect(rows.some((r) => r.resolutionSource === "official_data")).toBe(true); // fixture rules cite "the official data release"
     expect((await row(feeId)).feeRate).toBe(0.07);
@@ -63,7 +60,7 @@ describe("incremental sweep", () => {
     expect((await row(a)).liquidity).toBeCloseTo(base * 1.1);
     patch.set(b, { volume_24h: ((await row(b)).vol24h || 1000) * 10 });
     expect((await sweep()).written).toBe(1);
-    await d.db.update(s.markets).set({ liquidity: null }).where(eq(s.markets.conditionId, b));
+    await d.db.markets.update(b, { liquidity: null });
     expect((await sweep()).written).toBe(1); // null -> value
     expect((await row(b)).liquidity).not.toBeNull();
     expect((await sweep()).written).toBe(0);
@@ -71,7 +68,7 @@ describe("incremental sweep", () => {
 
   it("resolution source is recomputed only when the rules hash changes", async () => {
     const c = ids[2]!;
-    await d.db.update(s.markets).set({ resolutionSource: "subjective" }).where(eq(s.markets.conditionId, c)); // hash unchanged: the stored value is trusted
+    await d.db.markets.update(c, { resolutionSource: "subjective" }); // hash unchanged: the stored value is trusted
     expect((await sweep()).written).toBe(0);
     expect((await row(c)).resolutionSource).toBe("subjective");
     const text = "Resolves per the Bureau of Labor Statistics CPI release, published on bls.gov.";

@@ -1,6 +1,5 @@
 import { applyFill, feeRateFor, mirror, paperFill } from "@pm/core";
 import { schema as s } from "@pm/db";
-import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { feeExpOf, isOpenStatus, toMarket, type Deps } from "./deps";
 import { publish } from "./events";
 import { latestSnaps } from "./screen";
@@ -67,30 +66,43 @@ export const stopHit = (side: "BUY" | "SELL", stop: number, mid: number) => (sid
 const sideBook = (b: Book, outcome: "YES" | "NO"): Book => (outcome === "YES" ? b : { bids: mirror(b.asks), asks: mirror(b.bids) });
 const outcomeMid = (mid: number | null, outcome: "YES" | "NO") => (mid == null ? null : outcome === "YES" ? mid : 1 - mid);
 
-const openPositions = (d: Deps, tokenId: string) => d.db.select().from(s.positions)
-  .where(and(eq(s.positions.paper, true), eq(s.positions.tokenId, tokenId), isNull(s.positions.closedAt))).orderBy(asc(s.positions.id));
+/** Open paper positions on one token, oldest (lowest id) first. (paper, tokenId) index, closed rows dropped in code. */
+const openPositions = async (d: Deps, tokenId: string) =>
+  (await d.db.positions.find("bookToken", { paper: true, tokenId })).filter((p) => p.closedAt === null);
 
 /** Add a fill to the newest open position on this outcome, else open one. */
 async function buyInto(d: Deps, leg: Leg, shares: number, price: number, fee: number, now: number) {
   const into = (await openPositions(d, leg.tokenId)).at(-1);
-  const pos = applyFill(into ? { shares: into.size, avgCost: into.avgCost, realizedPnl: into.realizedPnl } : { shares: 0, avgCost: 0, realizedPnl: 0 }, { side: "buy", shares, price, fee });
-  if (into) await d.db.update(s.positions).set({ size: pos.shares, avgCost: pos.avgCost }).where(eq(s.positions.id, into.id));
-  else await d.db.insert(s.positions).values({ conditionId: leg.conditionId, tokenId: leg.tokenId, size: pos.shares, avgCost: pos.avgCost, realizedPnl: 0, openedAt: new Date(now), paper: true });
+  // CAS read-modify-write from the current row (a concurrent fill on the same position both land); closed in the meantime => open a new one
+  const added = into && await d.db.positions.update(into.id, (cur) => {
+    if (cur.closedAt !== null) return null;
+    const pos = applyFill({ shares: cur.size, avgCost: cur.avgCost, realizedPnl: cur.realizedPnl }, { side: "buy", shares, price, fee });
+    return { size: pos.shares, avgCost: pos.avgCost };
+  });
+  if (!added) {
+    const pos = applyFill({ shares: 0, avgCost: 0, realizedPnl: 0 }, { side: "buy", shares, price, fee });
+    await d.db.positions.insert({ conditionId: leg.conditionId, tokenId: leg.tokenId, size: pos.shares, avgCost: pos.avgCost, realizedPnl: 0, openedAt: new Date(now), paper: true });
+  }
   await record(d, leg, shares, price, fee, now);
 }
 
 /** Take a sale out of the open positions, oldest first; fee charged on the first leg. Returns the realized P&L. */
 async function sellOut(d: Deps, leg: Leg, shares: number, price: number, fee: number, now: number) {
-  let left = shares, pnl = 0, f = fee;
-  for (const p of await openPositions(d, leg.tokenId)) {
-    if (left <= 1e-9) break;
-    const take = Math.min(p.size, left);
-    const end = applyFill({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, { side: "sell", shares: take, price, fee: f });
-    pnl += end.realizedPnl - p.realizedPnl;
-    f = 0;
-    left -= take;
-    await d.db.update(s.positions).set({ size: end.shares, realizedPnl: end.realizedPnl, ...(end.shares <= 1e-9 ? { closedAt: new Date(now) } : {}) }).where(eq(s.positions.id, p.id));
-  }
+  const ids = (await openPositions(d, leg.tokenId)).map((p) => p.id);
+  // one transaction over the FIFO walk: re-reads the rows (versions checked at commit), so a concurrent fill or close cannot be lost
+  const pnl = await d.db.tx(async (tx) => {
+    let left = shares, pnl = 0, f = fee;
+    for (const p of (await tx.positions.getMany(ids)).filter((x) => x.paper && x.closedAt === null && x.tokenId === leg.tokenId)) {
+      if (left <= 1e-9) break;
+      const take = Math.min(p.size, left);
+      const end = applyFill({ shares: p.size, avgCost: p.avgCost, realizedPnl: p.realizedPnl }, { side: "sell", shares: take, price, fee: f });
+      pnl += end.realizedPnl - p.realizedPnl;
+      f = 0;
+      left -= take;
+      await tx.positions.update(p.id, { size: end.shares, realizedPnl: end.realizedPnl, ...(end.shares <= 1e-9 ? { closedAt: new Date(now) } : {}) });
+    }
+    return pnl;
+  });
   await record(d, leg, shares, price, fee, now);
   return pnl;
 }
@@ -102,7 +114,7 @@ async function sellOut(d: Deps, leg: Leg, shares: number, price: number, fee: nu
  */
 export async function placePaperOrder(d: Deps, o: PaperOrder): Promise<PaperOrderResult> {
   const { db } = d, now = d.now();
-  const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, o.conditionId)))[0];
+  const m = await db.markets.get(o.conditionId);
   if (!m) return fail("market not found");
   if (!isOpenStatus(m.status) || m.status === "not_accepting") return fail("market is not taking orders");
   const tokenId = o.outcome === "YES" ? m.yesTokenId : m.noTokenId;
@@ -124,7 +136,7 @@ export async function placePaperOrder(d: Deps, o: PaperOrder): Promise<PaperOrde
   if (o.side === "SELL" && held <= 1e-9) return fail(`you hold no paper ${o.outcome} shares`);
   const rest = (kind: "limit" | "stop", usd: number | null, shares: number | null): Promise<PaperWorking> => {
     const w: PaperWorking = { id: id("pord"), kind, side: o.side, outcome: o.outcome, limit: o.limit ?? null, stop: o.stop ?? null, usd, shares };
-    return db.insert(s.paperOrders).values({
+    return db.paperOrders.insert({
       id: w.id, conditionId: o.conditionId, tokenId, outcome: o.outcome, side: o.side, kind, limitPrice: w.limit, stopPrice: w.stop, usd, shares, createdAt: new Date(now), bookTs: snap.ts,
     }).then(() => (publish("paper.order", { conditionId: o.conditionId, id: w.id, status: "working" }), w));
   };
@@ -163,15 +175,17 @@ export async function placePaperOrder(d: Deps, o: PaperOrder): Promise<PaperOrde
 export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: boolean } = {}) {
   const { db } = d, now = d.now();
   const res = { working: 0, triggered: 0, filled: 0, cancelled: 0 };
-  const rows = await db.select().from(s.paperOrders)
-    .where(and(eq(s.paperOrders.status, "working"), ids ? inArray(s.paperOrders.conditionId, ids) : undefined)).orderBy(asc(s.paperOrders.createdAt));
+  // status = 'working' [AND conditionId IN ids] ORDER BY createdAt ASC (partitions merged by createdAt, ties by id)
+  const rows = ids
+    ? await db.paperOrders.find("statusCond", [...new Set(ids)].map((conditionId) => ({ status: "working", conditionId })))
+    : await db.paperOrders.find("status", { status: "working" });
   if (!rows.length) return res;
   const conds = [...new Set(rows.map((r) => r.conditionId))];
   if (o.snapshot) await takeSnapshots(d, conds).catch((e) => console.error("paper orders: snapshot failed", e));
-  const [mrows, snaps] = await Promise.all([db.select().from(s.markets).where(inArray(s.markets.conditionId, conds)), latestSnaps(db, conds)]);
+  const [mrows, snaps] = await Promise.all([db.markets.getMany(conds), latestSnaps(db, conds)]);
   const mk = new Map(mrows.map((m) => [m.conditionId, m]));
   const close = (r: Row, status: "filled" | "cancelled", reason: string | null, extra: Partial<Row> = {}) =>
-    db.update(s.paperOrders).set({ ...extra, status, reason, closedAt: new Date(now) }).where(eq(s.paperOrders.id, r.id))
+    db.paperOrders.update(r.id, { ...extra, status, reason, closedAt: new Date(now) })
       .then(() => publish("paper.order", { conditionId: r.conditionId, id: r.id, status }));
 
   for (const r of rows) {
@@ -187,8 +201,8 @@ export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: b
     if (r.kind === "stop") {
       if (!r.triggeredAt) {
         const mid = outcomeMid(snap.mid, leg.outcome);
-        if (mid == null || !stopHit(leg.side, r.stopPrice!, mid)) { await db.update(s.paperOrders).set(seen).where(eq(s.paperOrders.id, r.id)); res.working++; continue; }
-        await db.update(s.paperOrders).set({ triggeredAt: new Date(now) }).where(eq(s.paperOrders.id, r.id));
+        if (mid == null || !stopHit(leg.side, r.stopPrice!, mid)) { await db.paperOrders.update(r.id, seen); res.working++; continue; }
+        await db.paperOrders.update(r.id, { triggeredAt: new Date(now) });
         res.triggered++;
       }
       taker = true; // fired: a market order until it is filled
@@ -201,7 +215,7 @@ export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: b
       if (f.shares > 0) await buyInto(d, leg, f.shares, f.avgPrice, f.fee, now);
       const usd = left - f.filled, filledShares = r.filledShares + f.shares;
       if (usd < DUST_USD) { await close(r, "filled", null, { usd: 0, filledShares, ...seen }); res.filled++; }
-      else { await db.update(s.paperOrders).set({ usd, filledShares, ...seen }).where(eq(s.paperOrders.id, r.id)); res.working++; }
+      else { await db.paperOrders.update(r.id, { usd, filledShares, ...seen }); res.working++; }
       continue;
     }
 
@@ -212,30 +226,35 @@ export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: b
     if (f.shares > 0) await sellOut(d, leg, f.shares, f.avgPrice, f.fee, now);
     const shares = want - f.shares, filledShares = r.filledShares + f.shares;
     if (shares < DUST_SH) { await close(r, "filled", null, { shares: 0, filledShares, ...seen }); res.filled++; }
-    else { await db.update(s.paperOrders).set({ shares, filledShares, ...seen }).where(eq(s.paperOrders.id, r.id)); res.working++; }
+    else { await db.paperOrders.update(r.id, { shares, filledShares, ...seen }); res.working++; }
   }
   return res;
 }
 
 /** Markets with a working paper order: the watchlist snapshot keeps their books fresh. */
 export const workingPaperIds = async (d: Pick<Deps, "db">) =>
-  (await d.db.selectDistinct({ c: s.paperOrders.conditionId }).from(s.paperOrders).where(eq(s.paperOrders.status, "working"))).map((r) => r.c);
+  [...new Set((await d.db.paperOrders.find("status", { status: "working" })).map((r) => r.conditionId))];
 
 /** Cancel one working paper order. false = unknown or no longer working. */
 export async function cancelPaperOrder(d: Deps, orderId: string) {
-  const rows = await d.db.update(s.paperOrders).set({ status: "cancelled", reason: "cancelled by you", closedAt: new Date(d.now()) })
-    .where(and(eq(s.paperOrders.id, orderId), eq(s.paperOrders.status, "working"))).returning({ conditionId: s.paperOrders.conditionId });
-  if (rows[0]) publish("paper.order", { conditionId: rows[0].conditionId, id: orderId, status: "cancelled" });
-  return rows.length > 0;
+  const at = new Date(d.now());
+  const row = await d.db.paperOrders.update(orderId, (r) => (r.status === "working" ? { status: "cancelled", reason: "cancelled by you", closedAt: at } : null)); // CAS working -> cancelled
+  if (row) publish("paper.order", { conditionId: row.conditionId, id: orderId, status: "cancelled" });
+  return row !== null;
 }
 
 /** Working paper orders of one market (or all), then the 20 newest closed ones. */
 export async function listPaperOrders(d: Deps, conditionId?: string) {
-  const where = (st: "working" | "closed") => and(conditionId ? eq(s.paperOrders.conditionId, conditionId) : undefined, st === "working" ? eq(s.paperOrders.status, "working") : ne(s.paperOrders.status, "working"));
-  const [working, closed] = await Promise.all([
-    d.db.select().from(s.paperOrders).where(where("working")).orderBy(desc(s.paperOrders.createdAt)),
-    d.db.select().from(s.paperOrders).where(where("closed")).orderBy(desc(s.paperOrders.closedAt)).limit(20),
+  const po = d.db.paperOrders;
+  // closed: ORDER BY closedAt DESC LIMIT 20 with Postgres NULLS FIRST. The index puts null closedAt (-inf) last on desc, so the nulls (first
+  // ascending; closed rows always get closedAt, so normally none) are read separately and put in front.
+  const closedIx = (o: { order: "asc" | "desc"; limit: number }) => (conditionId ? po.find("closedCond", { conditionId }, o) : po.find("closed", {}, o));
+  const [working, newest, oldest] = await Promise.all([
+    conditionId ? po.find("statusCond", { status: "working", conditionId }, { order: "desc" }) : po.find("status", { status: "working" }, { order: "desc" }),
+    closedIx({ order: "desc", limit: 20 }),
+    closedIx({ order: "asc", limit: 20 }),
   ]);
+  const closed = [...oldest.filter((r) => r.closedAt === null), ...newest.filter((r) => r.closedAt !== null)].slice(0, 20);
   const out = (r: Row) => ({
     id: r.id, conditionId: r.conditionId, tokenId: r.tokenId, outcome: r.outcome as "YES" | "NO", side: r.side as "BUY" | "SELL", kind: r.kind as "limit" | "stop",
     limit: r.limitPrice, stop: r.stopPrice, usd: r.usd, shares: r.shares, filledShares: r.filledShares, status: r.status as "working" | "filled" | "cancelled", reason: r.reason,
@@ -248,10 +267,12 @@ export type PaperOrderRow = Awaited<ReturnType<typeof listPaperOrders>>["working
 /** Order + fill rows, so the paper fills table and the journal see manual trades too. */
 async function record(d: Deps, leg: Leg, shares: number, price: number, fee: number, now: number) {
   const orderId = id("ord");
-  await d.db.insert(s.fills).values({ orderId, ts: new Date(now), price, size: shares, fee, paper: true });
-  await d.db.insert(s.orders).values({
-    id: orderId, thesisId: "manual", idempotencyKey: `manual:${orderId}`, conditionId: leg.conditionId, tokenId: leg.tokenId, side: leg.side, limitPrice: leg.limit ?? price, size: shares,
-    modeAtSend: "manual", approval: "user", status: "paper_filled", paper: true,
+  await d.db.tx(async (tx) => { // fill + order commit together (one round trip)
+    await tx.fills.insert({ orderId, ts: new Date(now), price, size: shares, fee, paper: true });
+    await tx.orders.insert({
+      id: orderId, thesisId: "manual", idempotencyKey: `manual:${orderId}`, conditionId: leg.conditionId, tokenId: leg.tokenId, side: leg.side, limitPrice: leg.limit ?? price, size: shares,
+      modeAtSend: "manual", approval: "user", status: "paper_filled", paper: true,
+    });
   });
   publish("paper.fill", { conditionId: leg.conditionId, side: leg.outcome, sizeUsd: shares * price, avgPrice: price });
 }

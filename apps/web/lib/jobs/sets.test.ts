@@ -1,11 +1,9 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Book, type Exchange, type ImmediateOrder, type ImmediateResult, type Pm } from "@pm/pm";
-import { and, eq, like } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ackSet, decideSet, deps, halted, kill, proposeSets, read, reconcileJob, setMode, subscribe, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
 process.env.NTFY_TOPIC = "pm-test";
 process.env.APP_URL = "https://app.test";
 
@@ -28,20 +26,20 @@ const events: { type: string; payload: any }[] = [];
 const pushed: any[] = [];
 const tokens = new Map<string, { approve: string; reject: string }>();
 
-const setRow = async (id: string) => (await d.db.select().from(s.proposalSets).where(eq(s.proposalSets.id, id)))[0]!;
-const setOrders = async (id: string) => d.db.select().from(s.orders).where(eq(s.orders.setId, id)).orderBy(s.orders.createdAt);
+const setRow = async (id: string) => (await d.db.proposalSets.get(id))!;
+const setOrders = async (id: string) => d.db.orders.find("set", { setId: id }); // by createdAt
 let gn = 0;
 /** New neg-risk group with n legs + a fresh structural detection (older detections removed). price = YES ask (buy-all) or YES bid (sell-all). */
 async function group(kind: "buy-all" | "sell-all", sizes: number[], price: number, dep = d) {
   const g = `g${++gn}`;
-  await d.db.delete(s.screens);
+  await d.db.screens.deleteMany((await d.db.screens.ids("byTs", {})).map(Number));
   const legs = sizes.map((_, i) => `${g}-c${i}`);
-  await d.db.insert(s.markets).values(legs.map((c) => ({ conditionId: c, question: `${g} outcome ${c}?`, category: "politics", negRiskGroup: g, eventId: g, feeRate: 0, yesTokenId: `${c}-Y`, noTokenId: `${c}-N`, status: "active" })));
+  await d.db.markets.insertMany(legs.map((c) => ({ conditionId: c, question: `${g} outcome ${c}?`, category: "politics", negRiskGroup: g, eventId: g, feeRate: 0, yesTokenId: `${c}-Y`, noTokenId: `${c}-N`, status: "active" })));
   sizes.forEach((sz, i) => quote(legs[i]!, kind === "buy-all" ? { ask: price, bid: price - 0.04, askSz: sz, bidSz: 1000 } : { ask: price + 0.04, bid: price, askSz: 1000, bidSz: sz }));
-  await d.db.insert(s.screens).values(legs.map((c) => ({ conditionId: c, ts: new Date(t), structuralFlag: true, structuralDetail: { type: "neg-risk-sum", kind, legs, lockedC: 1, sum: 0, sizeUsd: 50 } })));
+  await d.db.screens.insertMany(legs.map((c) => ({ conditionId: c, ts: new Date(t), structuralFlag: true, structuralDetail: { type: "neg-risk-sum", kind, legs, lockedC: 1, sum: 0, sizeUsd: 50 } })));
   const r = await proposeSets(dep);
   expect(r).toMatchObject({ proposed: 1 });
-  const p = (await d.db.select().from(s.proposalSets).where(eq(s.proposalSets.eventId, g)))[0]!;
+  const p = (await d.db.proposalSets.find("event", { eventId: g }))[0]!;
   return { g, legs, p };
 }
 const quote = (c: string, q: { ask: number; bid: number; askSz: number; bidSz: number }) =>
@@ -82,9 +80,9 @@ describe("neg-risk sets (fake exchange)", () => {
     expect(placed.slice(n).map((o) => [o.tokenId, o.side, o.type, o.capPrice])).toEqual(p.legs.map((l) => [l.token, "BUY", "FOK", 0.31]));
     const os = await setOrders(p.id);
     expect(os.map((o) => [o.idempotencyKey, o.status, o.thesisId])).toEqual(p.legs.map((_, i) => [`set:${p.id}:${i}`, "filled", `set:${p.id}`]));
-    const fills = await d.db.select().from(s.fills).where(eq(s.fills.paper, false));
+    const fills = await d.db.fills.find("book", { paper: false });
     expect(fills.filter((f) => os.some((o) => o.id === f.orderId))).toHaveLength(3);
-    const pos = await d.db.select().from(s.positions).where(eq(s.positions.paper, false));
+    const pos = await d.db.positions.find("book", { paper: false });
     expect(pos.filter((x) => x.tokenId.startsWith(p.eventId))).toHaveLength(3);
     expect(await setRow(p.id)).toMatchObject({ status: "filled", decidedVia: "web", approveTokenHash: "", rejectTokenHash: "" });
     expect(events.filter((e) => e.type === "set.updated" && e.payload.id === p.id).at(-1)?.payload).toMatchObject({ state: "filled", legsFilled: 3, legsTotal: 3 });
@@ -147,7 +145,7 @@ describe("neg-risk sets (fake exchange)", () => {
     expect(await ackSet(d, p.id)).toEqual({ ok: true, state: "acknowledged" });
     expect(await ackSet(d, p.id)).toEqual({ ok: false, error: "NOT_FLAGGED" });
     expect(await halted(d)).toBe(false);
-    expect((await d.db.select().from(s.autonomyEvents).where(like(s.autonomyEvents.scope, "set:%"))).length).toBe(1);
+    expect((await d.db.autonomyEvents.find("byId", {})).filter((e) => e.scope.startsWith("set:")).length).toBe(1);
   });
 
   it("place throws => leg unknown, set flagged, no resend, no unwind", async () => {
@@ -238,11 +236,11 @@ describe("neg-risk sets (fake exchange)", () => {
       const { p } = await group("sell-all", [400, 400, 400], 0.4);
       expect(p).toMatchObject({ status: "filled", decidedVia: "auto" });
       expect((await orders(p.id)).every((o) => o.approval === "auto" && o.modeAtSend === "L4")).toBe(true);
-      await d.db.insert(s.reconciliations).values({ ok: false, usdcLedger: 1, usdcExchange: 2 });
+      await d.db.reconciliations.insert({ ok: false, usdcLedger: 1, usdcExchange: 2 });
       const n = placed.length;
       expect(await proposeSets(d)).toMatchObject({ proposed: 0, skipped: { HALTED: 1 } });
       expect(placed.length).toBe(n);
-      await d.db.insert(s.reconciliations).values({ ok: true, usdcLedger: 1, usdcExchange: 1 });
+      await d.db.reconciliations.insert({ ok: true, usdcLedger: 1, usdcExchange: 1 });
     });
   });
 });

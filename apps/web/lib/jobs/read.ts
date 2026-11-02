@@ -1,12 +1,11 @@
 import { aggregate, effectiveMode, gateProgress, gateStats, realizedEdge, reliabilityBins, type Mode, type Side, type Steering, type Tier, type WatchCore } from "@pm/core";
 import { schema as s, type Db } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { currentMode } from "./autonomy";
 import { categoryConfidence, forecastRows } from "./calib";
 import { DAY, dbReady, defaultNow, envExchange, ruleText, type Deps } from "./deps";
 import { liveFilled, orderUi, uiState } from "./live";
-import { compileFilter } from "./markets";
+import { compileFilter, screenerRows } from "./markets";
 import { memo, memoClear } from "./memo";
 import { LIVE_OPEN, exposureOf } from "./paper";
 import { latestScreens, latestSnaps, shortlist, type StructDetail } from "./screen";
@@ -21,10 +20,32 @@ type Th = typeof s.theses.$inferSelect;
 type ThDetail = { thesis?: string; pYes?: number; pMidYes?: number; k?: number; e?: number; shares?: number; payoff?: number; expectedProfit?: number; capped?: boolean; judgeConfidence?: number; trigger?: string; model?: string; strongFacts?: number; keyEvidence?: { url: string; claim: string; reputation: string; claim_strength: string; why: string; quoteCheck?: string }[] };
 const dt = (t: Th) => (t.detail ?? {}) as ThDetail;
 
+type Mk = typeof s.markets.$inferSelect;
+const nonNull = <T>(x: T | null | undefined): x is T => x != null;
+const byIdAsc = (a: { id: number }, b: { id: number }) => a.id - b.id;
+/** conditionId -> market row, for code-side joins (missing markets are absent: a left join reads null, an inner join drops the row). */
+const marketsById = async (db: Db, ids: Iterable<string>) => new Map((await db.markets.getMany([...new Set(ids)])).map((m) => [m.conditionId, m]));
+/**
+ * `inner join ... order by ... limit n`: `read(k)` returns the first k rows in order, `join` maps each to its joined row or null (a
+ * missing market). Dropped rows do not count toward the limit, so read further (doubling) until n survive or the source runs out.
+ * One read in the usual case.
+ */
+async function limitJoined<R, J>(n: number, read: (k: number) => Promise<R[]>, join: (rows: R[]) => Promise<(J | null)[]>): Promise<J[]> {
+  for (let k = n; ; k *= 2) {
+    const rows = await read(k);
+    const joined = (await join(rows)).filter(nonNull);
+    if (joined.length >= n || rows.length < k) return joined.slice(0, n);
+  }
+}
+
+/** Newest thesis per market (createdAt desc, id desc): per-market index reads for `ids`, else one scan of theses. */
 const latestTheses = async (db: Db, ids?: string[]) => {
-  const rows = await db.select().from(s.theses).where(ids ? inArray(s.theses.conditionId, ids) : undefined).orderBy(desc(s.theses.createdAt));
+  const rows = ids ? (await db.theses.findEach("cond", ids.map((conditionId) => ({ conditionId })), { order: "desc", limit: 1 })).flat() : await db.theses.all();
   const m = new Map<string, Th>();
-  for (const t of rows) if (!m.has(t.conditionId)) m.set(t.conditionId, t);
+  for (const t of rows) {
+    const cur = m.get(t.conditionId);
+    if (!cur || t.createdAt.getTime() > cur.createdAt.getTime() || (t.createdAt.getTime() === cur.createdAt.getTime() && t.id > cur.id)) m.set(t.conditionId, t);
+  }
   return m;
 };
 
@@ -62,10 +83,10 @@ async function watchlistRead(r: ReadDeps, tab: Tier | "structural", sort: WatchS
   const ids = screens.map((x) => x.conditionId);
   if (!ids.length) return [];
   const [mk, flags, snaps, run] = await Promise.all([
-    db.select().from(s.markets).where(inArray(s.markets.conditionId, ids)),
-    db.select().from(s.marketFlags),
+    db.markets.getMany(ids),
+    db.marketFlags.all(),
     latestSnaps(db, ids),
-    db.select({ c: s.pods.conditionId }).from(s.pods).where(eq(s.pods.status, "running")),
+    db.pods.find("status", { status: "running" }).then((ps) => ps.map((p) => ({ c: p.conditionId }))),
   ]);
   const M = new Map(mk.map((m) => [m.conditionId, m])), F = new Map(flags.map((f) => [f.conditionId, f]));
   const SL = new Set(sl.map((x) => x.conditionId)), RUN = new Set(run.map((x) => x.c));
@@ -114,15 +135,13 @@ const NO_THESIS = {
 } as const;
 /** Fallback list before any screen/thesis exists (fresh database): open markets with a mid and a future end date, by priority, then 24h volume, then liquidity. Muted hidden. */
 export async function topMarkets(r: ReadDeps, limit = 100): Promise<WatchlistRow[]> {
-  const { db } = r, now = r.now(), m = s.markets, ml = s.marketLatest;
-  const { where, orderBy } = compileFilter({
+  const { db } = r, now = r.now();
+  const { match, compare } = compileFilter({
     price: { min: 0 }, daysToResolution: { min: 0 }, muted: false,
     sort: [{ field: "priority", dir: "desc" }, { field: "volume24h", dir: "desc" }, { field: "liquidity", dir: "desc" }],
   }, now);
-  const rows = await db
-    .select({ conditionId: m.conditionId, question: m.question, category: m.category, endDate: m.endDate, priority: ml.priority, mid: ml.mid, pinned: s.marketFlags.pinned })
-    .from(m).innerJoin(ml, eq(ml.conditionId, m.conditionId)).leftJoin(s.marketFlags, eq(s.marketFlags.conditionId, m.conditionId))
-    .where(where).orderBy(...orderBy).limit(limit);
+  const rows = (await screenerRows(db)).filter((x) => x.ml !== null && match(x)).sort(compare).slice(0, limit) // inner join market_latest
+    .map(({ m, ml, flags }) => ({ conditionId: m.conditionId, question: m.question, category: m.category, endDate: m.endDate, priority: ml!.priority, mid: ml!.mid, pinned: flags?.pinned ?? null }));
   return rows.map((x): WatchlistRow => ({
     conditionId: x.conditionId, question: x.question, category: x.category, tier: null,
     pinned: !!x.pinned, muted: false, shortlisted: false, researching: false,
@@ -134,17 +153,17 @@ export async function topMarkets(r: ReadDeps, limit = 100): Promise<WatchlistRow
 // ---------------------------------------------------------------- market detail
 export async function marketDetail(r: ReadDeps, conditionId: string) {
   const { db } = r, now = r.now();
-  const m = (await db.select().from(s.markets).where(eq(s.markets.conditionId, conditionId)))[0];
+  const m = await db.markets.get(conditionId);
   if (!m) return null;
   const [snap, ths, flag, scr, hist, pos, pods, latest, st, rules] = await Promise.all([
     latestSnaps(db, [conditionId]).then((x) => x.get(conditionId) ?? null),
-    db.select().from(s.theses).where(eq(s.theses.conditionId, conditionId)).orderBy(desc(s.theses.createdAt)),
-    db.select().from(s.marketFlags).where(eq(s.marketFlags.conditionId, conditionId)).then((x) => x[0]),
-    db.select().from(s.screens).where(eq(s.screens.conditionId, conditionId)).orderBy(desc(s.screens.ts)).limit(1).then((x) => x[0] ?? null),
-    db.select({ ts: s.snapshots.ts, mid: s.snapshots.mid }).from(s.snapshots).where(eq(s.snapshots.conditionId, conditionId)).orderBy(desc(s.snapshots.ts)).limit(500),
-    db.select().from(s.positions).where(and(eq(s.positions.conditionId, conditionId), eq(s.positions.paper, true))).orderBy(desc(s.positions.id)),
-    db.select().from(s.pods).where(eq(s.pods.conditionId, conditionId)).orderBy(desc(s.pods.startedAt)),
-    db.select().from(s.marketLatest).where(eq(s.marketLatest.conditionId, conditionId)).then((x) => x[0] ?? null),
+    db.theses.find("cond", { conditionId }, { order: "desc" }),
+    db.marketFlags.get(conditionId),
+    db.screens.first("cond", { conditionId }, { order: "desc" }),
+    db.snapshots.find("cond", { conditionId }, { order: "desc", limit: 500 }).then((xs) => xs.map((x) => ({ ts: x.ts, mid: x.mid }))),
+    db.positions.find("cond", { conditionId }, { order: "desc" }).then((xs) => xs.filter((p) => p.paper)), // by id desc
+    db.pods.find("cond", { conditionId }, { order: "desc" }),
+    db.marketLatest.get(conditionId),
     getSettings(db),
     r.pm ? ruleText(r.pm, m) : undefined,
   ]);
@@ -152,8 +171,8 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
   const podId = t?.podId ?? pods.find((p) => p.status === "done")?.id;
   const [evidence, agents] = podId
     ? await Promise.all([
-        db.select().from(s.evidence).where(eq(s.evidence.podId, podId)),
-        db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId)).orderBy(asc(s.agentRuns.id)),
+        db.evidence.find("pod", { podId }),
+        db.agentRuns.find("pod", { podId }), // by id asc
       ])
     : [[], []];
   return {
@@ -187,15 +206,19 @@ export async function marketDetail(r: ReadDeps, conditionId: string) {
 // ---------------------------------------------------------------- fleet
 export async function fleet(r: ReadDeps) {
   const { db } = r, now = r.now();
-  const st = await getSettings(db);
-  const pods = await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId)).orderBy(desc(s.pods.startedAt)).limit(50);
-  const pids = [...new Set(pods.flatMap((x) => (x.p.profileId ? [x.p.profileId] : [])))];
-  const names = new Map((pids.length ? await db.select({ id: s.researchProfiles.id, name: s.researchProfiles.name }).from(s.researchProfiles).where(inArray(s.researchProfiles.id, pids)) : []).map((x) => [x.id, x.name]));
-  const runs = pods.length ? await db.select().from(s.agentRuns).where(inArray(s.agentRuns.podId, pods.map((x) => x.p.id))).orderBy(asc(s.agentRuns.id)) : [];
+  const day = new Date(now).toISOString().slice(0, 10);
+  const [st, ps] = await Promise.all([getSettings(db), db.pods.find("byStarted", {}, { order: "desc", limit: 50 })]);
+  const pids = [...new Set(ps.flatMap((p) => (p.profileId ? [p.profileId] : [])))];
+  const [M, profs, runs, sp] = await Promise.all([
+    marketsById(db, ps.map((p) => p.conditionId)),
+    db.researchProfiles.getMany(pids),
+    db.agentRuns.findEach("pod", ps.map((p) => ({ podId: p.id }))).then((x) => x.flat().sort(byIdAsc)),
+    db.spend.get(day),
+  ]);
+  const pods = ps.map((p) => ({ p, q: M.get(p.conditionId)?.question ?? null })); // left join markets
+  const names = new Map(profs.map((x) => [x.id, x.name]));
   type U = { inputTokens: number; outputTokens: number; costUsd: number };
   const usage = (a: (typeof runs)[number]) => (a.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }) as U;
-  const day = new Date(now).toISOString().slice(0, 10);
-  const sp = (await db.select().from(s.spend).where(eq(s.spend.day, day)))[0];
   const todays = pods.filter((x) => x.p.startedAt.toISOString().slice(0, 10) === day);
   const todayRuns = runs.filter((a) => todays.some((x) => x.p.id === a.podId));
   return {
@@ -218,23 +241,28 @@ const DEFAULT_AGENTS = 5; // rules, source, base_rate, news, red_team (custom ro
 /** Research runs for the desk: everything running plus the last day's runs (or the given markets'), with agent progress, failure reason and verdict. */
 export async function researchLive(r: ReadDeps, o: { ids?: string[]; limit?: number } = {}) {
   const { db } = r, now = r.now();
-  const st = await getSettings(db);
-  const where = o.ids?.length ? inArray(s.pods.conditionId, o.ids) : gte(s.pods.startedAt, new Date(now - DAY));
-  const pods = await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId))
-    .where(where).orderBy(desc(s.pods.startedAt)).limit(o.limit ?? 40);
-  const pids = pods.map((x) => x.p.id);
-  const [runs, ths, judged] = pids.length
+  const limit = o.limit ?? 40, day = new Date(now).toISOString().slice(0, 10);
+  const [st, ps, sp, podsToday] = await Promise.all([
+    getSettings(db),
+    o.ids?.length
+      ? db.pods.find("cond", o.ids.map((conditionId) => ({ conditionId })), { order: "desc", limit })
+      : db.pods.find("byStarted", {}, { min: now - DAY, order: "desc", limit }),
+    db.spend.get(day),
+    db.pods.count("byStarted", {}, { min: new Date(`${day}T00:00:00Z`) }),
+  ]);
+  const pids = ps.map((p) => p.id);
+  const [M, allRuns, ths] = pids.length
     ? await Promise.all([
-        db.select({ podId: s.agentRuns.podId, role: s.agentRuns.role, status: s.agentRuns.status }).from(s.agentRuns).where(inArray(s.agentRuns.podId, pids)),
-        db.select().from(s.theses).where(inArray(s.theses.podId, pids)),
-        db.select({ podId: s.agentRuns.podId, out: s.agentRuns.outputJson }).from(s.agentRuns).where(and(inArray(s.agentRuns.podId, pids), eq(s.agentRuns.role, "judge"), eq(s.agentRuns.status, "ok"))),
+        marketsById(db, ps.map((p) => p.conditionId)),
+        db.agentRuns.findEach("pod", pids.map((podId) => ({ podId }))).then((x) => x.flat()), // by id asc per pod
+        db.theses.findEach("pod", pids.map((podId) => ({ podId }))).then((x) => x.flat()), // by createdAt asc per pod: the newest wins below
       ])
-    : [[], [], []];
+    : [new Map<string, Mk>(), [], []];
+  const pods = ps.map((p) => ({ p, q: M.get(p.conditionId)?.question ?? null })); // left join markets
+  const runs = allRuns.map((a) => ({ podId: a.podId, role: a.role, status: a.status }));
+  const judged = allRuns.filter((a) => a.role === "judge" && a.status === "ok").map((a) => ({ podId: a.podId, out: a.outputJson }));
   const th = new Map(ths.map((t) => [t.podId, t]));
   const judge = new Map(judged.map((j) => [j.podId, j.out as { p_hat?: number; thesis?: string; confidence?: number } | null]));
-  const day = new Date(now).toISOString().slice(0, 10);
-  const sp = (await db.select().from(s.spend).where(eq(s.spend.day, day)))[0];
-  const [{ n: podsToday }] = (await db.select({ n: sql<number>`count(*)::int` }).from(s.pods).where(gte(s.pods.startedAt, new Date(`${day}T00:00:00Z`)))) as [{ n: number }];
   return {
     budget: {
       running: pods.filter((x) => x.p.status === "running").length, maxRunning: st.budget.maxConcurrentSandboxes,
@@ -273,19 +301,26 @@ export async function calibration(r: ReadDeps, o: { category?: string; model?: s
 // ---------------------------------------------------------------- paper book
 export async function paperBook(r: ReadDeps) {
   const { db } = r;
-  const pos = await db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId)).where(eq(s.positions.paper, true)).orderBy(desc(s.positions.id));
+  const allPos = await db.positions.find("book", { paper: true }, { order: "desc" }); // by id desc
+  const PM = await marketsById(db, allPos.map((p) => p.conditionId));
+  const pos = allPos.flatMap((p) => { const m = PM.get(p.conditionId); return m ? [{ p, m }] : []; }); // inner join markets
   const ids = [...new Set(pos.map((x) => x.p.conditionId))];
   const [snaps, outs, ords] = ids.length
     ? await Promise.all([
         latestSnaps(db, ids),
-        db.select().from(s.outcomes).where(inArray(s.outcomes.conditionId, ids)),
-        db.select().from(s.orders).where(inArray(s.orders.conditionId, ids)),
+        db.outcomes.getMany(ids),
+        db.orders.findEach("cond", ids.map((conditionId) => ({ conditionId }))).then((x) => x.flat()),
       ])
     : [new Map<string, never>(), [], []];
-  const FT = ords.length ? await db.select().from(s.fills).where(inArray(s.fills.orderId, ords.map((o) => o.id))) : [];
+  const [FT, ots] = ords.length
+    ? await Promise.all([
+        db.fills.findEach("order", ords.map((o) => ({ orderId: o.id }))).then((x) => x.flat()),
+        db.theses.getMany([...new Set(ords.map((o) => o.thesisId))]),
+      ])
+    : [[], []];
   const fillTs = new Map(FT.map((f) => [f.orderId, f.ts.getTime()]));
   const resolvedAt = new Map(outs.map((o) => [o.conditionId, o.resolvedAt.getTime()]));
-  const OT = new Map((ords.length ? await db.select().from(s.theses).where(inArray(s.theses.id, [...new Set(ords.map((o) => o.thesisId))])) : []).map((x) => [x.id, x]));
+  const OT = new Map(ots.map((x) => [x.id, x]));
   const O = new Map(outs.map((o) => [o.conditionId, o.result]));
   const positions = pos.map(({ p, m }) => {
     const tid = ords.filter((o) => o.conditionId === p.conditionId && o.tokenId === p.tokenId && (fillTs.get(o.id) ?? 0) <= p.openedAt.getTime())
@@ -303,9 +338,16 @@ export async function paperBook(r: ReadDeps) {
     };
   });
   // L1 autonomy fills and manual paper trades (modeAtSend "manual", from the Trade page)
-  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question, yesToken: s.markets.yesTokenId }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId))
-    .where(and(eq(s.orders.paper, true), inArray(s.orders.modeAtSend, ["L1", "manual"]))).orderBy(desc(s.fills.id)).limit(200);
-  const T = new Map((await db.select().from(s.theses).where(inArray(s.theses.id, [...new Set(fl.map((x) => x.o.thesisId))]))).map((t) => [t.id, t]));
+  // fills of paper L1/manual orders whose market exists, newest fill id first, 200: fill ids per order (no rows), then the 200 rows
+  const l1 = (await db.orders.find("book", { paper: true })).filter((o) => o.modeAtSend === "L1" || o.modeAtSend === "manual");
+  const [fids, LM] = await Promise.all([db.fills.idsEach("order", l1.map((o) => ({ orderId: o.id }))), marketsById(db, l1.map((o) => o.conditionId))]);
+  const top = l1.flatMap((o, i) => (LM.has(o.conditionId) ? (fids[i] ?? []).map((id) => ({ id: Number(id), o })) : [])).sort((a, b) => b.id - a.id).slice(0, 200);
+  const FR = new Map((await db.fills.getMany(top.map((x) => x.id))).map((f) => [f.id, f]));
+  const fl = top.flatMap(({ id, o }) => {
+    const f = FR.get(id), m = LM.get(o.conditionId)!;
+    return f ? [{ f, o, q: m.question, yesToken: m.yesTokenId }] : [];
+  });
+  const T = new Map((await db.theses.getMany([...new Set(fl.map((x) => x.o.thesisId))])).map((t) => [t.id, t]));
   const fills = fl.map(({ f, o, q, yesToken }) => {
     const t = T.get(o.thesisId), k = t ? (dt(t).k ?? null) : null;
     return {
@@ -335,24 +377,39 @@ export async function paperBook(r: ReadDeps) {
 /** Live positions, open orders, last 50 fills, recon. orderId is the exchange (clob) id; markPrice falls back to avgPrice (unrealized 0) when the market has no snapshot. */
 export async function bookLive(r: ReadDeps) {
   const { db } = r;
-  const pos = await db.select({ p: s.positions, m: s.markets }).from(s.positions).innerJoin(s.markets, eq(s.markets.conditionId, s.positions.conditionId))
-    .where(and(eq(s.positions.paper, false), isNull(s.positions.closedAt))).orderBy(desc(s.positions.id));
+  const joinM = async <T extends { conditionId: string }>(rows: T[]) => {
+    const M = await marketsById(db, rows.map((x) => x.conditionId));
+    return rows.map((x) => { const m = M.get(x.conditionId); return m ? { x, m } : null; }); // inner join markets
+  };
+  const [pos, filled, ords, fl] = await Promise.all([
+    db.positions.find("open", { paper: false }, { order: "desc" }).then(joinM).then((xs) => xs.filter(nonNull).map(({ x, m }) => ({ p: x, m }))), // by id desc
+    liveFilled(db),
+    db.orders.find("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status })), { order: "desc" }).then(joinM) // by createdAt desc
+      .then((xs) => xs.filter(nonNull).map(({ x, m }) => ({ o: x, q: m.question }))),
+    // last 50 live fills by ts desc, id desc whose order and market exist
+    limitJoined(50, async (k) => {
+      const page = await db.fills.find("book", { paper: false }, { order: "desc", limit: k });
+      const last = page.length === k ? page.at(-1)!.ts : null; // a ts tie at the page edge: read every row of that ts, then order ties by id
+      const ties = last ? await db.fills.find("book", { paper: false }, { min: last, max: last }) : [];
+      const rows = [...new Map([...page, ...ties].map((f) => [f.id, f])).values()];
+      return rows.sort((a, b) => b.ts.getTime() - a.ts.getTime() || b.id - a.id);
+    }, async (fs) => {
+      const O = new Map((await db.orders.getMany([...new Set(fs.map((f) => f.orderId))])).map((o) => [o.id, o]));
+      const M = await marketsById(db, [...O.values()].map((o) => o.conditionId));
+      return fs.map((f) => { const o = O.get(f.orderId), m = o && M.get(o.conditionId); return o && m ? { f, o, q: m.question } : null; });
+    }),
+  ]);
   const snaps = pos.length ? await latestSnaps(db, [...new Set(pos.map((x) => x.p.conditionId))]) : new Map<string, never>();
   const positions = pos.map(({ p, m }) => {
     const yes = snaps.get(p.conditionId)?.mid ?? null, isYes = p.tokenId === m.yesTokenId;
     const mark = yes == null ? p.avgCost : isYes ? yes : 1 - yes;
     return { conditionId: p.conditionId, question: m.question, tokenId: p.tokenId, outcome: (isYes ? "YES" : "NO") as "YES" | "NO", shares: p.size, avgPrice: p.avgCost, markPrice: mark, unrealizedUsd: p.size * (mark - p.avgCost) };
   });
-  const filled = await liveFilled(db);
-  const ords = await db.select({ o: s.orders, q: s.markets.question }).from(s.orders).innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId))
-    .where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN))).orderBy(desc(s.orders.createdAt));
   const openOrders = ords.map(({ o, q }) => ({
     orderId: o.clobOrderId ?? o.id, conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: o.limitPrice, shares: o.size,
     filledShares: filled.get(o.id) ?? 0, status: orderUi(o.status, filled.get(o.id) ?? 0, o.size), expiresAt: o.expiresAt?.getTime() ?? null,
     approval: o.approval as "auto" | "user" | null, modeAtSend: o.modeAtSend, setId: o.setId,
   }));
-  const fl = await db.select({ f: s.fills, o: s.orders, q: s.markets.question }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId))
-    .innerJoin(s.markets, eq(s.markets.conditionId, s.orders.conditionId)).where(eq(s.fills.paper, false)).orderBy(desc(s.fills.ts), desc(s.fills.id)).limit(50);
   const fills = fl.map(({ f, o, q }) => ({ tradeId: f.tradeId ?? String(f.id), conditionId: o.conditionId, question: q, side: o.side as "BUY" | "SELL", price: f.price, shares: f.size, feeUsd: f.fee, at: f.ts.getTime(), approval: o.approval as "auto" | "user" | null, modeAtSend: o.modeAtSend, setId: o.setId }));
   return { positions, openOrders, fills, recon: await reconStatus(r) };
 }
@@ -363,33 +420,48 @@ export async function bookLive(r: ReadDeps) {
  * modeled = side mid at proposal; approved = a human sent it. Edge: realized P&L of live positions closed in the last 30 d per share bought in that window, in cents.
  */
 export async function liveGateStats(db: ReadDeps["db"], now: Date) {
-  const rows = await db.select({ o: s.orders, px: sql<number>`(sum(${s.fills.price} * ${s.fills.size}) / sum(${s.fills.size}))::float8`, last: sql<Date>`max(${s.fills.ts})`, n: sql<number>`sum(${s.fills.size})::float8` })
-    .from(s.orders).innerJoin(s.fills, eq(s.fills.orderId, s.orders.id)).where(and(eq(s.orders.paper, false), isNull(s.orders.setId))).groupBy(s.orders.id);
-  const props = new Map((await db.select({ id: s.proposals.id, p: s.proposals.priceAtProposal }).from(s.proposals).where(isNotNull(s.proposals.orderId))).map((x) => [x.id, x.p]));
+  const since = new Date(now.getTime() - 30 * 86_400_000);
+  const ords = (await db.orders.find("book", { paper: false })).filter((o) => o.setId === null);
+  const [fl, pr, closed] = await Promise.all([
+    db.fills.findEach("order", ords.map((o) => ({ orderId: o.id }))),
+    db.proposals.getMany([...new Set(ords.flatMap((o) => (o.proposalId ? [o.proposalId] : [])))]),
+    db.positions.find("closed", { paper: false }, { min: since }),
+  ]);
+  // inner join fills, group by order: VWAP, last fill ts, shares filled
+  const rows = ords.flatMap((o, i) => {
+    const fs = fl[i] ?? [];
+    if (!fs.length) return [];
+    const n = fs.reduce((t, f) => t + f.size, 0);
+    return [{ o, px: fs.reduce((t, f) => t + f.price * f.size, 0) / n, last: new Date(Math.max(...fs.map((f) => f.ts.getTime()))), n }];
+  });
+  const props = new Map(pr.filter((x) => x.orderId !== null).map((x) => [x.id, x.priceAtProposal]));
   const trades = rows.map(({ o, px, last }) => ({ approved: o.approval === "user", side: o.side as "BUY" | "SELL", modeledPrice: (o.proposalId && props.get(o.proposalId)) || o.limitPrice, fillPrice: px, at: new Date(last) }));
   const g = gateStats(trades, now);
-  const since = new Date(now.getTime() - 30 * 86_400_000);
   const bought = rows.filter((x) => x.o.side === "BUY" && new Date(x.last) >= since).reduce((a, x) => a + x.n, 0);
-  const pnl = (await db.select({ v: sql<number>`coalesce(sum(${s.positions.realizedPnl}), 0)::float8` }).from(s.positions).where(and(eq(s.positions.paper, false), gte(s.positions.closedAt, since))))[0]!.v;
+  const pnl = closed.reduce((t, p) => t + p.realizedPnl, 0);
   return { ...g, avgSlippageC: g.avgSlippage == null ? null : g.avgSlippage * 100, realizedEdge30dC: bought > 0 ? (pnl / bought) * 100 : null, realizedEdge30d: bought > 0 ? pnl / bought : 0 };
 }
 
 export async function autonomy(r: ReadDeps) {
   const { db, now } = r;
   const st = await getSettings(db);
-  const mode = await currentMode(db);
-  const cats = [...new Set([...(await db.selectDistinct({ c: s.markets.category }).from(s.markets)).flatMap((x) => (x.c ? [x.c] : [])), ...Object.keys(st.overrides)])].sort();
-  const f = await forecastRows(db);
+  const [mode, mk, f, x, gs, ev, pendingCount, flaggedSets, liveOpen, recon] = await Promise.all([
+    currentMode(db),
+    db.markets.all(), // distinct categories
+    forecastRows(db),
+    exposureOf(db, st.bankroll, now()),
+    liveGateStats(db, new Date(now())),
+    db.autonomyEvents.find("byId", {}, { order: "desc", limit: 50 }),
+    db.proposals.count("status", { status: "pending" }),
+    db.proposalSets.count("status", { status: "flagged" }),
+    db.orders.idsEach("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status }))).then((x) => x.reduce((t, ids) => t + ids.length, 0)),
+    reconStatus(r),
+  ]);
+  const cats = [...new Set([...mk.flatMap((m) => (m.category ? [m.category] : [])), ...Object.keys(st.overrides)])].sort();
   const a = aggregate(f, () => "all").all;
-  const x = await exposureOf(db, st.bankroll, now());
-  const gs = await liveGateStats(db, new Date(now()));
-  const ev = await db.select().from(s.autonomyEvents).orderBy(desc(s.autonomyEvents.id)).limit(50);
-  const pend = await db.select({ id: s.proposals.id }).from(s.proposals).where(eq(s.proposals.status, "pending"));
-  const flaggedSets = (await db.select({ id: s.proposalSets.id }).from(s.proposalSets).where(eq(s.proposalSets.status, "flagged"))).length;
-  const liveOpen = await db.select({ id: s.orders.id }).from(s.orders).where(and(eq(s.orders.paper, false), inArray(s.orders.status, LIVE_OPEN)));
   return {
-    liveOpenOrders: liveOpen.length, flaggedSets, recon: await reconStatus(r),
-    mode, executionEnabled: !!r.exchangeConfigured, exchangeConfigured: !!r.exchangeConfigured, pendingCount: pend.length, // L2 needs the exchange; L3-L4 refused until phase 7
+    liveOpenOrders: liveOpen, flaggedSets, recon,
+    mode, executionEnabled: !!r.exchangeConfigured, exchangeConfigured: !!r.exchangeConfigured, pendingCount, // L2 needs the exchange; L3-L4 refused until phase 7
     categories: cats.map((c) => ({ category: c, override: (st.overrides[c] ?? null) as Mode | null, effective: effectiveMode(mode, st.overrides[c]) })),
     limits: st.limits,
     usage: { totalOpen: x.totalOpen, dailyNotional: x.dailyNotional, dailyRealizedLoss: x.dailyRealizedLoss, byCategory: x.byCategory },
@@ -406,15 +478,27 @@ export async function autonomy(r: ReadDeps) {
 /** Pending + sending (soonest expiry first) and the last 10 resolved (newest first). */
 export async function proposals(r: ReadDeps) {
   const { db } = r;
-  const q = () => db.select({ p: s.proposals, m: s.markets }).from(s.proposals).innerJoin(s.markets, eq(s.markets.conditionId, s.proposals.conditionId));
+  type P = typeof s.proposals.$inferSelect;
+  const join = async (ps: P[]) => {
+    const M = await marketsById(db, ps.map((p) => p.conditionId));
+    return ps.map((p) => { const m = M.get(p.conditionId); return m ? { p, m } : null; }); // inner join markets
+  };
+  const done = ["sent", "rejected", "expired", "failed"].map((status) => ({ status }));
   const [open, recent] = await Promise.all([
-    q().where(inArray(s.proposals.status, ["pending", "approved"])).orderBy(asc(s.proposals.expiresAt)),
-    q().where(inArray(s.proposals.status, ["sent", "rejected", "expired", "failed"])).orderBy(desc(s.proposals.decidedAt)).limit(10),
+    db.proposals.find("statusExpires", [{ status: "pending" }, { status: "approved" }], { order: "asc" }).then(join).then((xs) => xs.filter(nonNull)),
+    // decidedAt desc as Postgres orders it: undecided (null) rows first, then newest decided
+    limitJoined(10, async (k) => {
+      const [undecided, decided] = await Promise.all([
+        db.proposals.find("statusDecided", done, { max: -Infinity, limit: k }),
+        db.proposals.find("statusDecided", done, { order: "desc", limit: k }).then((xs) => xs.filter((p) => p.decidedAt !== null)),
+      ]);
+      return [...undecided, ...decided].slice(0, k);
+    }, join),
   ]);
   const ids = [...new Set([...open, ...recent].map((x) => x.p.conditionId))];
   const snaps = ids.length ? await latestSnaps(db, ids) : new Map<string, never>();
   const ords = [...open, ...recent].flatMap((x) => (x.p.orderId ? [x.p.orderId] : []));
-  const clob = new Map((ords.length ? await db.select({ id: s.orders.id, c: s.orders.clobOrderId, a: s.orders.approval }).from(s.orders).where(inArray(s.orders.id, ords)) : []).map((o) => [o.id, o]));
+  const clob = new Map((await db.orders.getMany([...new Set(ords)])).map((o) => [o.id, { id: o.id, c: o.clobOrderId, a: o.approval }]));
   const row = ({ p, m }: (typeof open)[number]) => {
     const yes = snaps.get(p.conditionId)?.mid ?? null, isYes = p.tokenId === m.yesTokenId, expired = p.status === "expired";
     return {
@@ -430,24 +514,24 @@ export async function proposals(r: ReadDeps) {
 
 // ---------------------------------------------------------------- sets (DESIGN 9.1 / 9.2 / 9.8)
 const SET_OPEN = ["pending", "sending", "unwinding"];
+const SET_DONE = ["filled", "unwound", "failed", "flagged", "acknowledged", "rejected", "expired"];
 /** Open sets (soonest expiry first), every flagged set, and the last 10 resolved. held/suggestedAction only for flagged sets (from booked fills). */
 async function setViews(db: Db) {
-  const q = db.select().from(s.proposalSets);
   const [open, flagged, recent] = await Promise.all([
-    q.where(inArray(s.proposalSets.status, SET_OPEN)).orderBy(asc(s.proposalSets.expiresAt)),
-    db.select().from(s.proposalSets).where(eq(s.proposalSets.status, "flagged")),
-    db.select().from(s.proposalSets).where(inArray(s.proposalSets.status, ["filled", "unwound", "failed", "flagged", "acknowledged", "rejected", "expired"])).orderBy(desc(s.proposalSets.createdAt)).limit(10),
+    db.proposalSets.find("statusExpires", SET_OPEN.map((status) => ({ status })), { order: "asc" }),
+    db.proposalSets.find("status", { status: "flagged" }),
+    db.proposalSets.find("status", SET_DONE.map((status) => ({ status })), { order: "desc", limit: 10 }), // by createdAt desc
   ]);
   const done = [...new Map([...flagged, ...recent].map((p) => [p.id, p])).values()];
   const all = [...open, ...done];
   if (!all.length) return { pending: [], recent: [] };
   const ids = [...new Set(all.flatMap((p) => p.legs.map((l) => l.conditionId)))];
-  const [mk, snaps, ords, fl] = await Promise.all([
-    db.select().from(s.markets).where(inArray(s.markets.conditionId, ids)),
+  const [mk, snaps, ords] = await Promise.all([
+    db.markets.getMany(ids),
     latestSnaps(db, ids),
-    db.select().from(s.orders).where(inArray(s.orders.setId, all.map((p) => p.id))),
-    db.select({ f: s.fills, o: s.orders }).from(s.fills).innerJoin(s.orders, eq(s.orders.id, s.fills.orderId)).where(inArray(s.orders.setId, all.map((p) => p.id))),
+    db.orders.findEach("set", all.map((p) => ({ setId: p.id }))).then((x) => x.flat()),
   ]);
+  const fl = (await db.fills.findEach("order", ords.map((o) => ({ orderId: o.id })))).flatMap((fs, i) => fs.map((f) => ({ f, o: ords[i]! }))); // inner join orders
   const M = new Map(mk.map((m) => [m.conditionId, m]));
   const O = new Map(ords.map((o) => [o.idempotencyKey, o]));
   const view = (p: (typeof all)[number]) => {
@@ -484,7 +568,7 @@ export const settingsGet = (r: Pick<Deps, "db">) => getSettings(r.db);
 export const settingsPut = (r: Pick<Deps, "db">, patch: unknown) => putSettings(r.db, patch);
 
 export async function setFlag(r: Pick<Deps, "db">, conditionId: string, flag: { pinned?: boolean; muted?: boolean }) {
-  await r.db.insert(s.marketFlags).values({ conditionId, ...flag }).onConflictDoUpdate({ target: s.marketFlags.conditionId, set: flag });
+  await r.db.marketFlags.upsert({ conditionId, ...flag }, flag); // ON CONFLICT (condition_id) DO UPDATE: only the given flags change
   memoClear("watch:");
 }
 
@@ -492,15 +576,16 @@ export async function setFlag(r: Pick<Deps, "db">, conditionId: string, flag: { 
 /** One pod: stage, cost totals, agent rows with captured tool calls, evidence, thesis (null until sizing wrote one), per-pod budget knobs. */
 export async function podDetail(r: ReadDeps, podId: string) {
   const { db } = r;
-  const row = (await db.select({ p: s.pods, q: s.markets.question }).from(s.pods).leftJoin(s.markets, eq(s.markets.conditionId, s.pods.conditionId)).where(eq(s.pods.id, podId)))[0];
-  if (!row) return null;
-  const { p } = row;
-  const [agents, ev, th, st] = await Promise.all([
-    db.select().from(s.agentRuns).where(eq(s.agentRuns.podId, podId)).orderBy(asc(s.agentRuns.id)),
-    db.select().from(s.evidence).where(eq(s.evidence.podId, podId)).orderBy(asc(s.evidence.id)),
-    db.select().from(s.theses).where(eq(s.theses.podId, podId)).orderBy(desc(s.theses.createdAt)).limit(1),
+  const p = await db.pods.get(podId);
+  if (!p) return null;
+  const [mkt, agents, ev, th, st] = await Promise.all([
+    db.markets.get(p.conditionId), // left join
+    db.agentRuns.find("pod", { podId }), // by id asc
+    db.evidence.find("pod", { podId }), // by id asc
+    db.theses.find("pod", { podId }, { order: "desc", limit: 1 }),
     getSettings(db),
   ]);
+  const row = { p, q: mkt?.question ?? null };
   type U = { inputTokens: number; outputTokens: number; costUsd: number };
   const u = (a: (typeof agents)[number]) => (a.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 }) as U;
   const t = th[0];

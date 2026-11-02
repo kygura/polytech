@@ -1,29 +1,26 @@
 import { brier, fitExtremize, logLoss, paperPnl } from "@pm/core";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { calibrateNightly, deps, getSettings, journalNightly, putSettings, type Deps } from "./index";
-
-process.env.PGLITE_DIR = "memory://";
 
 const DAY = 864e5;
 let T = Date.parse("2026-10-15T12:00:00Z");
 let d: Deps;
 const fresh = async () => ({ ...d, now: () => T, settings: await getSettings(d.db) });
-const jr = async (id: string) => (await d.db.select().from(s.journal).where(eq(s.journal.thesisId, id)))[0]!;
+const jr = async (id: string) => (await d.db.journal.get(id))!;
 
 async function seed(id: string, o: { c?: string; at?: number; pYes?: number; mid?: number; side?: "YES" | "NO"; k?: number; stake?: number; result?: "YES" | "NO"; category?: string; liquidity?: number; probs?: (number | null)[]; model?: string } = {}) {
   const c = o.c ?? `c-${id}`, at = o.at ?? T - 10 * DAY, pYes = o.pYes ?? 0.7, side = o.side ?? "YES";
-  await d.db.insert(s.markets).values({ conditionId: c, question: `Q ${id}?`, category: o.category ?? "politics", liquidity: o.liquidity ?? 12_000, status: o.result ? "resolved" : "active", endDate: new Date(T + DAY) }).onConflictDoNothing();
-  await d.db.insert(s.pods).values({ id: `pod-${id}`, conditionId: c, status: "done", trigger: "manual" });
+  await d.db.markets.insertIfAbsent({ conditionId: c, question: `Q ${id}?`, category: o.category ?? "politics", liquidity: o.liquidity ?? 12_000, status: o.result ? "resolved" : "active", endDate: new Date(T + DAY) });
+  await d.db.pods.insert({ id: `pod-${id}`, conditionId: c, status: "done", trigger: "manual" });
   const roles = ["base", "contrarian", "rules", "judge"];
-  await d.db.insert(s.agentRuns).values((o.probs ?? [0.6, 0.8, null]).map((p, i) => ({ podId: `pod-${id}`, role: roles[i]!, model: "m", status: "ok", outputJson: { probability: p } })).concat([{ podId: `pod-${id}`, role: "judge", model: "m", status: "ok", outputJson: { probability: 0.99 } }])); // the judge's own row never counts as blind
-  await d.db.insert(s.theses).values({
+  await d.db.agentRuns.insertMany((o.probs ?? [0.6, 0.8, null]).map((p, i) => ({ podId: `pod-${id}`, role: roles[i]!, model: "m", status: "ok", outputJson: { probability: p } })).concat([{ podId: `pod-${id}`, role: "judge", model: "m", status: "ok", outputJson: { probability: 0.99 } }])); // the judge's own row never counts as blind
+  await d.db.theses.insert({
     id: id, conditionId: c, podId: `pod-${id}`, pHat: side === "YES" ? pYes : 1 - pYes, c: 0.4, pPost: 0.6, side, edgeC: 6, sizeUsd: o.stake ?? 25, createdAt: new Date(at), expiresAt: new Date(at + 3 * DAY),
     detail: { pYes, pMidYes: o.mid ?? 0.5, k: o.k ?? 0.55, e: 0.055, model: o.model ?? "claude-judge" },
   });
-  if (o.result) await d.db.insert(s.outcomes).values({ conditionId: c, resolvedAt: new Date(T - DAY), result: o.result }).onConflictDoNothing();
+  if (o.result) await d.db.outcomes.insertIfAbsent({ conditionId: c, resolvedAt: new Date(T - DAY), result: o.result });
   return c;
 }
 
@@ -68,7 +65,7 @@ describe("journal", () => {
   it("drift 24h / 7d fill from snapshot history once their time has come, and are never recomputed", async () => {
     const at = T - 8 * DAY;
     const c = await seed("t-drift", { at, pYes: 0.7, mid: 0.5 });
-    await d.db.insert(s.snapshots).values([
+    await d.db.snapshots.insertMany([
       { conditionId: c, ts: new Date(at + DAY + 3_600_000), mid: 0.56 }, // +24h: market moved toward the estimate
       { conditionId: c, ts: new Date(at + 7 * DAY - 3_600_000), mid: 0.45 }, // +7d: and back past the start
     ]);
@@ -76,7 +73,7 @@ describe("journal", () => {
     const j = await jr("t-drift");
     expect(j.drift24h).toBeCloseTo(0.06, 12);
     expect(j.drift7d).toBeCloseTo(-0.05, 12);
-    await d.db.delete(s.snapshots);
+    await d.db.snapshots.deleteMany(await d.db.snapshots.ids("byTs", {}));
     await journalNightly(await fresh());
     expect((await jr("t-drift")).drift24h).toBeCloseTo(0.06, 12);
     // a fresh thesis has nothing to measure yet
@@ -87,13 +84,13 @@ describe("journal", () => {
     await seed("t-early", { result: "YES", at: T - 12 * DAY });
     await journalNightly(await fresh());
     expect((await jr("t-early")).drift7d).toBeNull(); // no snapshots near day 7
-    await d.db.update(s.journal).set({ stake: 999 }).where(eq(s.journal.thesisId, "t-early"));
+    await d.db.journal.update("t-early", { stake: 999 });
     await journalNightly(await fresh());
     expect((await jr("t-early")).stake).toBe(999); // not reprocessed (it would be rewritten to 25)
   });
 
   it("is idempotent", async () => {
-    const n = async () => (await d.db.select().from(s.journal)).length;
+    const n = async () => (await d.db.journal.all()).length;
     const before = await n();
     await journalNightly(await fresh());
     expect(await n()).toBe(before);
@@ -106,7 +103,7 @@ describe("extremize suggestion", () => {
     // underconfident model: says 0.7, YES happens 90% of the time -> k > 1
     for (let i = 0; i < 40; i++) await seed(`fit${i}`, { pYes: 0.7, result: i % 10 === 0 ? "NO" : "YES", stake: 0 });
     const out = await journalNightly(await fresh());
-    const rows = await d.db.select({ pHat: s.journal.pHat, result: s.journal.result }).from(s.journal).where(eq(s.journal.category, "politics"));
+    const rows = (await d.db.journal.all()).filter((j) => j.category === "politics");
     const k = fitExtremize(rows.filter((r) => r.result).map((r) => ({ pHat: r.pHat!, result: r.result as "YES" | "NO" })));
     expect(k).not.toBeNull();
     expect(out.suggested).toBe(k);

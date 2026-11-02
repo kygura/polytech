@@ -1,23 +1,21 @@
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm } from "@pm/pm";
-import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, monitor, subscribe, type Deps } from "./index";
-
-process.env.PGLITE_DIR = "memory://";
 
 const H = 3_600_000;
 let T = Date.parse("2026-10-15T12:00:00Z");
 let d: Deps;
 const run = async (over: Partial<Deps> = {}) => (await monitor({ ...d, now: () => T, ...over })) as { raised: number; deduped: number; suppressed: number; byKind: Record<string, number> };
-const alerts = async () => (await d.db.select().from(s.alerts)).sort((a, b) => a.id - b.id);
+const alerts = async () => (await d.db.alerts.find("byCreated", {})).sort((a, b) => a.id - b.id);
 const market = (c: string, over: Partial<typeof s.markets.$inferInsert> = {}) =>
-  d.db.insert(s.markets).values({ conditionId: c, question: `Question ${c}?`, endDate: new Date(T + 30 * 864e5), status: "active", ...over }).onConflictDoNothing();
+  d.db.markets.insertIfAbsent({ conditionId: c, question: `Question ${c}?`, endDate: new Date(T + 30 * 864e5), status: "active", ...over });
 const latest = (c: string, over: Partial<typeof s.marketLatest.$inferInsert> = {}) =>
-  d.db.insert(s.marketLatest).values({ conditionId: c, mid: 0.5, ...over }).onConflictDoUpdate({ target: s.marketLatest.conditionId, set: { mid: 0.5, ...over } });
+  d.db.marketLatest.upsert({ conditionId: c, mid: 0.5, ...over }, { mid: 0.5, ...over });
 const thesis = (id: string, c: string, over: Partial<typeof s.theses.$inferInsert> = {}) =>
-  d.db.insert(s.theses).values({ id, conditionId: c, podId: `pod-${id}`, pHat: 0.7, c: 0.4, pPost: 0.6, side: "YES", edgeC: 5, sizeUsd: 20, createdAt: new Date(T - H), expiresAt: new Date(T + 48 * H), detail: { pYes: 0.7, pMidYes: 0.4 }, ...over });
-const clear = async () => { for (const t of [s.alerts, s.theses, s.marketLatest, s.markets, s.pods, s.marketFlags]) await d.db.delete(t); await d.kv.set("monitor:state", null); };
+  d.db.theses.insert({ id, conditionId: c, podId: `pod-${id}`, pHat: 0.7, c: 0.4, pPost: 0.6, side: "YES", edgeC: 5, sizeUsd: 20, createdAt: new Date(T - H), expiresAt: new Date(T + 48 * H), detail: { pYes: 0.7, pMidYes: 0.4 }, ...over });
+const wipe = async (h: { pks(): Promise<string[]>; deleteMany(pks: string[]): Promise<unknown> }) => h.deleteMany(await h.pks());
+const clear = async () => { for (const h of [d.db.alerts, d.db.theses, d.db.marketLatest, d.db.markets, d.db.pods, d.db.marketFlags]) await wipe(h); await d.kv.set("monitor:state", null); };
 
 beforeAll(async () => {
   d = await deps({ pm: createPm({ fixtures: true }), kv: memoryKv(), now: () => T });
@@ -52,7 +50,7 @@ describe("monitor", () => {
     await market("m1"); await market("m2"); await market("m3");
     await thesis("t1", "m1"); await thesis("t2", "m2"); await thesis("t3", "m3", { expiresAt: new Date(T - H) });
     for (const c of ["m1", "m2", "m3"]) await latest(c, { mid: 0.47 }); // +7c each
-    await d.db.insert(s.marketFlags).values({ conditionId: "m2", muted: true });
+    await d.db.marketFlags.insert({ conditionId: "m2", muted: true });
     const st = { ...d.settings, alerts: { midMoveC: 8, cooldownH: 6 } };
     expect((await run({ settings: st })).raised).toBe(0);
     expect(await run()).toMatchObject({ raised: 1, byKind: { mid_move: 1 } }); // only m1: m2 is muted, m3's thesis expired
@@ -72,8 +70,8 @@ describe("monitor", () => {
   it("run_failed: pods failed since the last pass, once", async () => {
     await clear();
     await market("m1");
-    await d.db.insert(s.pods).values({ id: "pod_x", conditionId: "m1", status: "failed", trigger: "manual", startedAt: new Date(T - 10 * 60_000) });
-    await d.db.insert(s.pods).values({ id: "pod_ok", conditionId: "m1", status: "done", trigger: "manual", startedAt: new Date(T - 10 * 60_000) });
+    await d.db.pods.insert({ id: "pod_x", conditionId: "m1", status: "failed", trigger: "manual", startedAt: new Date(T - 10 * 60_000) });
+    await d.db.pods.insert({ id: "pod_ok", conditionId: "m1", status: "done", trigger: "manual", startedAt: new Date(T - 10 * 60_000) });
     expect(await run()).toMatchObject({ raised: 1, byKind: { run_failed: 1 } });
     T += 10 * 60_000;
     expect((await run()).raised).toBe(0); // same pod is inside the overlap window but deduped
@@ -83,10 +81,10 @@ describe("monitor", () => {
   it("run_failed: a pod reaped later (old startedAt, status flipped to failed after the last pass) is still alerted, once", async () => {
     await clear();
     await market("m1");
-    await d.db.insert(s.pods).values({ id: "pod_slow", conditionId: "m1", status: "running", trigger: "manual", startedAt: new Date(T - 2 * 24 * H) });
+    await d.db.pods.insert({ id: "pod_slow", conditionId: "m1", status: "running", trigger: "manual", startedAt: new Date(T - 2 * 24 * H) });
     expect((await run()).raised).toBe(0); // first pass: nothing failed yet
     T += 30 * 60_000;
-    await d.db.update(s.pods).set({ status: "failed" }).where(eq(s.pods.id, "pod_slow")); // the research reaper marks it dead
+    await d.db.pods.update("pod_slow", { status: "failed" }); // the research reaper marks it dead
     expect(await run()).toMatchObject({ raised: 1, byKind: { run_failed: 1 } });
     T += 7 * H;
     expect((await run()).raised).toBe(0); // already alerted, even after the cooldown
@@ -151,7 +149,7 @@ describe("monitor", () => {
     expect(init).toMatchObject({ method: "POST", headers: { "content-type": "application/json" } });
     expect(JSON.parse(String(init.body))).toEqual({ text: expect.stringContaining("structural overround") });
     expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(await d.db.select().from(s.alerts).where(eq(s.alerts.kind, "structural"))).toHaveLength(2);
+    expect((await alerts()).filter((a) => a.kind === "structural")).toHaveLength(2);
   });
 
   it("is locked: a concurrent pass is skipped", async () => {

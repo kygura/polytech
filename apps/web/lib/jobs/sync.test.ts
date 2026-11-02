@@ -1,11 +1,9 @@
 import { fakeJudge, fakeRunner } from "@pm/agents";
 import { memoryKv, schema as s } from "@pm/db";
 import { createPm, fakeExchange, type Exchange } from "@pm/pm";
-import { desc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { currentMode, decide, deps, orderUi, expireProposals, kill, propose, read, reconcileJob, rebaseline, setMode, snapshotBooks, subscribe, sweepUniverse, syncFills, screenAll, researchShortlist, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
 delete process.env.NTFY_TOPIC;
 
 const MIN = 60_000;
@@ -24,9 +22,11 @@ const ex: Exchange = {
 let d: Deps;
 const events: { type: string; payload: any }[] = [];
 const big = () => ({ ...d, settings: { ...d.settings, limits: { ...d.settings.limits, perMarket: 1e6, perEvent: 1e6, perCategory: 1e6, totalOpen: 1e6, dailyNotional: 1e6 } } });
-const order = async (id: string) => (await d.db.select().from(s.orders).where(eq(s.orders.id, id)))[0]!;
-const ofProposal = async (id: string) => order((await d.db.select().from(s.proposals).where(eq(s.proposals.id, id)))[0]!.orderId!);
-const pending = () => d.db.select().from(s.proposals).where(eq(s.proposals.status, "pending"));
+const order = async (id: string) => (await d.db.orders.get(id))!;
+const ofProposal = async (id: string) => order((await d.db.proposals.get(id))!.orderId!);
+const pending = () => d.db.proposals.find("status", { status: "pending" });
+const livePositions = () => d.db.positions.find("book", { paper: false });
+const deleteLivePositions = async () => void (await d.db.positions.deleteMany(await d.db.positions.ids("book", { paper: false })));
 /** propose (if none pending) and approve the first pending proposal; returns proposal id */
 async function approveOne() {
   if (!(await pending()).length) await propose(big());
@@ -60,7 +60,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     fx.fill(o.clobOrderId!, o.size / 2, o.limitPrice - 0.005);
     expect(await syncFills(d)).toMatchObject({ fills: 1 });
     expect(await syncFills(d)).toMatchObject({ fills: 0, updated: 0 }); // same trade again: no-op
-    let [pos] = await d.db.select().from(s.positions).where(eq(s.positions.paper, false));
+    let [pos] = await livePositions();
     expect(pos).toMatchObject({ tokenId: o.tokenId, paper: false, closedAt: null });
     expect(pos!.size).toBeCloseTo(o.size / 2, 9);
     expect(await order(o.id)).toMatchObject({ status: "live" });
@@ -71,11 +71,11 @@ describe("fill sync + reconcile (fake exchange)", () => {
     fx.fill(o.clobOrderId!);
     expect(await syncFills(d)).toMatchObject({ fills: 1 });
     expect(await order(o.id)).toMatchObject({ status: "filled" });
-    [pos] = await d.db.select().from(s.positions).where(eq(s.positions.paper, false));
+    [pos] = await livePositions();
     expect(pos!.size).toBeCloseTo(o.size, 9);
     expect(events.filter((e) => e.type === "order.filled")).toHaveLength(2);
     expect(events.filter((e) => e.type === "order.updated").at(-1)!.payload).toMatchObject({ status: "filled", filledShares: o.size });
-    const fills = await d.db.select().from(s.fills).where(eq(s.fills.paper, false));
+    const fills = await d.db.fills.find("book", { paper: false });
     expect(fills.map((f) => f.tradeId).every(Boolean)).toBe(true);
 
     const b = await read.bookLive({ db: d.db, now: d.now });
@@ -99,7 +99,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
   });
 
   it("recon: position drift is a mismatch; stale last run reads 'late'", async () => {
-    const tok = (await d.db.select().from(s.positions).where(eq(s.positions.paper, false)))[0]!.tokenId;
+    const tok = (await livePositions())[0]!.tokenId;
     const real = ex.positions;
     (ex as any).positions = async () => ({ [tok]: 1 });
     expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
@@ -134,7 +134,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect(await syncFills(d)).toMatchObject({ failedUnknown: 1 });
     expect((await order(o.id)).status).toBe("failed_unknown");
     expect(events.some((e) => e.type === "order.error" && e.payload.id === o.id)).toBe(true);
-    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, pid)))[0]).toMatchObject({ status: "failed", error: "ORDER_FAILED_UNKNOWN" });
+    expect(await d.db.proposals.get(pid)).toMatchObject({ status: "failed", error: "ORDER_FAILED_UNKNOWN" });
     expect(events.some((e) => e.type === "proposal.updated" && e.payload.id === pid && e.payload.error === "ORDER_FAILED_UNKNOWN")).toBe(true);
     await syncFills(d);
     expect(places).toBe(before + 1); // the one failed attempt, nothing resent
@@ -144,10 +144,10 @@ describe("fill sync + reconcile (fake exchange)", () => {
   let seqO = 0;
   const mkOrder = async (v: Partial<typeof s.orders.$inferInsert>) => {
     const n = ++seqO;
-    await d.db.insert(s.orders).values({ id: `ord_x${n}`, thesisId: `th_x${n}`, idempotencyKey: `th_x${n}:0`, conditionId: "c", tokenId: "tokX", side: "BUY", limitPrice: 0.4, size: 10, modeAtSend: "L2", paper: false, createdAt: new Date(d.now()), status: "sending", ...v });
+    await d.db.orders.insert({ id: `ord_x${n}`, thesisId: `th_x${n}`, idempotencyKey: `th_x${n}:0`, conditionId: "c", tokenId: "tokX", side: "BUY", limitPrice: 0.4, size: 10, modeAtSend: "L2", paper: false, createdAt: new Date(d.now()), status: "sending", ...v });
     return `ord_x${n}`;
   };
-  const lastRecon = async () => (await d.db.select().from(s.reconciliations).orderBy(desc(s.reconciliations.id)).limit(1))[0]!;
+  const lastRecon = async () => (await d.db.reconciliations.first("byId", {}, { order: "desc" }))!;
 
   it("'matched' order with no trade ever -> failed_unknown after 10 min", async () => {
     const id = await mkOrder({ status: "matched", clobOrderId: "fake-ghost", createdAt: new Date(t - 11 * MIN) });
@@ -196,22 +196,22 @@ describe("fill sync + reconcile (fake exchange)", () => {
   it("rebaseline refused while an order is matched with zero fills, even with ack", async () => {
     const id = await mkOrder({ status: "matched", clobOrderId: "fake-m0" });
     expect(await rebaseline(d, { ack: true })).toEqual({ ok: false, error: expect.stringContaining("matched without fills") });
-    await d.db.update(s.orders).set({ status: "cancelled" }).where(eq(s.orders.id, id));
+    await d.db.orders.update(id, { status: "cancelled" });
   });
 
   it("late SELL fill after settlement corrects realized PnL (sale price replaces payout)", async () => {
-    const m = (await d.db.select().from(s.markets))[0]!, tok = m.yesTokenId!;
-    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
-    await d.db.insert(s.outcomes).values({ conditionId: m.conditionId, result: "YES", resolvedAt: new Date(t) }).onConflictDoNothing();
-    await d.db.insert(s.positions).values({ conditionId: m.conditionId, tokenId: tok, size: 10, avgCost: 0.5, realizedPnl: 5, openedAt: new Date(t), closedAt: new Date(t + 3_600_000), paper: false }); // settled: 10 x (1 - 0.5)
+    const m = (await d.db.markets.all())[0]!, tok = m.yesTokenId!;
+    await deleteLivePositions();
+    await d.db.outcomes.insertIfAbsent({ conditionId: m.conditionId, result: "YES", resolvedAt: new Date(t) });
+    await d.db.positions.insert({ conditionId: m.conditionId, tokenId: tok, size: 10, avgCost: 0.5, realizedPnl: 5, openedAt: new Date(t), closedAt: new Date(t + 3_600_000), paper: false }); // settled: 10 x (1 - 0.5)
     const placed = await fx.place({ tokenId: tok, side: "SELL", price: 0.9, shares: 10, expiresAt: new Date(t + 3_600_000) });
     await mkOrder({ status: "live", side: "SELL", tokenId: tok, conditionId: m.conditionId, limitPrice: 0.9, clobOrderId: placed.orderId });
     fx.fill(placed.orderId, 10, 0.9);
     expect(await syncFills(d)).toMatchObject({ fills: 1 });
-    const [pos] = await d.db.select().from(s.positions).where(eq(s.positions.tokenId, tok));
+    const [pos] = await d.db.positions.find("bookToken", [{ paper: false, tokenId: tok }, { paper: true, tokenId: tok }]);
     expect(pos!.realizedPnl).toBeCloseTo(5 + (9 - 10), 9); // sold at 0.9 instead of paying out 1.0
-    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
-    await d.db.delete(s.outcomes).where(eq(s.outcomes.conditionId, m.conditionId));
+    await deleteLivePositions();
+    await d.db.outcomes.delete(m.conditionId);
   });
 
   it("rebaseline 409s on a lost (failed_unknown) order newer than the baseline, naming count + position diff; ack proceeds", async () => {
@@ -259,9 +259,9 @@ describe("fill sync + reconcile (fake exchange)", () => {
     expect(r).toMatchObject({ mode: "L0", cancelled: openNow, failed: [] });
     expect(await fx.openOrders()).toEqual([]);
     expect(await pending()).toEqual([]);
-    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.error, "KILLED"))).length).toBe(livePending);
+    expect((await d.db.proposals.find("byCreated", {})).filter((p) => p.error === "KILLED").length).toBe(livePending);
     expect(events.some((e) => e.type === "proposal.updated" && e.payload.reason === "KILLED")).toBe(true);
-    expect(await d.db.select().from(s.orders).where(eq(s.orders.status, "live"))).toEqual([]);
+    expect(await d.db.orders.find("bookStatus", [{ paper: false, status: "live" }, { paper: true, status: "live" }])).toEqual([]);
   });
 
   it("kill: cancelAll throws -> still L0, failed lists open orders with scrubbed error", async () => {
@@ -280,7 +280,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
 
   it("3 consecutive order failures auto-downgrade to L0", async () => {
     await setMode(d, "L2", "again");
-    const mk = (i: number, status: string) => d.db.insert(s.orders).values({
+    const mk = (i: number, status: string) => d.db.orders.insert({
       id: `ord_err${i}`, thesisId: `th_err${i}`, idempotencyKey: `th_err${i}:0`, conditionId: "c", tokenId: "tok", side: "BUY", limitPrice: 0.5, size: 1,
       modeAtSend: "L2", status, paper: false, createdAt: new Date(d.now()),
     });
@@ -291,7 +291,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
     await mk(3, "failed_unknown");
     await syncFills(d);
     expect(await currentMode(d.db)).toBe("L0");
-    const ev = (await d.db.select().from(s.autonomyEvents)).at(-1)!;
+    const ev = (await d.db.autonomyEvents.first("byId", {}, { order: "desc" }))!;
     expect(ev).toMatchObject({ reason: "ORDER_ERRORS", actor: "auto-downgrade" });
     await setMode(d, "L2", "again"); // old failures predate this raise: not re-downgraded
     await syncFills(d);
@@ -299,7 +299,7 @@ describe("fill sync + reconcile (fake exchange)", () => {
   });
 
   it("rows but no baseline row: recon writes ok=false 'needs rebaseline', rebaseline clears it", async () => {
-    await d.db.update(s.reconciliations).set({ baseline: false });
+    await d.db.reconciliations.updateMany(await d.db.reconciliations.ids("byId", {}), { baseline: false });
     expect(await reconcileJob(d)).toMatchObject({ status: "mismatch" });
     expect(await lastRecon()).toMatchObject({ ok: false, baseline: false });
     expect((await read.autonomy({ db: d.db, now: d.now })).recon).toMatchObject({ status: "mismatch", detail: "needs rebaseline" });
@@ -308,13 +308,13 @@ describe("fill sync + reconcile (fake exchange)", () => {
   });
 
   it("live settlement: market resolves against a filled BUY -> position closed, loss realized, L2 downgrades on daily loss", async () => {
-    await d.db.delete(s.positions).where(eq(s.positions.paper, false));
-    const m = (await d.db.select().from(s.markets))[0]!;
-    await d.db.insert(s.positions).values({ conditionId: m.conditionId, tokenId: m.yesTokenId!, size: 10, avgCost: 0.5, realizedPnl: 0, openedAt: new Date(t), paper: false });
-    await d.db.insert(s.outcomes).values({ conditionId: m.conditionId, result: "NO", resolvedAt: new Date(t) }).onConflictDoNothing();
+    await deleteLivePositions();
+    const m = (await d.db.markets.all())[0]!;
+    await d.db.positions.insert({ conditionId: m.conditionId, tokenId: m.yesTokenId!, size: 10, avgCost: 0.5, realizedPnl: 0, openedAt: new Date(t), paper: false });
+    await d.db.outcomes.insertIfAbsent({ conditionId: m.conditionId, result: "NO", resolvedAt: new Date(t) });
     await setMode(d, "L2", "test");
     await syncFills(d);
-    const [pos] = await d.db.select().from(s.positions).where(eq(s.positions.conditionId, m.conditionId));
+    const [pos] = await d.db.positions.find("cond", { conditionId: m.conditionId });
     expect(pos).toMatchObject({ realizedPnl: -5 });
     expect(pos!.closedAt).not.toBeNull();
     expect(await propose({ ...d, settings: { ...d.settings, limits: { ...d.settings.limits, dailyLoss: 1 } } })).toMatchObject({ mode: "L0" });
@@ -322,16 +322,16 @@ describe("fill sync + reconcile (fake exchange)", () => {
 
   it("approved proposal whose order is terminal -> sent/failed after sync", async () => {
     await setMode(d, "L2", "test");
-    const [p] = await d.db.select().from(s.proposals).limit(1);
-    const mkP = async (id: string, orderId: string) => { await d.db.update(s.proposals).set({ status: "approved", orderId }).where(eq(s.proposals.id, p!.id)); };
+    const [p] = await d.db.proposals.find("byCreated", {}, { limit: 1 });
+    const mkP = async (id: string, orderId: string) => { await d.db.proposals.update(p!.id, { status: "approved", orderId }); };
     const oid = await mkOrder({ status: "filled", clobOrderId: "fake-done", size: 1 });
     await mkP(p!.id, oid);
     await syncFills(d);
-    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, p!.id)))[0]).toMatchObject({ status: "sent" });
+    expect(await d.db.proposals.get(p!.id)).toMatchObject({ status: "sent" });
     const oid2 = await mkOrder({ status: "cancelled", clobOrderId: "fake-gone" });
     await mkP(p!.id, oid2);
     await syncFills(d);
-    expect((await d.db.select().from(s.proposals).where(eq(s.proposals.id, p!.id)))[0]).toMatchObject({ status: "failed", error: "ORDER_CANCELLED" });
+    expect(await d.db.proposals.get(p!.id)).toMatchObject({ status: "failed", error: "ORDER_CANCELLED" });
   });
 
   it("no exchange: sync and reconcile are no-ops", async () => {
