@@ -9,7 +9,7 @@ let kv: Kv;
 beforeAll(async () => {
   await migrate();
   kv = dbKv(getDb());
-}, 60_000); // PGlite migrate is slow under the full parallel test run
+}, 60_000); // migrate can be slow under the full parallel test run
 
 describe("dbKv (kv table)", () => {
   it("lock: one holder; release only frees our own hold; an expired hold can be taken over", async () => {

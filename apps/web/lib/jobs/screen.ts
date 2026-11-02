@@ -253,8 +253,10 @@ export async function screenAll(d: Deps, opts: { budgetMs?: number; maxLlm?: num
       } satisfies typeof s.screens.$inferInsert];
     });
     // all-or-nothing: latestScreens reads max(ts), so a partial insert would become the truncated "latest" screen.
-    const parts = chunks(out, 500);
-    await d.db.transaction(async (tx) => { for (const c of parts) await tx.insert(s.screens).values(c); });
+    // One batch (a transaction in one request) rather than an interactive transaction: no write lock is held across awaits, which on a
+    // local file would make every other writer fail with SQLITE_BUSY meanwhile.
+    const [head, ...tail] = chunks(out, 500).map((c) => d.db.insert(s.screens).values(c));
+    if (head) await d.db.batch([head, ...tail]);
 
     // market_latest carries the screen output for the DSL / screener: priority, structural kinds, opportunity (sized live theses). Derived data: a failure here must not lose the screens above.
     let latest = true;
