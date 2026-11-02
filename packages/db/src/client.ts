@@ -16,10 +16,13 @@ const migrationsFolder = resolve(here, "../drizzle");
 type Conn = { db?: Db; client?: Client };
 const conn: Conn = ((globalThis as { __pmDb?: Conn }).__pmDb ??= {});
 
-/** True when the app talks to a hosted Turso database (shared by every instance, migrated with `db:migrate`, not on start). */
-export const hostedDb = (): boolean => !!process.env.TURSO_DATABASE_URL;
+/**
+ * True when the app talks to a hosted Turso database (shared by every instance, migrated by the production build, not on start).
+ * DB_FILE wins over TURSO_DATABASE_URL: tests set it (`:memory:`), so exported or pulled Turso credentials can never point a test run at production.
+ */
+export const hostedDb = (): boolean => !process.env.DB_FILE && !!process.env.TURSO_DATABASE_URL;
 
-/** The libSQL URL in use: TURSO_DATABASE_URL, else DB_FILE (a path, or `:memory:` for tests), else <repo>/.data/polytech.db. */
+/** DB_FILE (a path, a `file:` URL or `:memory:`), else <repo>/.data/polytech.db. */
 function localUrl(): string {
   const f = process.env.DB_FILE ?? resolve(here, "../../../.data/polytech.db");
   if (f === ":memory:" || f.startsWith("file:")) return f;
@@ -28,14 +31,15 @@ function localUrl(): string {
 }
 
 /**
- * TURSO_DATABASE_URL (+ TURSO_AUTH_TOKEN) → hosted Turso over HTTP; else a local libSQL file (DB_FILE overrides, `:memory:` for tests).
- * libsql:// is rewritten to https:// so serverless instances use stateless HTTP requests instead of holding a WebSocket each.
+ * Hosted Turso (TURSO_DATABASE_URL + TURSO_AUTH_TOKEN) when hostedDb(), else a local libSQL file. The Node client sends `libsql://` URLs over HTTPS
+ * (plain HTTP with `?tls=0`): stateless requests, no WebSocket held per serverless instance.
+ * Local files get a busy timeout: the client pools connections and the libSQL default (0) fails a write at once when another holds the lock.
  */
 export function getDb(): Db {
   if (conn.db) return conn.db;
-  const hosted = process.env.TURSO_DATABASE_URL;
-  const url = hosted ? hosted.replace(/^libsql:\/\//, "https://") : localUrl();
-  const client = createClient({ url, authToken: hosted ? process.env.TURSO_AUTH_TOKEN : undefined });
+  const client = hostedDb()
+    ? createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN })
+    : createClient({ url: localUrl(), timeout: 5_000 });
   conn.client = client;
   return (conn.db = drizzle({ client, schema }));
 }
