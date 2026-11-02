@@ -5,10 +5,11 @@
 # The alert pass (monitor job) also runs on every beat; deduped server-side, so extra beats are cheap.
 name: scout
 
-# Paused: schedule off while the project is paused (README.md, Paused). To resume, restore:
-#   schedule:
-#     - cron: "*/30 * * * *" # ~1,440 runner-min/month, inside the 2,000 free for a private repo
+# Every 2 h: the full-pass cadence (FULL_PASS_MS), so every beat runs the full pass and the data never reads as stale (STALE_MS = 2.5 h).
+# ~360 runner-min/month (12 one-minute runs a day), well inside the 2,000 free for a private repo. Odd minute to dodge the top-of-hour queue.
 on:
+  schedule:
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 jobs:
