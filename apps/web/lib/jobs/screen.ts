@@ -3,7 +3,7 @@ import {
   crowd, findStructural, mirrorPairs, pass1, screen, sizeTrade, sortAsc, structuralFlagsByMarket, takerFeePerShare,
   type Pass1Reason, type StructuralGroup, type StructuralKind, type StructuralMarket, type Tier,
 } from "@pm/core";
-import { pruneScreens, schema as s, type Db } from "@pm/db";
+import { newestSnapshots, pruneScreens, schema as s, type Db } from "@pm/db";
 import { and, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
 import { DAY, addSpend, chunks, feeExpOf, feeOf, groupBy, ruleText, toMarket, toSnap, today, withLock, type Deps } from "./deps";
 import { publish } from "./events";
@@ -54,9 +54,7 @@ type SnapRow = typeof s.snapshots.$inferSelect;
  */
 export const latestSnaps = async (db: Db, ids?: string[]) => {
   const [rows, seen] = await Promise.all([
-    db.selectDistinctOn([s.snapshots.conditionId]).from(s.snapshots)
-      .where(ids ? inArray(s.snapshots.conditionId, ids) : undefined)
-      .orderBy(s.snapshots.conditionId, desc(s.snapshots.ts)),
+    newestSnapshots(db, ids),
     db.select({ c: s.marketLatest.conditionId, ts: s.marketLatest.ts }).from(s.marketLatest).where(ids ? inArray(s.marketLatest.conditionId, ids) : undefined),
   ]);
   const at = new Map(seen.map((x) => [x.c, x.ts]));

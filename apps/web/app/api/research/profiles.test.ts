@@ -2,7 +2,7 @@ import { schema as s } from "@pm/db";
 import { ProfileFilterSchema, DEFAULT_STEERING } from "@pm/core";
 import { beforeAll, describe, expect, it } from "vitest";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const NOW = Date.parse("2026-10-15T12:00:00Z"), DAY = 86_400_000;
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });

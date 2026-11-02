@@ -1,8 +1,9 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { sql } from "drizzle-orm";
-import { getDb, type Db } from "./client";
+import { getDb, hostedDb, type Db } from "./client";
 import { kvStore } from "./schema";
+import { nowMs } from "./sql";
 
 export interface Kv {
   /** Returns a release fn, or null if held. Auto-expires after ttlMs. */
@@ -73,34 +74,34 @@ export function upstashKv(redis: Redis): Kv {
 }
 
 /**
- * kv on the app's own Postgres (the `kv` table): shared across instances like Upstash, no extra service. Time is the db clock.
- * lock = insert-or-take-over-expired (atomic per statement), released only by its owner. rateLimit = fixed-window counter.
+ * kv on the app's own database (the `kv` table): shared across instances like Upstash, no extra service. Time is the db clock.
+ * lock = insert-or-take-over-expired (one upsert statement, atomic), released only by its owner. rateLimit = fixed-window counter.
  */
-export function pgKv(db: Db): Kv {
+export function dbKv(db: Db): Kv {
   const k = kvStore;
   let calls = 0;
-  const prune = () => (++calls % 50 ? undefined : db.delete(k).where(sql`${k.expiresAt} <= now()`).then(() => undefined, () => undefined));
-  const until = (ttlMs: number) => sql`now() + ${`${Math.max(1, Math.round(ttlMs))} milliseconds`}::interval`;
+  const prune = () => (++calls % 50 ? undefined : db.delete(k).where(sql`${k.expiresAt} <= ${nowMs}`).then(() => undefined, () => undefined));
+  const until = (ttlMs: number) => sql`(${nowMs} + ${Math.max(1, Math.round(ttlMs))})`;
   return {
     async lock(key, ttlMs) {
       void prune();
       const id = `lock:${key}`, owner = crypto.randomUUID();
       const got = await db.insert(k).values({ key: id, value: owner, expiresAt: until(ttlMs) as never })
-        .onConflictDoUpdate({ target: k.key, set: { value: sql`excluded.value`, expiresAt: sql`excluded.expires_at` }, setWhere: sql`${k.expiresAt} <= now()` })
+        .onConflictDoUpdate({ target: k.key, set: { value: sql`excluded.value`, expiresAt: sql`excluded.expires_at` }, setWhere: sql`${k.expiresAt} <= ${nowMs}` })
         .returning({ key: k.key });
       if (!got.length) return null;
-      return async () => { await db.delete(k).where(sql`${k.key} = ${id} and ${k.value} = ${JSON.stringify(owner)}::jsonb`); };
+      return async () => { await db.delete(k).where(sql`${k.key} = ${id} and ${k.value} = ${JSON.stringify(owner)}`); };
     },
     async rateLimit(key, limit, windowMs) {
       const slot = Math.floor(Date.now() / windowMs), id = `rl:${limit}:${windowMs}:${key}:${slot}`;
       const [row] = await db.insert(k).values({ key: id, value: 1, expiresAt: until(windowMs * 2) as never })
-        .onConflictDoUpdate({ target: k.key, set: { value: sql`to_jsonb((${k.value} #>> '{}')::bigint + 1)` } })
-        .returning({ n: sql<number>`(${k.value} #>> '{}')::bigint` });
+        .onConflictDoUpdate({ target: k.key, set: { value: sql`cast(cast(${k.value} as integer) + 1 as text)` } })
+        .returning({ n: sql<number>`cast(${k.value} as integer)` });
       const n = Number(row?.n ?? limit + 1);
       return { ok: n <= limit, remaining: Math.max(0, limit - n) };
     },
     async get<T>(key: string) {
-      const [row] = await db.select({ v: k.value }).from(k).where(sql`${k.key} = ${key} and (${k.expiresAt} is null or ${k.expiresAt} > now())`);
+      const [row] = await db.select({ v: k.value }).from(k).where(sql`${k.key} = ${key} and (${k.expiresAt} is null or ${k.expiresAt} > ${nowMs})`);
       return (row?.v as T | undefined) ?? null;
     },
     async set(key, value, ttlMs) {
@@ -118,11 +119,11 @@ export function getKv(): Kv {
   const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
   if (url && token) return (kvSlot.kv = upstashKv(new Redis({ url, token })));
-  // hosted Postgres is shared by every instance: the kv table works there too
-  if (process.env.DATABASE_URL) return (kvSlot.kv = pgKv(getDb()));
+  // the hosted database is shared by every instance: the kv table works there too
+  if (hostedDb()) return (kvSlot.kv = dbKv(getDb()));
   // Serverless instances don't share memory, so rate limits/locks would be per-instance: refuse.
   if (process.env.NODE_ENV === "production" && process.env.VERCEL) {
-    throw new Error("DATABASE_URL, UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
+    throw new Error("TURSO_DATABASE_URL, UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN required in production on Vercel (memory kv is per-instance)");
   }
   if (process.env.NODE_ENV === "production") console.warn("kv: Upstash not configured, using in-memory kv (single process only)");
   return (kvSlot.kv = memoryKv());

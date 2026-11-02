@@ -6,7 +6,7 @@ import { deps, screenAll, snapshotBooks, sweepUniverse, type Deps } from "./inde
 import { detectStructural, heuristicR, preRank, smallCapTooBusy, type Listed } from "./screen";
 import { DEFAULT_APP_SETTINGS } from "./settings";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 type Rows = Parameters<typeof detectStructural>[0];
 const row = (id: string, o: { q?: string; end?: number; group?: string; bid: number; ask: number }) => ({

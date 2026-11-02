@@ -2,7 +2,7 @@ import { beforeAll, expect, it } from "vitest";
 import { getDb, insertSnapshots, migrate, pruneMarkets, pruneScreens, pruneSnapshots, referencedMarkets, schema as s } from "./index";
 
 beforeAll(async () => {
-  process.env.PGLITE_DIR = "memory://";
+  process.env.DB_FILE = ":memory:";
   await migrate();
 }, 60_000);
 

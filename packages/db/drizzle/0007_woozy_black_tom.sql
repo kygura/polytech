@@ -1,1 +1,0 @@
-ALTER TABLE "markets" ADD COLUMN "tick_size" double precision;

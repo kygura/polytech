@@ -5,7 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { calibrateNightly, deps, monitor, read, researchShortlist, screenAll, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 // SPEC Rev 7 "Done": with PM_FIXTURES and no API keys a sweep -> snapshot -> screen -> monitor cycle fills market_latest and alerts.
 // Fixtures: 39 open markets, a neg-risk ladder that is a structural arb, holders/trades for a subset.

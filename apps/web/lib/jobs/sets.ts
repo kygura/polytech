@@ -1,5 +1,5 @@
 import { checkSet, setLegPlan, unwindPlan, type Mode, type SetInputLeg } from "@pm/core";
-import { schema as s } from "@pm/db";
+import { newestPer, schema as s } from "@pm/db";
 import { scrub, type ImmediateResult } from "@pm/pm";
 import { and, desc, eq, gt, gte, inArray, lt, or } from "drizzle-orm";
 import { safeEqual } from "../auth";
@@ -90,8 +90,9 @@ export async function proposeSets(d: Deps) {
     if (!LIVE.includes(mode) || !d.exchange) return res;
     if (await halted(d)) return (skip("HALTED"), res);
 
-    const scr = await db.selectDistinctOn([s.screens.conditionId]).from(s.screens).where(and(eq(s.screens.structuralFlag, true), gte(s.screens.ts, new Date(now - 60 * MIN))))
-      .orderBy(s.screens.conditionId, desc(s.screens.ts));
+    const scr = await db.select().from(s.screens)
+      .where(inArray(s.screens.id, newestPer(db, s.screens, and(eq(s.screens.structuralFlag, true), gte(s.screens.ts, new Date(now - 60 * MIN))))))
+      .orderBy(s.screens.conditionId);
     const det = new Map<string, { kind: "buy-all" | "sell-all"; legs: string[] }>();
     for (const r of scr) {
       const x = r.structuralDetail as StructDetail | null;

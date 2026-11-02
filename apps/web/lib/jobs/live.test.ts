@@ -5,7 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { decide, deps, downgradeOn, expireProposals, exposureOf, kill, orderUi, paperBook, propose, read, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 process.env.NTFY_TOPIC = "pm-test";
 process.env.APP_URL = "https://app.test";
 

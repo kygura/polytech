@@ -6,7 +6,7 @@ import { asc, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { POD_WINDOW_MS, deps, latestSnaps, read, requestCancel, researchMarket, runProfile, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 let d: Deps, markets: string[];
 const events: string[] = [];

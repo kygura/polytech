@@ -1,9 +1,20 @@
 import { sql } from "drizzle-orm";
-import { bigserial, boolean, date, doublePrecision as dp, index, integer, jsonb, pgTable, text, timestamp, primaryKey, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, integer, primaryKey, real as dp, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { nowMs } from "./sql";
 
-const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+// SQLite (libSQL / Turso) column helpers. Times are epoch milliseconds, read back as Date; JSON is text, read back parsed;
+// booleans are 0/1. Time defaults are SQL expressions on the database clock (like Postgres defaultNow()).
+const ts = (name: string) => integer(name, { mode: "timestamp_ms" });
+const boolean = (name: string) => integer(name, { mode: "boolean" });
+const jsonb = (name: string) => text(name, { mode: "json" });
+/** Auto-increment integer key (was bigserial). */
+const serial = (name: string) => integer(name).primaryKey({ autoIncrement: true });
+/** Random UUID text key (was uuid defaultRandom), generated in the app. */
+const uuidPk = (name: string) => text(name).primaryKey().$defaultFn(() => crypto.randomUUID());
+/** YYYY-MM-DD (was date). */
+const date = (name: string) => text(name);
 
-export const markets = pgTable("markets", {
+export const markets = sqliteTable("markets", {
   conditionId: text("condition_id").primaryKey(),
   eventId: text("event_id"),
   question: text("question").notNull(),
@@ -24,12 +35,12 @@ export const markets = pgTable("markets", {
   heuristicR: dp("heuristic_r"), // rules-text cue score from the sweep (screen R without the LLM); the text itself is fetched from Gamma on demand
   resolutionSource: text("resolution_source"), // official_data | scheduled_event | media_report | subjective | unknown
   negRiskAugmented: boolean("neg_risk_augmented").notNull().default(false),
-}).enableRLS();
+});
 
 /** One row per market, updated in place by the snapshot job. */
-export const marketLatest = pgTable("market_latest", {
+export const marketLatest = sqliteTable("market_latest", {
   conditionId: text("condition_id").primaryKey(),
-  ts: ts("ts").notNull().defaultNow(),
+  ts: ts("ts").notNull().default(nowMs),
   mid: dp("mid"),
   bestBid: dp("best_bid"),
   bestAsk: dp("best_ask"),
@@ -52,28 +63,28 @@ export const marketLatest = pgTable("market_latest", {
   priority: dp("priority"), // latest screen score
   structural: jsonb("structural").$type<string[]>(), // structural kinds this market is in
   opportunity: jsonb("opportunity").$type<{ side: string; edge: number; stake: number; o: number; contrarian: boolean } | null>(),
-}).enableRLS();
+});
 
-export const views = pgTable("views", {
+export const views = sqliteTable("views", {
   id: text("id").primaryKey(),
   name: text("name").notNull().unique(),
   query: text("query").notNull(),
   columns: jsonb("columns").$type<string[]>().notNull().default([]),
-  createdAt: ts("created_at").notNull().defaultNow(),
-}).enableRLS();
+  createdAt: ts("created_at").notNull().default(nowMs),
+});
 
-export const alerts = pgTable("alerts", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const alerts = sqliteTable("alerts", {
+  id: serial("id"),
   conditionId: text("condition_id"),
   kind: text("kind").notNull(), // mid_move | catalyst_passed | new_candidate | structural | run_failed
   message: text("message").notNull(),
   data: jsonb("data").$type<Record<string, unknown>>(),
-  createdAt: ts("created_at").notNull().defaultNow(),
+  createdAt: ts("created_at").notNull().default(nowMs),
   ackedAt: ts("acked_at"),
-}, (t) => [index("alerts_acked_created").on(t.ackedAt, t.createdAt)]).enableRLS(); // dedupe in code: same kind + market not re-raised within 6 h
+}, (t) => [index("alerts_acked_created").on(t.ackedAt, t.createdAt)]); // dedupe in code: same kind + market not re-raised within 6 h
 
 /** Per-thesis calibration row; filled by the calibrate job. */
-export const journal = pgTable("journal", {
+export const journal = sqliteTable("journal", {
   thesisId: text("thesis_id").primaryKey(),
   conditionId: text("condition_id").notNull(),
   category: text("category"),
@@ -94,12 +105,12 @@ export const journal = pgTable("journal", {
   drift24h: dp("drift_24h"),
   drift7d: dp("drift_7d"),
   paperPnl: dp("paper_pnl"),
-}).enableRLS();
+});
 
-export const snapshots = pgTable("snapshots", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const snapshots = sqliteTable("snapshots", {
+  id: serial("id"),
   conditionId: text("condition_id").notNull(),
-  ts: ts("ts").notNull().defaultNow(),
+  ts: ts("ts").notNull().default(nowMs),
   mid: dp("mid"),
   bestBid: dp("best_bid"),
   bestAsk: dp("best_ask"),
@@ -110,12 +121,12 @@ export const snapshots = pgTable("snapshots", {
   lastTradeTs: ts("last_trade_ts"),
   // YES-token levels kept for sizing/fills + 24h net taker flow (-1..1) for crowding
   book: jsonb("book").$type<{ bids: { price: number; size: number }[]; asks: { price: number; size: number }[]; netFlow: number; flowUnknown?: boolean }>(),
-}, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]).enableRLS();
+}, (t) => [index("snapshots_cond_ts").on(t.conditionId, t.ts)]);
 
-export const screens = pgTable("screens", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const screens = sqliteTable("screens", {
+  id: serial("id"),
   conditionId: text("condition_id").notNull(),
-  ts: ts("ts").notNull().defaultNow(),
+  ts: ts("ts").notNull().default(nowMs),
   r: dp("r"),
   i: dp("i"),
   l: dp("l"),
@@ -125,12 +136,12 @@ export const screens = pgTable("screens", {
   tier: text("tier"),
   structuralFlag: boolean("structural_flag").notNull().default(false),
   structuralDetail: jsonb("structural_detail").$type<Record<string, unknown>>(),
-}, (t) => [index("screens_cond_ts").on(t.conditionId, t.ts)]).enableRLS();
+}, (t) => [index("screens_cond_ts").on(t.conditionId, t.ts)]);
 
-export const pods = pgTable("pods", {
+export const pods = sqliteTable("pods", {
   id: text("id").primaryKey(),
   conditionId: text("condition_id").notNull(),
-  startedAt: ts("started_at").notNull().defaultNow(),
+  startedAt: ts("started_at").notNull().default(nowMs),
   status: text("status").notNull().default("running"), // running | ... | cancelled
   trigger: text("trigger").notNull(),
   costSandboxS: dp("cost_sandbox_s").notNull().default(0),
@@ -139,20 +150,20 @@ export const pods = pgTable("pods", {
   cancelRequestedAt: ts("cancel_requested_at"),
   stage: text("stage"), // rules | agents | judge | sizing | done
   error: text("error"), // why a failed pod failed (reason + scrubbed message), shown on the research desk
-}).enableRLS();
+});
 
 /** Cheap pre-research verdict per market: primitive rules first, then a Haiku read of the question and rules. Newest row per market wins. */
-export const triage = pgTable("triage", {
+export const triage = sqliteTable("triage", {
   conditionId: text("condition_id").primaryKey(),
   verdict: text("verdict").notNull(), // research | skip
   score: dp("score").notNull(), // 0..1, how much public research can move fair value
   reason: text("reason").notNull(),
   failedRules: jsonb("failed_rules").$type<string[]>().notNull().default([]), // primitive rules that failed; non-empty = skipped without a model call
   model: text("model"), // null when the rules alone decided
-  createdAt: ts("created_at").notNull().defaultNow(),
-}).enableRLS();
+  createdAt: ts("created_at").notNull().default(nowMs),
+});
 
-export const researchProfiles = pgTable("research_profiles", {
+export const researchProfiles = sqliteTable("research_profiles", {
   id: text("id").primaryKey(),
   name: text("name").notNull().unique(),
   enabled: boolean("enabled").notNull().default(false),
@@ -160,12 +171,12 @@ export const researchProfiles = pgTable("research_profiles", {
   steering: jsonb("steering").$type<Record<string, unknown>>().notNull(),
   everyMin: integer("every_min"),
   lastRunAt: ts("last_run_at"),
-  createdAt: ts("created_at").notNull().defaultNow(),
-  updatedAt: ts("updated_at").notNull().defaultNow(),
-}).enableRLS();
+  createdAt: ts("created_at").notNull().default(nowMs),
+  updatedAt: ts("updated_at").notNull().default(nowMs),
+});
 
-export const agentRuns = pgTable("agent_runs", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const agentRuns = sqliteTable("agent_runs", {
+  id: serial("id"),
   podId: text("pod_id").notNull(),
   role: text("role").notNull(),
   model: text("model").notNull(),
@@ -176,21 +187,21 @@ export const agentRuns = pgTable("agent_runs", {
   startedAt: ts("started_at"),
   finishedAt: ts("finished_at"),
   toolCalls: jsonb("tool_calls").$type<{ ts: number; name: string; input: string; ok: boolean }[]>(), // input <= 500 chars, capped at 200 entries
-}).enableRLS();
+});
 
-export const evidence = pgTable("evidence", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const evidence = sqliteTable("evidence", {
+  id: serial("id"),
   podId: text("pod_id").notNull(),
   agentRole: text("agent_role").notNull(),
   url: text("url").notNull(),
   quote: text("quote").notNull(),
   publishedAt: ts("published_at"),
-  retrievedAt: ts("retrieved_at").notNull().defaultNow(),
+  retrievedAt: ts("retrieved_at").notNull().default(nowMs),
   claim: text("claim").notNull(),
   direction: integer("direction").notNull(), // +1 / -1
-}).enableRLS();
+});
 
-export const theses = pgTable("theses", {
+export const theses = sqliteTable("theses", {
   id: text("id").primaryKey(),
   conditionId: text("condition_id").notNull(),
   podId: text("pod_id").notNull(),
@@ -204,21 +215,21 @@ export const theses = pgTable("theses", {
   rank: dp("rank"),
   catalysts: jsonb("catalysts").$type<string[]>().notNull().default([]),
   killCriteria: jsonb("kill_criteria").$type<string[]>().notNull().default([]),
-  createdAt: ts("created_at").notNull().defaultNow(),
+  createdAt: ts("created_at").notNull().default(nowMs),
   expiresAt: ts("expires_at"),
   // thesis text, YES-side pYes/pMidYes, k, shares, payoff, expectedProfit, daysLeft, capped, trigger
   detail: jsonb("detail").$type<Record<string, unknown>>(),
-}, (t) => [index("theses_cond").on(t.conditionId)]).enableRLS();
+}, (t) => [index("theses_cond").on(t.conditionId)]);
 
-export const outcomes = pgTable("outcomes", {
+export const outcomes = sqliteTable("outcomes", {
   conditionId: text("condition_id").primaryKey(),
   resolvedAt: ts("resolved_at").notNull(),
   result: text("result").notNull(),
   brier: dp("brier"),
   logLoss: dp("log_loss"),
-}).enableRLS();
+});
 
-export const orders = pgTable("orders", {
+export const orders = sqliteTable("orders", {
   id: text("id").primaryKey(),
   thesisId: text("thesis_id").notNull(),
   idempotencyKey: text("idempotency_key").notNull().unique(),
@@ -234,37 +245,37 @@ export const orders = pgTable("orders", {
   expiresAt: ts("expires_at"),
   paper: boolean("paper").notNull().default(true),
   attempt: integer("attempt").notNull().default(0), // live key = `${thesisId}:${attempt}`; set legs: `set:${setId}:${leg}` / `set:${setId}:u${leg}` (unwind)
-  createdAt: ts("created_at").notNull().defaultNow(),
-  setId: uuid("set_id").references(() => proposalSets.id), // neg-risk set leg; thesisId = `set:${setId}` (sets are not theses)
-  proposalId: uuid("proposal_id"), // single-leg order: the proposal that sent it (no FK: proposals.order_id already points back)
-}).enableRLS();
+  createdAt: ts("created_at").notNull().default(nowMs),
+  setId: text("set_id").references(() => proposalSets.id), // neg-risk set leg; thesisId = `set:${setId}` (sets are not theses)
+  proposalId: text("proposal_id"), // single-leg order: the proposal that sent it (no FK: proposals.order_id already points back)
+});
 
-export const fills = pgTable("fills", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const fills = sqliteTable("fills", {
+  id: serial("id"),
   orderId: text("order_id").notNull(),
-  ts: ts("ts").notNull().defaultNow(),
+  ts: ts("ts").notNull().default(nowMs),
   price: dp("price").notNull(),
   size: dp("size").notNull(),
   fee: dp("fee").notNull().default(0),
   txHash: text("tx_hash"),
   paper: boolean("paper").notNull().default(true),
   tradeId: text("trade_id").unique(), // live exchange trade id; null for paper (multiple nulls allowed)
-}).enableRLS();
+});
 
-export const positions = pgTable("positions", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
+export const positions = sqliteTable("positions", {
+  id: serial("id"),
   conditionId: text("condition_id").notNull(),
   tokenId: text("token_id").notNull(),
   size: dp("size").notNull(),
   avgCost: dp("avg_cost").notNull(),
   realizedPnl: dp("realized_pnl").notNull().default(0),
-  openedAt: ts("opened_at").notNull().defaultNow(),
+  openedAt: ts("opened_at").notNull().default(nowMs),
   closedAt: ts("closed_at"),
   paper: boolean("paper").notNull().default(true),
-}).enableRLS();
+});
 
 /** Working manual paper orders: a limit that did not fill on arrival rests here; a stop waits for its trigger. Fills land in orders/fills/positions. */
-export const paperOrders = pgTable("paper_orders", {
+export const paperOrders = sqliteTable("paper_orders", {
   id: text("id").primaryKey(),
   conditionId: text("condition_id").notNull(),
   tokenId: text("token_id").notNull(),
@@ -278,50 +289,50 @@ export const paperOrders = pgTable("paper_orders", {
   filledShares: dp("filled_shares").notNull().default(0),
   status: text("status").notNull().default("working"), // working | filled | cancelled
   reason: text("reason"), // why it was cancelled
-  createdAt: ts("created_at").notNull().defaultNow(),
+  createdAt: ts("created_at").notNull().default(nowMs),
   triggeredAt: ts("triggered_at"),
   bookTs: ts("book_ts"), // the book it last looked at: the next fill or trigger check needs a newer one (a snapshot's levels count once)
   closedAt: ts("closed_at"),
-}, (t) => [index("paper_orders_status_idx").on(t.status, t.conditionId)]).enableRLS();
+}, (t) => [index("paper_orders_status_idx").on(t.status, t.conditionId)]);
 
-export const autonomyEvents = pgTable("autonomy_events", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  ts: ts("ts").notNull().defaultNow(),
+export const autonomyEvents = sqliteTable("autonomy_events", {
+  id: serial("id"),
+  ts: ts("ts").notNull().default(nowMs),
   fromMode: text("from_mode").notNull(),
   toMode: text("to_mode").notNull(),
   scope: text("scope").notNull().default("global"), // global | category:<name>
   reason: text("reason").notNull(),
   actor: text("actor").notNull(), // user | auto-downgrade | kill
-}).enableRLS();
+});
 
 // Extras the UI/actions need beyond SPEC's 12 tables.
-export const settings = pgTable("settings", {
+export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey().default(1), // single row
   data: jsonb("data").notNull(),
-}).enableRLS();
+});
 
-export const marketFlags = pgTable("market_flags", {
+export const marketFlags = sqliteTable("market_flags", {
   conditionId: text("condition_id").primaryKey(),
   pinned: boolean("pinned").notNull().default(false),
   muted: boolean("muted").notNull().default(false),
-}).enableRLS();
+});
 
-export const spend = pgTable("spend", {
+export const spend = sqliteTable("spend", {
   day: date("day").primaryKey(),
   anthropicUsd: dp("anthropic_usd").notNull().default(0),
   exaCalls: integer("exa_calls").notNull().default(0),
   sandboxS: dp("sandbox_s").notNull().default(0),
-}).enableRLS();
+});
 
-export const rrCache = pgTable("rr_cache", {
+export const rrCache = sqliteTable("rr_cache", {
   conditionId: text("condition_id").notNull(),
   rulesHash: text("rules_hash").notNull(),
   r: dp("r").notNull(),
   detail: jsonb("detail"),
-}, (t) => [primaryKey({ columns: [t.conditionId, t.rulesHash] })]).enableRLS();
+}, (t) => [primaryKey({ columns: [t.conditionId, t.rulesHash] })]);
 
-export const proposals = pgTable("proposals", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const proposals = sqliteTable("proposals", {
+  id: uuidPk("id"),
   thesisId: text("thesis_id").notNull(),
   conditionId: text("condition_id").notNull(),
   tokenId: text("token_id").notNull(),
@@ -332,7 +343,7 @@ export const proposals = pgTable("proposals", {
   limitPrice: dp("limit_price").notNull(),
   expectedProfit: dp("expected_profit").notNull(),
   priceAtProposal: dp("price_at_proposal").notNull(),
-  createdAt: ts("created_at").notNull().defaultNow(),
+  createdAt: ts("created_at").notNull().default(nowMs),
   expiresAt: ts("expires_at").notNull(),
   status: text("status").notNull().default("pending"), // pending | approved | rejected | expired | sent | failed
   decidedAt: ts("decided_at"),
@@ -345,14 +356,14 @@ export const proposals = pgTable("proposals", {
   exitReason: text("exit_reason"), // kind=exit: killed | flipped
 }, (t) => [
   index("proposals_status").on(t.status),
-  uniqueIndex("proposals_one_pending_per_thesis").on(t.thesisId).where(sql`${t.status} = 'pending'`),
-]).enableRLS();
+  uniqueIndex("proposals_one_pending_per_thesis").on(t.thesisId).where(sql`status = 'pending'`),
+]);
 
 export type SetLegRow = { conditionId: string; token: string; shares: number; limit: number; price: number }; // limit = FOK cap, price = touch at proposal
 
 /** One neg-risk set = one approval, one risk check (build 3 decision 5). Legs live here, not as proposal rows, so single-leg decide/expire can never act on a leg. */
-export const proposalSets = pgTable("proposal_sets", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const proposalSets = sqliteTable("proposal_sets", {
+  id: uuidPk("id"),
   eventId: text("event_id").notNull(), // neg-risk group
   kind: text("kind").notNull(), // buy-all | sell-all
   legs: jsonb("legs").$type<SetLegRow[]>().notNull(), // send order (thinnest first)
@@ -360,7 +371,7 @@ export const proposalSets = pgTable("proposal_sets", {
   totalCost: dp("total_cost").notNull(),
   edge: dp("edge").notNull(), // worst-case locked profit USD at the caps, after fees (= expected profit)
   status: text("status").notNull().default("pending"), // pending | sending | filled | unwinding | unwound | failed | flagged | acknowledged | rejected | expired
-  createdAt: ts("created_at").notNull().defaultNow(),
+  createdAt: ts("created_at").notNull().default(nowMs),
   expiresAt: ts("expires_at").notNull(),
   decidedAt: ts("decided_at"),
   decidedVia: text("decided_via"), // web | tui | push
@@ -371,23 +382,23 @@ export const proposalSets = pgTable("proposal_sets", {
   fallbackReason: text("fallback_reason"), // L3 only: why the set needs approval (STRUCTURAL_AUTO_OFF | ...)
 }, (t) => [
   index("proposal_sets_status").on(t.status),
-  uniqueIndex("proposal_sets_one_pending_per_event").on(t.eventId).where(sql`${t.status} = 'pending'`),
-]).enableRLS();
+  uniqueIndex("proposal_sets_one_pending_per_event").on(t.eventId).where(sql`status = 'pending'`),
+]);
 
-export const reconciliations = pgTable("reconciliations", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  at: ts("at").notNull().defaultNow(),
+export const reconciliations = sqliteTable("reconciliations", {
+  id: serial("id"),
+  at: ts("at").notNull().default(nowMs),
   ok: boolean("ok").notNull(),
   baseline: boolean("baseline").notNull().default(false),
   positions: jsonb("positions").$type<Record<string, number>>().notNull().default({}),
   usdcLedger: dp("usdc_ledger").notNull(),
   usdcExchange: dp("usdc_exchange").notNull(),
   mismatches: jsonb("mismatches").$type<{ key: string; ledger: number; exchange: number }[]>().notNull().default([]),
-}).enableRLS();
+});
 
-/** Shared kv for serverless instances (locks, rate limits, freshness marks) when no Upstash store is configured. `value` is JSON; expired rows are ignored and pruned lazily. */
-export const kvStore = pgTable("kv", {
+/** Shared kv for serverless instances (locks, rate limits, freshness marks) when no Upstash store is configured. `value` is JSON text; expired rows are ignored and pruned lazily. */
+export const kvStore = sqliteTable("kv", {
   key: text("key").primaryKey(),
   value: jsonb("value"),
   expiresAt: ts("expires_at"),
-}).enableRLS();
+});

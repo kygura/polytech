@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, monitor, subscribe, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const H = 3_600_000;
 let T = Date.parse("2026-10-15T12:00:00Z");

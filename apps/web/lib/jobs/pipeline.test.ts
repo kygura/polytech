@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 import { calibrateNightly, createProfile, deps, runProfile, kill, paperBook, read, researchMarket, researchShortlist, screenAll, setMode, snapshotBooks, subscribe, sweepUniverse, type Deps } from "./index";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 const cid = (k: string) => "0x" + createHash("sha256").update("cond:" + k).digest("hex"); // gen-fixtures.ts
 const ids = (ks: string[]) => ks.map(cid);
 

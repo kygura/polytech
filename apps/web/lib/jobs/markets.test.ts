@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { dbReady } from "./deps";
 import { change24h, compileFilter, listMarkets, topCategories } from "./markets";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const NOW = Date.UTC(2026, 9, 20);
 const compile = (q: string) => {

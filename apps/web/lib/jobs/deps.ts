@@ -1,6 +1,6 @@
 import { anthropicJudge, anthropicTriage, modelFor, classifyR, disabledJudge, fakeJudge, heuristicTriage, isProd, pickRunner, type AgentRunner, type RunnerKind, type Judge, type Triage } from "@pm/agents";
 import { feeExponentOf, feeRateFor, type Market, type Snapshot } from "@pm/core";
-import { getDb, getKv, migrate, schema as s, type Db, type Kv } from "@pm/db";
+import { getDb, getKv, hostedDb, migrate, schema as s, type Db, type Kv } from "@pm/db";
 import { createPm, exchangeFromEnv, type Exchange, type Pm } from "@pm/pm";
 import { sql } from "drizzle-orm";
 import { getSettings, type AppSettings } from "./settings";
@@ -45,9 +45,9 @@ export function envExchange(): Exchange | null {
 
 // globalThis: dev RSC and route-handler bundles are separate module instances; one migrate promise per process (see packages/db/src/client.ts)
 const slot = ((globalThis as { __pmReady?: { p?: Promise<Db> } }).__pmReady ??= {});
-/** getDb(), migrated once per process when running on local PGlite (a hosted DATABASE_URL is migrated with `db:migrate`). Cache cleared on reject. */
+/** getDb(), migrated once per process when running on a local libSQL file (hosted Turso is migrated with `db:migrate`). Cache cleared on reject. */
 export const dbReady = () =>
-  (slot.p ??= (process.env.DATABASE_URL ? Promise.resolve(getDb()) : migrate()).catch((e) => ((slot.p = undefined), Promise.reject(e))));
+  (slot.p ??= (hostedDb() ? Promise.resolve(getDb()) : migrate()).catch((e) => ((slot.p = undefined), Promise.reject(e))));
 
 /** Production wiring. Tests/seed override pieces via `over`. */
 export async function deps(over: Partial<Deps> = {}): Promise<Deps> {

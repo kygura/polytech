@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deps, sweepUniverse, type Deps } from "./index";
 import { heuristicR } from "./screen";
 
-process.env.PGLITE_DIR = "memory://";
+process.env.DB_FILE = ":memory:";
 
 const fx = createPm({ fixtures: true });
 /** The fixture pm with every walked market overlaid with `patch` (what Gamma "says" now; patches persist across tests like the real world does). */
