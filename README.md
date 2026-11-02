@@ -12,7 +12,7 @@ apps/tui       Ink terminal client (`pm`)
 packages/core  book, calibration, autonomy, risk-limit checks
 packages/pm    Polymarket clients, exchange, fixtures
 packages/agents  research pods, judge, sizing
-packages/db    Drizzle schema (Postgres via DATABASE_URL, e.g. Supabase; PGlite when unset)
+packages/db    Drizzle schema (libSQL via TURSO_DATABASE_URL, e.g. Turso; local file .data/polytech.db when unset)
 ```
 
 ## Run
@@ -48,8 +48,20 @@ Live trading has shipped. In `git log`:
 
 ## Paused
 
-The project is paused in three places. Resume in this order, so nothing runs against a dead database:
+The project is paused on Vercel and in GitHub Actions, and its database has moved from Supabase (Postgres) to Turso (libSQL). Resume in this order, so nothing runs against a missing or empty database:
 
-1. Supabase: restore the `polytech` project (`yocphnzilmbnfsueqemn`) from its dashboard.
-2. Vercel: unpause the `polytech` project from its dashboard. This brings back the site and the daily crons in `apps/web/vercel.json`.
-3. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.
+1. Turso: the `polytech` database exists and is migrated: `cd packages/db && TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... bun run db:migrate`. To keep the Supabase data, copy it now (next section).
+2. Vercel env: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set, `DATABASE_URL` removed. With no Upstash vars, locks and rate limits use the database's `kv` table.
+3. Vercel: unpause the `polytech` project from its dashboard. This brings back the site and the daily crons in `apps/web/vercel.json`.
+4. GitHub Actions: in `.github/workflows/scout.yml`, put back the commented `schedule:` block (`*/30 * * * *`); in `.github/workflows/ci.yml`, put back the `push:` and `pull_request:` triggers. Keep `workflow_dispatch:` in both.
+
+## Moving data off Supabase
+
+`packages/db/scripts/copy-from-postgres.ts` copies the old Postgres data into the libSQL database, once. The Supabase project `polytech` (`yocphnzilmbnfsueqemn`) is paused: restore it from its dashboard and take its session-pooler or direct connection string (not the transaction pooler).
+
+```bash
+cd packages/db
+PG_URL=postgresql://... TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... bun run db:copy-from-postgres
+```
+
+It migrates the target, then reads every schema table from the Postgres table of the same name (referenced tables first) and inserts in chunks with `ON CONFLICT DO NOTHING`, so a rerun only adds missing rows. Timestamps become epoch ms, `date` becomes `YYYY-MM-DD`, bigint ids become numbers, jsonb becomes JSON text; Postgres columns the schema no longer has are left behind with a warning. It ends with per-table counts (Postgres, before, inserted, after) and exits 1 if a table has fewer rows than its source. Run it before step 3: once the app writes to Turso, a Postgres row whose id is already taken there is skipped. Without `TURSO_DATABASE_URL` it fills the local file instead, which makes a dry run. Once the counts match, Supabase can be paused again.
