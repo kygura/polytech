@@ -39,7 +39,7 @@ export const JOBS = {
   expire: () => getDeps().then(expireProposals),
   sync: () => getDeps().then(syncFills),
   reconcile: () => getDeps().then(reconcileJob),
-  scout: (run?: () => Promise<unknown>) => kickIfStale(undefined, undefined, run), // heartbeat: true = scouting chain started
+  scout: (run?: (full: boolean) => Promise<unknown>) => kickIfStale(undefined, undefined, run), // heartbeat: true = scouting chain started
 };
 export type JobName = keyof typeof JOBS;
 
