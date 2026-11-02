@@ -121,7 +121,7 @@ export async function change24h(db: Db, ids: string[], now: number): Promise<Map
   let todo = [...new Set(ids)];
   const max = new Date(now - DAY_MS);
   for (let offset = 0, limit = 4; todo.length; offset += limit, limit *= 2) {
-    const got = await db.snapshots.findEach("cond", todo.map((conditionId) => ({ conditionId })), { order: "desc", max, offset, limit });
+    const got = await db.snapshots.findEach("condMid", todo.map((conditionId) => ({ conditionId })), { order: "desc", max, offset, limit });
     const next: string[] = [];
     todo.forEach((id, i) => {
       const rows = got[i] ?? [];

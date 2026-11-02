@@ -19,7 +19,7 @@ const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 
 /** Apply one live trade to the open live position of its token (opens it on a buy). A sell beyond the position is skipped; reconcile flags the drift. */
 async function applyToPosition(d: Pick<Deps, "db">, o: Order, t: Trade) {
-  const pos = (await d.db.positions.find("bookToken", { paper: false, tokenId: t.tokenId })).find((p) => p.closedAt === null) ?? null;
+  const pos = await d.db.positions.first("openToken", { paper: false, tokenId: t.tokenId });
   const fill = { side: t.side === "BUY" ? ("buy" as const) : ("sell" as const), shares: t.shares, price: t.price, fee: t.fee };
   if (!pos && fill.side === "sell") return lateSell(d, t);
   try {

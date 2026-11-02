@@ -68,7 +68,7 @@ const outcomeMid = (mid: number | null, outcome: "YES" | "NO") => (mid == null ?
 
 /** Open paper positions on one token, oldest (lowest id) first. (paper, tokenId) index, closed rows dropped in code. */
 const openPositions = async (d: Deps, tokenId: string) =>
-  (await d.db.positions.find("bookToken", { paper: true, tokenId })).filter((p) => p.closedAt === null);
+  d.db.positions.find("openToken", { paper: true, tokenId });
 
 /** Add a fill to the newest open position on this outcome, else open one. */
 async function buyInto(d: Deps, leg: Leg, shares: number, price: number, fee: number, now: number) {
@@ -233,7 +233,7 @@ export async function workPaperOrders(d: Deps, ids?: string[], o: { snapshot?: b
 
 /** Markets with a working paper order: the watchlist snapshot keeps their books fresh. */
 export const workingPaperIds = async (d: Pick<Deps, "db">) =>
-  [...new Set((await d.db.paperOrders.find("status", { status: "working" })).map((r) => r.conditionId))];
+  (await d.db.paperOrders.distinct("workingCond")).filter((c): c is string => c !== null);
 
 /** Cancel one working paper order. false = unknown or no longer working. */
 export async function cancelPaperOrder(d: Deps, orderId: string) {

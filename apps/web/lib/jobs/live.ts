@@ -384,7 +384,7 @@ async function send(d: Deps, p: Proposal, mode: Mode, via: Via): Promise<Decisio
 
   // Double-send guard = the pending->approved CAS (one winner) + an order row written before place that is never re-sent while sending/unknown.
   // The (thesis, attempt) idempotency key below is an audit trail only, not the guard.
-  const attempt = (await d.db.orders.find("thesis", { thesisId: p.thesisId })).filter((o) => !o.paper).length;
+  const attempt = await d.db.orders.count("thesisBook", { thesisId: p.thesisId, paper: false });
   const orderId = `ord_${crypto.randomUUID().slice(0, 12)}`;
   try {
     await d.db.orders.insert({

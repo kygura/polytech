@@ -339,7 +339,7 @@ export async function paperBook(r: ReadDeps) {
   });
   // L1 autonomy fills and manual paper trades (modeAtSend "manual", from the Trade page)
   // fills of paper L1/manual orders whose market exists, newest fill id first, 200: fill ids per order (no rows), then the 200 rows
-  const l1 = (await db.orders.find("book", { paper: true })).filter((o) => o.modeAtSend === "L1" || o.modeAtSend === "manual");
+  const l1 = await db.orders.find("bookMode", [{ paper: true, modeAtSend: "L1" }, { paper: true, modeAtSend: "manual" }]);
   const [fids, LM] = await Promise.all([db.fills.idsEach("order", l1.map((o) => ({ orderId: o.id }))), marketsById(db, l1.map((o) => o.conditionId))]);
   const top = l1.flatMap((o, i) => (LM.has(o.conditionId) ? (fids[i] ?? []).map((id) => ({ id: Number(id), o })) : [])).sort((a, b) => b.id - a.id).slice(0, 200);
   const FR = new Map((await db.fills.getMany(top.map((x) => x.id))).map((f) => [f.id, f]));
@@ -447,7 +447,7 @@ export async function autonomy(r: ReadDeps) {
   const st = await getSettings(db);
   const [mode, mk, f, x, gs, ev, pendingCount, flaggedSets, liveOpen, recon] = await Promise.all([
     currentMode(db),
-    db.markets.all(), // distinct categories
+    db.markets.distinct("category"),
     forecastRows(db),
     exposureOf(db, st.bankroll, now()),
     liveGateStats(db, new Date(now())),
@@ -457,7 +457,7 @@ export async function autonomy(r: ReadDeps) {
     db.orders.idsEach("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status }))).then((x) => x.reduce((t, ids) => t + ids.length, 0)),
     reconStatus(r),
   ]);
-  const cats = [...new Set([...mk.flatMap((m) => (m.category ? [m.category] : [])), ...Object.keys(st.overrides)])].sort();
+  const cats = [...new Set([...mk.flatMap((c) => (c ? [c] : [])), ...Object.keys(st.overrides)])].sort();
   const a = aggregate(f, () => "all").all;
   return {
     liveOpenOrders: liveOpen, flaggedSets, recon,

@@ -50,7 +50,7 @@ export async function exposureOf(db: Deps["db"], bankroll: number, now: number, 
     // ponytail: open live orders count at limit x size on top of positions; once fill sync (P4) books a position it must move the order out of LIVE_OPEN, else it double-counts (over-count = fail-safe)
     paper ? [] : db.orders.find("bookStatus", LIVE_OPEN.map((status) => ({ paper: false, status }))).then((os) => withMarket(db, os, "o")),
     // "daily max notional sent": approved/sent proposals decided today (null decidedAt sorts as -inf, outside the range)
-    paper ? [] : db.proposals.find("statusDecided", [{ status: "approved" }, { status: "sent" }], { min: dayStart }),
+    paper ? [] : db.proposals.find("kindStatusDecided", [{ kind: "entry", status: "approved" }, { kind: "entry", status: "sent" }], { min: dayStart }),
     db.positions.find("closed", { paper }, { min: dayStart }),
   ]);
   for (const { p, m } of book) addExposure(x, m, p.size * p.avgCost);

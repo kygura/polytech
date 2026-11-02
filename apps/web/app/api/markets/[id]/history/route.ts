@@ -8,16 +8,9 @@ export const dynamic = "force-dynamic";
 const CACHE = "public, s-maxage=60";
 const SNAP_LIMIT = 20_000; // rows read for the fallback before downsampling
 
-/** ts >= since and mid not null, oldest first, first SNAP_LIMIT rows. The index has no mid filter: page until SNAP_LIMIT rows with a mid. */
-async function oldestMids(db: Db, conditionId: string, since: number) {
-  const out: { ts: number; mid: number }[] = [];
-  for (let offset = 0; out.length < SNAP_LIMIT; offset += SNAP_LIMIT) {
-    const page = await db.snapshots.find("cond", { conditionId }, { min: since, order: "asc", offset, limit: SNAP_LIMIT });
-    for (const x of page) if (x.mid !== null && out.length < SNAP_LIMIT) out.push({ ts: x.ts.getTime(), mid: x.mid });
-    if (page.length < SNAP_LIMIT) break;
-  }
-  return out;
-}
+/** ts >= since and mid not null, oldest first, first SNAP_LIMIT rows (the condMid index holds only rows with a mid). */
+const oldestMids = async (db: Db, conditionId: string, since: number) =>
+  (await db.snapshots.find("condMid", { conditionId }, { min: since, order: "asc", limit: SNAP_LIMIT })).map((x) => ({ ts: x.ts.getTime(), mid: x.mid! }));
 
 /** DESIGN 12.6.2: YES price history for ?range=1d|1w|1m|all (default 1m), <= 500 points, 60 s memo + CDN cache. */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

@@ -33,6 +33,7 @@ export const markets = table("markets", {
 }, {
   indexes: {
     status: { on: ["status"] },
+    category: { on: ["category"] }, // distinct("category")
     negRisk: { on: ["negRiskGroup"], when: (r) => r.negRiskGroup !== null },
     event: { on: ["eventId"] },
   },
@@ -147,6 +148,8 @@ export const snapshots = table("snapshots", {
 }, {
   indexes: {
     cond: { on: ["conditionId"], sort: "ts" },
+    /** Rows with a mid only (price history, 24 h change). */
+    condMid: { on: ["conditionId"], sort: "ts", when: (r) => r.mid !== null },
     byTs: { on: [], sort: "ts" },
   },
 });
@@ -318,8 +321,10 @@ export const orders = table("orders", {
     /** By book and status (e.g. paper=false and status in LIVE_OPEN). */
     bookStatus: { on: ["paper", "status"], sort: "createdAt" },
     bookToken: { on: ["paper", "tokenId"], sort: "createdAt" },
+    bookMode: { on: ["paper", "modeAtSend"], sort: "createdAt" },
     cond: { on: ["conditionId"], sort: "createdAt" },
     thesis: { on: ["thesisId"], sort: "createdAt" },
+    thesisBook: { on: ["thesisId", "paper"], sort: "createdAt" },
     set: { on: ["setId"], sort: "createdAt", when: (r) => r.setId !== null },
     proposal: { on: ["proposalId"], when: (r) => r.proposalId !== null },
   },
@@ -340,6 +345,8 @@ export const fills = table("fills", {
     order: { on: ["orderId"], sort: "ts" },
     /** Every fill of one book (paper=true/false), by ts. */
     book: { on: ["paper"], sort: "ts" },
+    /** Same, by id (insertion order). */
+    bookById: { on: ["paper"], sort: "id" },
   },
 });
 
@@ -362,6 +369,8 @@ export const positions = table("positions", {
     /** Closed positions of one book, by closedAt. */
     closed: { on: ["paper"], sort: "closedAt", when: (r) => !open(r) },
     bookToken: { on: ["paper", "tokenId"], sort: "id" },
+    /** Open positions of one token in one book, by id. */
+    openToken: { on: ["paper", "tokenId"], sort: "id", when: open },
     cond: { on: ["conditionId"], sort: "id" },
   },
 });
@@ -392,6 +401,8 @@ export const paperOrders = table("paper_orders", {
     /** Not working (filled/cancelled), by closedAt. */
     closed: { on: [], sort: "closedAt", when: (r) => r.status !== "working" },
     closedCond: { on: ["conditionId"], sort: "closedAt", when: (r) => r.status !== "working" },
+    /** Markets with a working order: distinct("workingCond"). */
+    workingCond: { on: ["conditionId"], when: (r) => r.status === "working" },
     cond: { on: ["conditionId"], sort: "createdAt" },
   },
 });
@@ -469,6 +480,7 @@ export const proposals = table("proposals", {
     /** By status, ordered by decidedAt (undecided rows sort first, like Postgres NULLS FIRST on desc). */
     statusDecided: { on: ["status"], sort: "decidedAt" },
     kindStatus: { on: ["kind", "status"], sort: "createdAt" },
+    kindStatusDecided: { on: ["kind", "status"], sort: "decidedAt" },
     thesis: { on: ["thesisId"], sort: "createdAt" },
     cond: { on: ["conditionId"], sort: "createdAt" },
     order: { on: ["orderId"], when: (r) => r.orderId !== null },
