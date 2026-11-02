@@ -1,5 +1,5 @@
-import { parseQuery } from "@pm/core";
-import { PgDialect } from "drizzle-orm/pg-core";
+import { parseQuery, type Filter } from "@pm/core";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { schema as s } from "@pm/db";
 import { beforeAll, describe, expect, it } from "vitest";
 import { dbReady } from "./deps";
@@ -12,7 +12,7 @@ const compile = (q: string) => {
   const { filter, errors } = parseQuery(q);
   expect(errors).toEqual([]);
   const c = compileFilter(filter, NOW);
-  const d = new PgDialect();
+  const d = new SQLiteSyncDialect();
   return { where: d.sqlToQuery(c.where), order: c.orderBy.map((o) => d.sqlToQuery(o)), limit: c.limit, offset: c.offset };
 };
 
@@ -27,8 +27,8 @@ describe("compileFilter", () => {
 
   it("ranges, sort, paging map to bound parameters", () => {
     const c = compile("liq:5k..50k depth:>1k sort:-vol24h,spread limit:25 offset:50");
-    expect(c.where.sql).toContain(`"markets"."liquidity" >= $`);
-    expect(c.where.sql).toContain(`"market_latest"."depth_2c" >= $`);
+    expect(c.where.sql).toContain(`"markets"."liquidity" >= ?`);
+    expect(c.where.sql).toContain(`"market_latest"."depth_2c" >= ?`);
     expect(c.where.params).toEqual(expect.arrayContaining([5000, 50000, 1000]));
     expect(c.order[0]!.sql).toMatch(/"vol_24h" desc nulls last/);
     expect(c.order[1]!.sql).toMatch(/"spread" asc nulls last/);
@@ -39,15 +39,15 @@ describe("compileFilter", () => {
     const evil = `x'); drop table markets; --`;
     const { filter } = parseQuery(`cat:"${evil}" tag:"${evil}" "${evil}"`);
     const c = compileFilter({ ...filter, text: evil, tags: [evil], excludeTags: [evil], categories: [evil], excludeCategories: [evil] }, NOW);
-    const q = new PgDialect().sqlToQuery(c.where);
+    const q = new SQLiteSyncDialect().sqlToQuery(c.where);
     expect(q.sql).not.toMatch(/drop table/i);
     expect(q.params.some((p) => typeof p === "string" && p.includes("drop table"))).toBe(true);
   });
 
-  it("flags, thesis, src, struct, opportunity jsonb", () => {
+  it("flags, thesis, src, struct, opportunity json", () => {
     const c = compile("is:watch -is:muted has:thesis src:off struct:over opp:>0.01 edge:>3%");
     expect(c.where.sql).toContain("coalesce");
-    expect(c.where.sql).toContain("jsonb_exists_any");
+    expect(c.where.sql).toContain("json_each");
     expect(c.where.sql).toContain(`->>'o'`);
     expect(c.where.sql).toContain(`->>'edge'`);
     expect(c.where.params).toEqual(expect.arrayContaining(["official_data", "overround", 0.01, 0.03]));
@@ -55,7 +55,7 @@ describe("compileFilter", () => {
 });
 
 describe("d24c and /trade list ordering", () => {
-  beforeAll(async () => { await dbReady(); }, 60_000); // first use migrates the in-memory PGlite
+  beforeAll(async () => { await dbReady(); }, 60_000); // first use migrates the in-memory libSQL database
   const H = 3_600_000, at = (hAgo: number) => new Date(NOW - hAgo * H);
   const mk = (id: string, category: string | null) => ({ conditionId: id, question: `Question ${id}`, category, status: "active" });
   const seed = async () => {
@@ -98,5 +98,16 @@ describe("d24c and /trade list ordering", () => {
     const db = await seed();
     expect((await topCategories(db, 8)).slice(0, 2)).toEqual([{ category: "politics", n: 2 }, { category: "sports", n: 1 }]);
     expect(await topCategories(db, 1)).toEqual([{ category: "politics", n: 2 }]);
+  });
+
+  it("text, tag and category matching ignore case beyond ASCII too (SQLite's lower() folds ASCII only)", async () => {
+    const db = await dbReady();
+    await db.insert(s.markets).values({ conditionId: "0xe", question: "Gewinnt ÖSTERREICH?", category: "Économie", tags: ["Ärzte"], status: "active" }).onConflictDoNothing();
+    const ids = async (f: Filter) => (await listMarkets(db, f, NOW)).rows.map((r) => r.conditionId);
+    expect(await ids({ text: "österreich" })).toEqual(["0xe"]);
+    expect(await ids({ tags: ["ÄRZTE"] })).toEqual(["0xe"]);
+    expect(await ids({ categories: ["économie"] })).toEqual(["0xe"]);
+    expect(await ids({ excludeCategories: ["ÉCONOMIE"] })).not.toContain("0xe");
+    expect(await ids({ excludeTags: ["ärzte"] })).not.toContain("0xe");
   });
 });
