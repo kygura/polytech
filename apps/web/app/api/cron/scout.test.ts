@@ -20,7 +20,7 @@ describe("cron scout", () => {
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ started: true });
     expect(after).toHaveBeenCalledTimes(1);
-    expect(await (await POST(req(process.env.CRON_SECRET!), ctx)).json()).toEqual({ started: false }); // kick lock + 30 min freshness
+    expect(await (await POST(req(process.env.CRON_SECRET!), ctx)).json()).toEqual({ started: false }); // kick lock + 1 h freshness
     expect(after).toHaveBeenCalledTimes(1);
   });
 });

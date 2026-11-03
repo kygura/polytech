@@ -94,7 +94,7 @@ export function Shell({ mode: initialMode, lastSnapshotAt, now, children }: { mo
   // Polling fallback while SSE is down.
   useEffect(() => {
     if (sse.status === "live") return;
-    const id = setInterval(() => { void refreshNow(); loadStatus(); }, 30_000);
+    const id = setInterval(() => { if (document.visibilityState !== "visible") return; void refreshNow(); loadStatus(); }, 30_000);
     return () => clearInterval(id);
   }, [sse.status, refreshNow, loadStatus]);
 

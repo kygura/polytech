@@ -14,5 +14,6 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // only the guarded paths: every other request skipped the proxy anyway, and each proxy run is billed CPU
+  matcher: ["/api/cron/:path*", "/api/public/:path*"],
 };

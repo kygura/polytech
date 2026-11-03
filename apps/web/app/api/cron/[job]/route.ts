@@ -13,7 +13,7 @@ async function handle(req: Request, { params }: { params: Promise<{ job: string 
   const name = (await params).job;
   if (!Object.hasOwn(JOBS, name)) return notFound();
   const job = name as JobName;
-  // scout kick (manual GitHub Actions dispatch): sweep + watchlist books start after the response; the reply says whether it started
+  // scout kick (manual GitHub Actions dispatch): watchlist books start after the response; the reply says whether it started
   if (job === "scout") return json({ started: await JOBS.scout(async () => after(() => startChain().catch((e) => console.error("scouting kick failed", e)))) });
   const scope = new URL(req.url).searchParams.get("scope") === "all" ? "all" : "watchlist";
 
