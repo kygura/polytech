@@ -1,30 +1,43 @@
-# Heartbeat for scouting on Vercel Hobby (vercel.json crons are once-per-day there).
-# The scout cron job runs kickIfStale, which starts scoutChain (sweep -> snapshot -> screen -> research -> monitor)
-# when the last kick is older than 30 min; its KV lock keeps overlapping pings to one start.
-# The whole app is behind the login, so both steps authenticate with the CRON_SECRET repo secret (required).
-# The alert pass (monitor job) also runs on every beat; deduped server-side, so extra beats are cheap.
+# Manual scouting on Vercel Hobby (vercel.json crons are once-per-day there).
+# The daily Vercel crons (apps/web/vercel.json) run sweep 01:00, all books 02:00, screen 03:00, research 04:00 UTC.
+# A kick (/api/cron/scout) refreshes only the watchlist books, so on an empty or stale database (fresh Turso, a missed 01:00 cron)
+# nothing lists until the next night. With `sweep` (default on) this dispatch runs the sweep and the all-books snapshot first.
+# /api/cron/* is guarded by CRON_SECRET, so every step authenticates with the CRON_SECRET repo secret (required).
 name: scout
 
-# Manual only: the daily Vercel crons (apps/web/vercel.json) run discovery, screen and research; site traffic kicks the cheap sweep.
-# Dispatch this to force a sweep + watchlist refresh between those.
 on:
   workflow_dispatch:
+    inputs:
+      sweep:
+        description: "Sweep the Polymarket universe and snapshot every kept market's book first (fills an empty database)"
+        type: boolean
+        default: true
 
 jobs:
   kick:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     env:
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       SCOUT_URL: ${{ vars.SCOUT_URL }} # deployment origin, e.g. https://polytech.vercel.app
     steps:
-      - name: Kick scouting
+      - name: Check config
         run: |
           test -n "$SCOUT_URL" || { echo "::error::set repo variable SCOUT_URL"; exit 1; }
           test -n "$CRON_SECRET" || { echo "::error::set repo secret CRON_SECRET (same value as the deployment's CRON_SECRET, at least 32 bytes)"; exit 1; }
+      # runs inline on Vercel (maxDuration 300 s): wait for the result
+      - name: Sweep universe
+        if: ${{ inputs.sweep }}
+        run: |
+          curl -fsS --max-time 320 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/sweep"
+      # scope=all starts a Vercel Workflow run and returns at once
+      - name: Snapshot all books
+        if: ${{ inputs.sweep }}
+        run: |
+          curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/snapshot?scope=all"
+      - name: Kick scouting
+        run: |
           curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/scout"
       - name: Run alert monitor
         run: |
-          test -n "$SCOUT_URL" || { echo "::error::set repo variable SCOUT_URL"; exit 1; }
-          test -n "$CRON_SECRET" || { echo "::error::set repo secret CRON_SECRET"; exit 1; }
           curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/monitor"
