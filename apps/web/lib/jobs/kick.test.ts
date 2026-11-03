@@ -20,7 +20,7 @@ describe("kickIfStale", () => {
   });
   it("stale but lock held: no start", async () => {
     const kv = memoryKv(), run = vi.fn(async () => {});
-    await kv.set("kick:startedAt", Date.now() - 40 * MIN);
+    await kv.set("kick:startedAt", Date.now() - 70 * MIN);
     await kv.lock("kick", 10 * MIN);
     expect(await kickIfStale(kv, Date.now(), run)).toBe(false);
     expect(run).not.toHaveBeenCalled();
@@ -37,17 +37,16 @@ describe("kickIfStale", () => {
 });
 
 describe("runChain (inline, no workflow wrapper)", () => {
-  it("sweeps then refreshes the watchlist books, and a failed sweep does not block the snapshot", async () => {
-    const seen: string[] = [], err = vi.spyOn(console, "error").mockImplementation(() => {});
-    await runChain(async (n, sc) => { seen.push(sc ? `${n}:${sc}` : n); if (n === "sweep") throw new Error("gamma down"); });
-    expect(seen).toEqual(["sweep", "snapshot:watchlist"]);
-    expect(err).toHaveBeenCalledWith("chain: sweep failed", expect.any(Error));
-    err.mockRestore();
-  });
-  it("never runs the daily steps (all books, screen, research), even when the sweep changed the universe", async () => {
+  it("refreshes only the watchlist books: no sweep, no daily steps (all books, screen, research)", async () => {
     const seen: string[] = [];
-    await runChain(async (n, sc) => { seen.push(sc ? `${n}:${sc}` : n); return n === "sweep" ? { newMarkets: 5, closed: 2 } : undefined; });
-    expect(seen).toEqual(["sweep", "snapshot:watchlist"]);
+    await runChain(async (n, sc) => { seen.push(sc ? `${n}:${sc}` : n); });
+    expect(seen).toEqual(["snapshot:watchlist"]);
+  });
+  it("a failed snapshot is logged, not thrown", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runChain(async () => { throw new Error("clob down"); });
+    expect(err).toHaveBeenCalledWith("chain: snapshot failed", expect.any(Error));
+    err.mockRestore();
   });
   it("startChain off Vercel runs inline and never calls the workflow function directly", async () => {
     vi.stubEnv("VERCEL", "");
@@ -55,7 +54,7 @@ describe("runChain (inline, no workflow wrapper)", () => {
     vi.doMock("../api", () => ({ JOBS: jobs }));
     const { startChain: fresh } = await import("./kick");
     await fresh();
-    expect(jobs.sweep).toHaveBeenCalledTimes(1);
+    expect(jobs.sweep).not.toHaveBeenCalled();
     expect(jobs.snapshot).toHaveBeenCalledWith("watchlist");
     expect(jobs.screen).not.toHaveBeenCalled();
     expect(jobs.research).not.toHaveBeenCalled();

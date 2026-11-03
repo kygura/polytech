@@ -9,12 +9,11 @@ const STARTED = "kick:startedAt";
 type Step = (name: JobName, scope?: "watchlist") => Promise<unknown>;
 
 /**
- * What a kick runs: sweep (new and closed markets into the universe) and the watchlist books (that snapshot also works paper orders and runs
- * the alert pass). No LLM step: every kept market's book, the screen and research run once a day from the Vercel crons (vercel.json), so new
- * markets a kick sweeps in are screened and researched on the next daily pass. A failed sweep must not block the snapshot (each job is idempotent and locked).
+ * What a kick runs: the watchlist books only (that snapshot also works paper orders and runs the alert pass). The sweep walks ~26k Gamma
+ * markets and was most of the CPU a kick burned (Vercel Hobby caps Fluid Active CPU at 4 h/month), so it runs only from the 01:00 cron
+ * with every kept market's book, the screen and research (vercel.json).
  */
 async function runSteps(step: Step) {
-  await step("sweep").catch((e) => console.error("chain: sweep failed", e));
   await step("snapshot", "watchlist").catch((e) => console.error("chain: snapshot failed", e));
 }
 
@@ -46,7 +45,7 @@ export async function startChain() {
 }
 
 /**
- * Traffic-triggered scouting: starts the kick chain when the last kick is older than 30 min and the kick lock is free. The lock is never
+ * Traffic-triggered scouting: starts the kick chain when the last kick is older than SCOUT_KICK_MS (1 h) and the kick lock is free. The lock is never
  * released, it expires: at most one start per 10 min even if the start fails. Returns whether it started.
  */
 export async function kickIfStale(kv?: Kv, now = Date.now(), run: () => Promise<unknown> = startChain): Promise<boolean> {

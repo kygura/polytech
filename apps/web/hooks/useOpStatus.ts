@@ -14,7 +14,7 @@ export function useOpStatus(everyMs = 30_000) {
   }, []);
   useEffect(() => {
     reload();
-    const id = setInterval(reload, everyMs);
+    const id = setInterval(() => { if (document.visibilityState === "visible") reload(); }, everyMs); // hidden tabs don't poll (billed CPU)
     return () => clearInterval(id);
   }, [reload, everyMs]);
   const setUnacked = useCallback((n: number) => setStatus((s) => (s && s.unacked !== n ? { ...s, unacked: n } : s)), []);

@@ -37,7 +37,7 @@ export function useAlerts({ enabled, showAcked, refreshKey = 0, onUnacked, every
   useEffect(() => {
     if (!enabled) return;
     void load();
-    const id = setInterval(() => void load(), everyMs);
+    const id = setInterval(() => { if (document.visibilityState === "visible") void load(); }, everyMs);
     return () => clearInterval(id);
   }, [enabled, load, refreshKey, everyMs]);
 
