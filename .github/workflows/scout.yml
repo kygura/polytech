@@ -28,12 +28,16 @@ jobs:
       # runs inline on Vercel (maxDuration 300 s): wait for the result
       - name: Sweep universe
         if: ${{ inputs.sweep }}
-        run: curl -fsS --max-time 320 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/sweep"
+        run: |
+          curl -fsS --max-time 320 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/sweep"
       # scope=all starts a Vercel Workflow run and returns at once
       - name: Snapshot all books
         if: ${{ inputs.sweep }}
-        run: curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/snapshot?scope=all"
+        run: |
+          curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/snapshot?scope=all"
       - name: Kick scouting
-        run: curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/scout"
+        run: |
+          curl -fsS --max-time 60 -w "\n%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/scout"
       - name: Run alert monitor
-        run: curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/monitor"
+        run: |
+          curl -fsS --max-time 60 -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $CRON_SECRET" "$SCOUT_URL/api/cron/monitor"
